@@ -946,6 +946,7 @@ const ChatTextarea = memo(forwardRef(function ChatTextarea({
   externalValue, 
   onSubmit, 
   onHistoryNav,
+  onValueChange,
   placeholder, 
   disabled,
   userMessages = []
@@ -984,8 +985,10 @@ const ChatTextarea = memo(forwardRef(function ChatTextarea({
   }, [localValue])
   
   const handleChange = useCallback((e) => {
-    setLocalValue(e.target.value)
-  }, [])
+    const nextValue = e.target.value
+    setLocalValue(nextValue)
+    onValueChange?.(nextValue)
+  }, [onValueChange])
   
   const handleKeyDown = useCallback((e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -993,6 +996,7 @@ const ChatTextarea = memo(forwardRef(function ChatTextarea({
       if (localValue.trim()) {
         onSubmit?.(localValue.trim())
         setLocalValue('')
+        onValueChange?.('')
         historyIndexRef.current = -1
       }
       return
@@ -1005,7 +1009,9 @@ const ChatTextarea = memo(forwardRef(function ChatTextarea({
         e.preventDefault()
         const newIndex = Math.min(historyIndexRef.current + 1, userMessages.length - 1)
         historyIndexRef.current = newIndex
-        setLocalValue(userMessages[newIndex] || '')
+        const nextValue = userMessages[newIndex] || ''
+        setLocalValue(nextValue)
+        onValueChange?.(nextValue)
         onHistoryNav?.(newIndex)
       }
     }
@@ -1018,9 +1024,12 @@ const ChatTextarea = memo(forwardRef(function ChatTextarea({
         if (newIndex < 0) {
           historyIndexRef.current = -1
           setLocalValue('')
+          onValueChange?.('')
         } else {
           historyIndexRef.current = newIndex
-          setLocalValue(userMessages[newIndex] || '')
+          const nextValue = userMessages[newIndex] || ''
+          setLocalValue(nextValue)
+          onValueChange?.(nextValue)
         }
         onHistoryNav?.(newIndex)
       }
@@ -1061,6 +1070,7 @@ function App() {
     }
   })
   const chatInputRef = useRef(null) // Ref for the isolated chat textarea
+  const codeChatEndRef = useRef(null)
   const [inputHistoryIndex, setInputHistoryIndex] = useState(-1) // -1 = not navigating history
   const [isTyping, setIsTyping] = useState(false)
   const [typingStatus, setTypingStatus] = useState('') // 'generating' | 'image' | 'searching'
@@ -1141,6 +1151,8 @@ function App() {
   const [newLocalProjectName, setNewLocalProjectName] = useState('')
   const [newLocalProjectType, setNewLocalProjectType] = useState('html') // 'html' | 'react' | 'node' | 'python' | 'blank'
   const editorRef = useRef(null)
+  const editorLineNumbersRef = useRef(null)
+  const githubEditorLineNumbersRef = useRef(null)
   const previewIframeRef = useRef(null)
 
   // GitHub file editing
@@ -2204,6 +2216,14 @@ Respond ONLY with valid JSON, no other text.`
     scrollToBottom()
   }, [currentConversation?.messages])
 
+  useEffect(() => {
+    if (!showCodeChat) return
+    const raf = requestAnimationFrame(() => {
+      codeChatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [codeMessages, codeGenerating, showCodeChat])
+
   // DB mode: load chats once authenticated
   useEffect(() => {
     if (!dbEnabled) return
@@ -3134,11 +3154,6 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     showToast('Stopped')
   }
 
-  // Memoized input change handlers for smooth typing
-  const handleCodeInputChange = useCallback((e) => {
-    setCodeInput(e.target.value)
-  }, [])
-
   // Memoized user messages for history navigation (passed to ChatTextarea)
   const userMessagesForHistory = useMemo(() => {
     return currentConversation?.messages
@@ -3147,6 +3162,14 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       ?.filter(Boolean)
       ?.reverse() || [] // Most recent first
   }, [currentConversation?.messages])
+
+  const codeUserMessagesForHistory = useMemo(() => {
+    return codeMessages
+      ?.filter(m => m.role === 'user')
+      ?.map(m => typeof m.content === 'string' ? m.content : '')
+      ?.filter(Boolean)
+      ?.reverse() || []
+  }, [codeMessages])
 
   // Close attach menu when clicking outside
   useEffect(() => {
@@ -4215,15 +4238,54 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     }
   }
 
+  const codeLangToExt = {
+    'javascript': 'js', 'js': 'js', 'jsx': 'jsx',
+    'typescript': 'ts', 'ts': 'ts', 'tsx': 'tsx',
+    'html': 'html', 'htm': 'html',
+    'css': 'css', 'scss': 'scss', 'sass': 'scss',
+    'python': 'py', 'py': 'py',
+    'json': 'json',
+    'sql': 'sql',
+    'bash': 'sh', 'shell': 'sh', 'sh': 'sh',
+    'markdown': 'md', 'md': 'md',
+    'yaml': 'yaml', 'yml': 'yaml',
+    'xml': 'xml',
+    'java': 'java',
+    'c': 'c', 'cpp': 'cpp', 'csharp': 'cs', 'cs': 'cs',
+    'go': 'go', 'rust': 'rs', 'ruby': 'rb', 'php': 'php',
+    'swift': 'swift', 'kotlin': 'kt',
+  }
+
+  const codeExtToDefaultName = {
+    'js': 'script.js', 'jsx': 'App.jsx', 'ts': 'script.ts', 'tsx': 'App.tsx',
+    'html': 'index.html', 'css': 'styles.css', 'scss': 'styles.scss',
+    'py': 'main.py', 'json': 'data.json', 'sql': 'query.sql',
+    'sh': 'script.sh', 'md': 'README.md', 'yaml': 'config.yaml',
+    'xml': 'data.xml', 'java': 'Main.java',
+    'c': 'main.c', 'cpp': 'main.cpp', 'cs': 'Program.cs',
+    'go': 'main.go', 'rs': 'main.rs', 'rb': 'main.rb', 'php': 'index.php',
+    'swift': 'main.swift', 'kt': 'Main.kt',
+  }
+
   // Code chat handler - sends message to selected agent with GitHub context
-  const handleCodeChat = async () => {
-    if (!codeInput.trim() || codeGenerating) return
+  const handleCodeChat = async (messageOverride) => {
+    const draftMessage = typeof messageOverride === 'string' ? messageOverride : codeInput
+    if (!draftMessage?.trim() || codeGenerating) return
     if (!selectedAgent) {
       showToast('Please select an agent first')
       return
     }
+    if (codeEditorMode === 'local' && !activeLocalProject) {
+      showToast('Select or create a project to generate files')
+      setShowNewProjectModal(true)
+      return
+    }
+    if (codeEditorMode === 'github' && !selectedRepo) {
+      showToast('Select a GitHub repo to apply code')
+      return
+    }
 
-    const userMessage = codeInput.trim()
+    const userMessage = draftMessage.trim()
     setCodeInput('')
     setCodeMessages(prev => [...prev, { role: 'user', content: userMessage }])
     setCodeGenerating(true)
@@ -4240,8 +4302,12 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
         }
       }
 
+      const targetContext = codeEditorMode === 'github'
+        ? `\n[Target: GitHub]\n${githubContext || 'No repository selected'}`
+        : `\n[Target: Local Project]\n[Project: ${activeLocalProject?.name || 'No project selected'}]`
+
       // System prompt for code assistance
-      const systemPrompt = `You are a code assistant with access to the user's GitHub repository.
+      const systemPrompt = `You are a code assistant helping users create and modify code files.
 You can help with:
 - Reading and understanding code files
 - Writing new code
@@ -4254,9 +4320,9 @@ When the user asks you to modify or create files, respond with the complete file
 // file content here
 \`\`\`
 
-The user will then be able to apply these changes to their repository.
+If you are updating the currently selected file, you may provide a single code block without the filename prefix and we will apply it to that file.
 
-Current GitHub Context:${githubContext || '\nNo repository selected'}
+Target Context:${targetContext}
 
 Be concise but thorough. When showing code, always include the full file or the complete modified section.`
 
@@ -4334,6 +4400,7 @@ Be concise but thorough. When showing code, always include the full file or the 
       const fileChangeRegex = /```filename:([^\n]+)\n([\s\S]*?)```/g
       let match
       const newPendingChanges = { ...pendingFileChanges }
+      let didChangePending = false
       
       // First, parse explicit filename:path code blocks
       while ((match = fileChangeRegex.exec(response)) !== null) {
@@ -4343,6 +4410,7 @@ Be concise but thorough. When showing code, always include the full file or the 
           content: fileContent,
           action: 'update'
         }
+        didChangePending = true
       }
       
       // For local projects: Also parse standard code blocks and create discrete files
@@ -4350,37 +4418,6 @@ Be concise but thorough. When showing code, always include the full file or the 
         const projectData = localProjectFiles[activeLocalProject.id] || { files: [], fileContents: {}, expandedFolders: {} }
         const existingFiles = projectData.files || []
         const existingContents = projectData.fileContents || {}
-        
-        // Map language to file extension
-        const langToExt = {
-          'javascript': 'js', 'js': 'js', 'jsx': 'jsx',
-          'typescript': 'ts', 'ts': 'ts', 'tsx': 'tsx',
-          'html': 'html', 'htm': 'html',
-          'css': 'css', 'scss': 'scss', 'sass': 'scss',
-          'python': 'py', 'py': 'py',
-          'json': 'json',
-          'sql': 'sql',
-          'bash': 'sh', 'shell': 'sh', 'sh': 'sh',
-          'markdown': 'md', 'md': 'md',
-          'yaml': 'yaml', 'yml': 'yaml',
-          'xml': 'xml',
-          'java': 'java',
-          'c': 'c', 'cpp': 'cpp', 'csharp': 'cs', 'cs': 'cs',
-          'go': 'go', 'rust': 'rs', 'ruby': 'rb', 'php': 'php',
-          'swift': 'swift', 'kotlin': 'kt',
-        }
-        
-        // Map extension to default filename
-        const extToDefaultName = {
-          'js': 'script.js', 'jsx': 'App.jsx', 'ts': 'script.ts', 'tsx': 'App.tsx',
-          'html': 'index.html', 'css': 'styles.css', 'scss': 'styles.scss',
-          'py': 'main.py', 'json': 'data.json', 'sql': 'query.sql',
-          'sh': 'script.sh', 'md': 'README.md', 'yaml': 'config.yaml',
-          'xml': 'data.xml', 'java': 'Main.java',
-          'c': 'main.c', 'cpp': 'main.cpp', 'cs': 'Program.cs',
-          'go': 'main.go', 'rs': 'main.rs', 'rb': 'main.rb', 'php': 'index.php',
-          'swift': 'main.swift', 'kt': 'Main.kt',
-        }
         
         // Parse standard code blocks with language specifiers
         const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g
@@ -4399,7 +4436,7 @@ Be concise but thorough. When showing code, always include the full file or the 
           
           if (!lang || !code) continue
           
-          const ext = langToExt[lang]
+          const ext = codeLangToExt[lang]
           if (!ext) continue
           
           // Find existing file with matching extension or create new one
@@ -4414,7 +4451,7 @@ Be concise but thorough. When showing code, always include the full file or the 
             // Create new file with unique name if multiple of same type
             fileTypeCounters[ext] = (fileTypeCounters[ext] || 0) + 1
             const count = fileTypeCounters[ext]
-            const defaultName = extToDefaultName[ext] || `file.${ext}`
+            const defaultName = codeExtToDefaultName[ext] || `file.${ext}`
             
             if (count === 1) {
               targetPath = defaultName
@@ -4484,8 +4521,53 @@ Be concise but thorough. When showing code, always include the full file or the 
         }
       }
       
-      // For GitHub mode, keep the pending changes behavior
-      if (Object.keys(newPendingChanges).length > Object.keys(pendingFileChanges).length) {
+      // For GitHub mode: parse standard code blocks when filename tags are missing
+      if (codeEditorMode === 'github' && selectedRepo) {
+        const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g
+        let codeMatch
+        const fileTypeCounters = {}
+        let usedSelectedFile = false
+        const selectedExt = selectedFile?.path?.split('.').pop()?.toLowerCase()
+
+        while ((codeMatch = codeBlockRegex.exec(response)) !== null) {
+          const lang = (codeMatch[1] || '').toLowerCase()
+          const code = codeMatch[2].trim()
+
+          if (response.substring(codeMatch.index - 10, codeMatch.index).includes('filename:')) {
+            continue
+          }
+          if (!code) continue
+
+          const ext = codeLangToExt[lang]
+          let targetPath = null
+
+          if (selectedFile && !usedSelectedFile && (!ext || ext === selectedExt)) {
+            targetPath = selectedFile.path
+            usedSelectedFile = true
+          } else if (ext) {
+            fileTypeCounters[ext] = (fileTypeCounters[ext] || 0) + 1
+            const count = fileTypeCounters[ext]
+            const defaultName = codeExtToDefaultName[ext] || `file.${ext}`
+            if (count === 1) {
+              targetPath = defaultName
+            } else {
+              const baseName = defaultName.replace(`.${ext}`, '')
+              targetPath = `${baseName}_${count}.${ext}`
+            }
+          }
+
+          if (!targetPath) continue
+
+          const existing = newPendingChanges[targetPath]?.content
+          newPendingChanges[targetPath] = {
+            content: existing ? `${existing}\n\n${code}` : code,
+            action: 'update'
+          }
+          didChangePending = true
+        }
+      }
+
+      if (didChangePending) {
         setPendingFileChanges(newPendingChanges)
       }
 
@@ -4535,6 +4617,14 @@ Be concise but thorough. When showing code, always include the full file or the 
       })
       // Refresh file tree
       await loadRepoFiles(owner, repo)
+    }
+  }
+
+  const applyAllPendingChanges = async () => {
+    if (!selectedRepo) return
+    const paths = Object.keys(pendingFileChanges)
+    for (const path of paths) {
+      await applyPendingChange(path)
     }
   }
 
@@ -10689,7 +10779,7 @@ else console.log('Deleted successfully')`
                     // LOCAL MODE EDITOR
                     activeTabId ? (
                       <div className="code-editor-wrapper">
-                        <div className="code-editor-line-numbers">
+                        <div ref={editorLineNumbersRef} className="code-editor-line-numbers">
                           {editorContent.split('\n').map((_, i) => (
                             <div key={i} className="line-number">{i + 1}</div>
                           ))}
@@ -10699,6 +10789,11 @@ else console.log('Deleted successfully')`
                           className="code-editor-textarea"
                           value={editorContent}
                           onChange={handleEditorChange}
+                          onScroll={(e) => {
+                            if (editorLineNumbersRef.current) {
+                              editorLineNumbersRef.current.scrollTop = e.target.scrollTop
+                            }
+                          }}
                           spellCheck="false"
                           autoComplete="off"
                           autoCorrect="off"
@@ -10791,7 +10886,7 @@ else console.log('Deleted successfully')`
                             </div>
                           ) : githubFileEditing ? (
                             <div className="code-editor-wrapper">
-                              <div className="code-editor-line-numbers">
+                              <div ref={githubEditorLineNumbersRef} className="code-editor-line-numbers">
                                 {githubEditContent.split('\n').map((_, i) => (
                                   <div key={i} className="line-number">{i + 1}</div>
                                 ))}
@@ -10800,6 +10895,11 @@ else console.log('Deleted successfully')`
                                 className="code-editor-textarea"
                                 value={githubEditContent}
                                 onChange={(e) => setGithubEditContent(e.target.value)}
+                                onScroll={(e) => {
+                                  if (githubEditorLineNumbersRef.current) {
+                                    githubEditorLineNumbersRef.current.scrollTop = e.target.scrollTop
+                                  }
+                                }}
                                 spellCheck="false"
                                 autoComplete="off"
                                 autoCorrect="off"
@@ -10925,6 +11025,28 @@ else console.log('Deleted successfully')`
                 </div>
               </div>
 
+              <div className="code-chat-target">
+                {codeEditorMode === 'local' ? (
+                  activeLocalProject ? (
+                    <span className="code-chat-target-value">Target: {activeLocalProject.name}</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="code-chat-target-action"
+                      onClick={() => setShowNewProjectModal(true)}
+                    >
+                      Create a project to start generating files
+                    </button>
+                  )
+                ) : (
+                  selectedRepo ? (
+                    <span className="code-chat-target-value">Target: {selectedRepo.full_name}</span>
+                  ) : (
+                    <span className="code-chat-target-empty">Select a repo in the left panel to apply code</span>
+                  )
+                )}
+              </div>
+
               <div className="code-chat-sidebar-messages">
                 {codeMessages.length === 0 ? (
                   <div className="code-chat-sidebar-empty">
@@ -10957,29 +11079,25 @@ else console.log('Deleted successfully')`
                     </div>
                   </div>
                 )}
+                <div ref={codeChatEndRef} />
               </div>
 
               <div className="code-chat-sidebar-input">
                 <form
                   onSubmit={(e) => {
                     e.preventDefault()
-                    handleCodeChat()
+                    handleCodeChat(codeInput)
                   }}
                 >
-                  <textarea
+                  <ChatTextarea
+                    externalValue={codeInput}
+                    onValueChange={setCodeInput}
+                    onSubmit={handleCodeChat}
                     placeholder={codeEditorMode === 'local'
                       ? (activeLocalProject ? "Ask anything about your code..." : "Create a project to get started...")
                       : (selectedRepo ? "Ask anything about this repo..." : "Connect a repo to get started...")}
-                    value={codeInput}
-                    onChange={handleCodeInputChange}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        handleCodeChat()
-                      }
-                    }}
                     disabled={codeGenerating}
-                    rows={3}
+                    userMessages={codeUserMessagesForHistory}
                   />
                   <div className="code-chat-sidebar-input-actions">
                     <div className="code-chat-sidebar-input-left">
@@ -11343,6 +11461,15 @@ else console.log('Deleted successfully')`
                     <line x1="9" y1="15" x2="15" y2="15"/>
                   </svg>
                   <span>Pending Changes ({Object.keys(pendingFileChanges).length})</span>
+                  <button
+                    className="code-pending-apply-all"
+                    onClick={applyAllPendingChanges}
+                    type="button"
+                    title="Apply all to GitHub"
+                    disabled={!selectedRepo}
+                  >
+                    Apply all
+                  </button>
                 </div>
                 <div className="code-pending-list">
                   {Object.entries(pendingFileChanges).map(([path, change]) => (

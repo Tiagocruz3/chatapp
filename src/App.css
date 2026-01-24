@@ -8112,6 +8112,7 @@ button,
   flex-direction: column;
   overflow: hidden;
   background: var(--main-bg);
+  min-height: 0;
 }
 
 /* Constrain Code page input to match main chat width (.chat-container) */
@@ -8129,6 +8130,7 @@ button,
   overflow: hidden;
   background: var(--main-bg);
   flex: 1;
+  min-height: 0;
 }
 
 .code-editor-header {
@@ -8183,6 +8185,7 @@ button,
   flex: 1;
   overflow: auto;
   padding: 16px;
+  min-height: 0;
 }
 
 .code-file-content {
@@ -8258,6 +8261,27 @@ button,
   width: 18px;
   height: 18px;
   color: #f59e0b;
+}
+
+.code-pending-apply-all {
+  margin-left: auto;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--accent-color);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.1s var(--ease-out-fast);
+}
+
+.code-pending-apply-all:hover {
+  background: rgba(16, 185, 129, 0.2);
+}
+
+.code-pending-apply-all:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .code-pending-list {
@@ -9143,6 +9167,7 @@ button,
   display: flex;
   flex: 1;
   overflow: hidden;
+  min-height: 0;
 }
 
 .code-main.with-preview .code-editor-section {
@@ -9160,6 +9185,7 @@ button,
   flex: 1;
   overflow: auto;
   background: #0d1117;
+  min-height: 0;
 }
 
 .code-editor-line-numbers {
@@ -9170,6 +9196,8 @@ button,
   border-right: 1px solid #21262d;
   user-select: none;
   flex-shrink: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 .line-number {
@@ -9196,6 +9224,8 @@ button,
   white-space: pre;
   overflow-wrap: normal;
   overflow-x: auto;
+  overflow-y: auto;
+  height: 100%;
   tab-size: 2;
 }
 
@@ -9688,6 +9718,40 @@ button,
 .code-chat-sidebar-actions button svg {
   width: 16px;
   height: 16px;
+}
+
+.code-chat-target {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 12px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.code-chat-target-value {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.code-chat-target-action {
+  border: 1px solid var(--border-color);
+  background: var(--hover-bg);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.1s var(--ease-out-fast);
+}
+
+.code-chat-target-action:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.code-chat-target-empty {
+  color: var(--text-muted);
 }
 
 .code-chat-sidebar-messages {
