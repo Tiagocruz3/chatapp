@@ -4163,8 +4163,8 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       'Authorization': `Bearer ${githubToken}`,
       ...options.headers
     }
-    // Use proxy to avoid CORS issues
-    const resp = await fetch(`/api/github${endpoint}`, {
+    // Use direct GitHub API URL (works in both dev and production)
+    const resp = await fetch(`https://api.github.com${endpoint}`, {
       ...options,
       headers
     })
