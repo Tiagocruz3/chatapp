@@ -4683,6 +4683,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     setFileContent('')
     setExpandedFolders({})
     setPendingFileChanges({})
+    setCodeEditorMode('github') // Auto-switch to GitHub mode when repo selected
     await loadRepoBranches(repo.owner.login, repo.name)
     await loadRepoFiles(repo.owner.login, repo.name)
   }
