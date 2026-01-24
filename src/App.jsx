@@ -1,0 +1,12312 @@
+import { useState, useRef, useEffect, useMemo, useCallback, startTransition, memo, forwardRef, useImperativeHandle } from 'react'
+import './App.css'
+import { isSupabaseConfigured, supabase } from './lib/supabaseClient'
+import { AuthGate } from './components/AuthGate'
+import * as pdfjsLib from 'pdfjs-dist/build/pdf'
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import mammoth from 'mammoth/mammoth.browser'
+
+// pdf.js worker config (Vite)
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
+
+// Language display names
+const languageNames = {
+  js: 'JavaScript',
+  javascript: 'JavaScript',
+  ts: 'TypeScript',
+  typescript: 'TypeScript',
+  jsx: 'React JSX',
+  tsx: 'React TSX',
+  py: 'Python',
+  python: 'Python',
+  java: 'Java',
+  cpp: 'C++',
+  c: 'C',
+  cs: 'C#',
+  csharp: 'C#',
+  go: 'Go',
+  rust: 'Rust',
+  rb: 'Ruby',
+  ruby: 'Ruby',
+  php: 'PHP',
+  swift: 'Swift',
+  kotlin: 'Kotlin',
+  sql: 'SQL',
+  html: 'HTML',
+  css: 'CSS',
+  scss: 'SCSS',
+  json: 'JSON',
+  yaml: 'YAML',
+  yml: 'YAML',
+  xml: 'XML',
+  md: 'Markdown',
+  markdown: 'Markdown',
+  bash: 'Bash',
+  shell: 'Shell',
+  sh: 'Shell',
+  zsh: 'Zsh',
+  powershell: 'PowerShell',
+  dockerfile: 'Dockerfile',
+  graphql: 'GraphQL',
+  vue: 'Vue',
+  svelte: 'Svelte',
+}
+
+const CODE_NL_SENTINEL = '__CODE_NL__'
+
+const escapeHtmlAttr = (s) =>
+  String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+const escapeHtmlText = (s) =>
+  String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+
+const decodeBasicEntities = (s) =>
+  String(s)
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+
+const safeBtoa = (str) => {
+  try {
+    return btoa(unescape(encodeURIComponent(str)))
+  } catch {
+    return ''
+  }
+}
+
+const safeAtob = (str) => {
+  try {
+    return decodeURIComponent(escape(atob(str)))
+  } catch {
+    return ''
+  }
+}
+
+const getKeywordRegexForLang = (lang) => {
+  const l = (lang || '').toLowerCase()
+  const js = [
+    'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete',
+    'do', 'else', 'export', 'extends', 'finally', 'for', 'function', 'if', 'import', 'in',
+    'instanceof', 'let', 'new', 'return', 'super', 'switch', 'this', 'throw', 'try',
+    'typeof', 'var', 'void', 'while', 'with', 'yield', 'async', 'await', 'static', 'get',
+    'set', 'of',
+  ]
+  const py = [
+    'and', 'as', 'assert', 'break', 'class', 'continue', 'def', 'del', 'elif', 'else',
+    'except', 'False', 'finally', 'for', 'from', 'global', 'if', 'import', 'in', 'is',
+    'lambda', 'None', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return', 'True', 'try',
+    'while', 'with', 'yield',
+  ]
+  const json = ['true', 'false', 'null']
+
+  if (['js', 'jsx', 'ts', 'tsx', 'javascript', 'typescript'].includes(l)) return js
+  if (['py', 'python'].includes(l)) return py
+  if (['json'].includes(l)) return json
+  // Generic fallback: no keyword highlighting
+  return []
+}
+
+const highlightCode = (code, lang) => {
+  const l = (lang || '').toLowerCase()
+  const keywords = getKeywordRegexForLang(l)
+  const keywordAlt = keywords.length ? `\\b(?:${keywords.map(k => k.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')).join('|')})\\b` : null
+
+  // NOTE: `code` is already HTML-escaped by `formatMarkdown` (we escape before replacements).
+  // Keep regex order: strings first, then comments, then numbers, then keywords.
+  const parts = []
+  if (['py', 'python'].includes(l)) {
+    parts.push(
+      // strings (single/double, basic)
+      `"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'`,
+      // comments
+      `#[^\\n]*`,
+    )
+  } else if (['json'].includes(l)) {
+    parts.push(
+      `"(?:\\\\.|[^"\\\\])*"`,
+      `\\b\\d+(?:\\.\\d+)?\\b`,
+    )
+  } else if (['html', 'xml'].includes(l)) {
+    // Very lightweight HTML highlighting (tags / attributes / strings)
+    // We'll highlight tag names and attribute strings only.
+    // Strings in attributes:
+    parts.push(`"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'`)
+    // Tags (already escaped, so tags appear as &lt;...&gt;)
+    // We'll handle tags separately below.
+  } else if (['css', 'scss'].includes(l)) {
+    parts.push(
+      `"(?:\\\\.|[^"\\\\])*"|'(?:\\\\.|[^'\\\\])*'`,
+      `\\/\\*[\\s\\S]*?\\*\\/`,
+    )
+  } else {
+    // JS-like default
+    parts.push(
+      // template / single / double strings
+      '`(?:\\\\.|[^`\\\\])*`|"(?:\\\\.|[^"\\\\])*"|' + "'(?:\\\\.|[^'\\\\])*'",
+      // comments
+      `\\/\\*[\\s\\S]*?\\*\\/|\\/\\/[^\\n]*`,
+    )
+  }
+
+  // Numbers (common)
+  parts.push(`\\b\\d+(?:\\.\\d+)?\\b`)
+  // Keywords (per language)
+  if (keywordAlt) parts.push(keywordAlt)
+
+  const master = new RegExp(parts.join('|'), 'gm')
+
+  let out = code.replace(master, (m) => {
+    // Strings
+    if (m.startsWith('"') || m.startsWith("'") || m.startsWith('`')) return `<span class="tok-string">${m}</span>`
+    // Comments
+    if (m.startsWith('/*') || m.startsWith('//') || m.startsWith('#')) return `<span class="tok-comment">${m}</span>`
+    // Numbers
+    if (/^\d/.test(m)) return `<span class="tok-number">${m}</span>`
+    // Keywords
+    if (keywordAlt && new RegExp(`^${keywordAlt}$`, 'i').test(m)) return `<span class="tok-keyword">${m}</span>`
+    return m
+  })
+
+  // Extra lightweight HTML tag highlighting (since &lt;...&gt; is escaped)
+  if (['html', 'xml'].includes(l)) {
+    out = out
+      .replace(/(&lt;\/?)([a-zA-Z][\w:-]*)([^&]*?)(\/?&gt;)/g, (match, open, tag, rest, close) => {
+        const tagHtml = `${open}<span class="tok-tag">${tag}</span>${rest}${close}`
+        return tagHtml
+      })
+      .replace(/(\s)([a-zA-Z_:][\w:.-]*)(=)/g, (match, sp, attr, eq) => `${sp}<span class="tok-attr">${attr}</span>${eq}`)
+  }
+
+  return out
+}
+
+// Simple markdown parser for formatting responses
+const formatMarkdown = (text) => {
+  if (!text || typeof text !== 'string') return text
+  
+  let html = text
+    // Escape HTML first
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    // Headers
+    .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^# (.+)$/gm, '<h2>$1</h2>')
+    // Bold
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Italic
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    // Code blocks with language + optional filename (syntax: ```lang:filename.js)
+    // If filename is provided, render as a file card; otherwise render as code block
+    // IMPORTANT: return HTML WITHOUT any newline characters, because later we convert '\n' -> '<br/>'
+    // and we don't want <br/> inserted inside the code block UI.
+    .replace(/```(\w+)?(?::([^\n]+))?\n([\s\S]*?)```/g, (match, lang, filename, code) => {
+      const language = lang || ''
+      const displayName = language ? (languageNames[language.toLowerCase()] || language) : 'code'
+      const raw = decodeBasicEntities(code.trim())
+      const rawB64 = safeBtoa(raw)
+      const lineCount = raw.split('\n').length
+
+      // If filename provided, render as compact file link (code will be auto-added to editor)
+      if (filename && filename.trim()) {
+        const safeFilename = escapeHtmlAttr(filename.trim())
+        return `<div class="code-file-card" data-filename="${safeFilename}" data-lang="${escapeHtmlAttr(language)}" data-raw="${rawB64}"><div class="code-file-card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg></div><div class="code-file-card-info"><span class="code-file-card-name">${safeFilename}</span><span class="code-file-card-meta">${lineCount} lines</span></div><div class="code-file-card-actions"><button class="code-file-open">Open</button><button class="code-file-copy">Copy</button></div></div>`
+      }
+
+      // No filename - render as normal code block
+      const safeCode = highlightCode(code.trim(), language).replace(/\n/g, CODE_NL_SENTINEL)
+      return `<div class="code-block-wrapper"><div class="code-block-header"><span class="code-block-lang">${escapeHtmlAttr(displayName)}</span><div class="code-block-actions"><button class="code-block-canvas" title="Add to Canvas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button><button class="code-block-copy" title="Copy code"><svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></button></div></div><pre><code data-lang="${escapeHtmlAttr(language)}" data-raw="${rawB64}">${safeCode}</code></pre></div>`
+    })
+    // Inline code
+    .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
+    // Bullet lists (handle - and •)
+    .replace(/^[-•] (.+)$/gm, '<li>$1</li>')
+    // Numbered lists
+    .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+    // Images (markdown)
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="chat-image" loading="lazy" />')
+    // Links
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    // Line breaks (double newline = paragraph)
+    .replace(/\n\n/g, '</p><p>')
+    // Single line breaks
+    .replace(/\n/g, '<br/>')
+  
+  // Wrap consecutive <li> elements in <ul>
+  html = html.replace(/(<li>.*?<\/li>)(\s*<br\/>)?(\s*<li>)/g, '$1$3')
+  html = html.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+  // Clean up any duplicate <ul> tags
+  html = html.replace(/<\/ul>\s*<ul>/g, '')
+  
+  // Wrap in paragraph
+  html = '<p>' + html + '</p>'
+  // Clean up empty paragraphs
+  html = html.replace(/<p>\s*<\/p>/g, '')
+  html = html.replace(/<p>\s*<br\/>\s*<\/p>/g, '')
+  
+  // Restore code newlines (kept safe from '\n' -> '<br/>' conversion)
+  html = html.replace(new RegExp(CODE_NL_SENTINEL, 'g'), '\n')
+  return html
+}
+
+// File Tree Component for Code Page
+function FileTree({ files, expandedFolders, selectedFile, onToggleFolder, onSelectFile, pendingChanges, depth = 0 }) {
+  const getFileIcon = (file) => {
+    if (file.type === 'dir') {
+      return expandedFolders[file.path] ? (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          <line x1="9" y1="14" x2="15" y2="14"/>
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+        </svg>
+      )
+    }
+    // File type icons
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    if (['js', 'jsx', 'ts', 'tsx'].includes(ext)) {
+      return <span className="file-icon-text js">JS</span>
+    }
+    if (['py'].includes(ext)) {
+      return <span className="file-icon-text py">PY</span>
+    }
+    if (['html', 'htm'].includes(ext)) {
+      return <span className="file-icon-text html">{'<>'}</span>
+    }
+    if (['css', 'scss', 'sass'].includes(ext)) {
+      return <span className="file-icon-text css">#</span>
+    }
+    if (['json'].includes(ext)) {
+      return <span className="file-icon-text json">{'{}'}</span>
+    }
+    if (['md', 'mdx'].includes(ext)) {
+      return <span className="file-icon-text md">MD</span>
+    }
+    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
+      return (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+      )
+    }
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+        <polyline points="14 2 14 8 20 8"/>
+      </svg>
+    )
+  }
+
+  return (
+    <div className="file-tree-level">
+      {files.map(file => (
+        <div key={file.path} className="file-tree-item-wrapper">
+          <div
+            className={`file-tree-item ${selectedFile?.path === file.path ? 'active' : ''} ${pendingChanges[file.path] ? 'has-changes' : ''}`}
+            style={{ paddingLeft: `${12 + depth * 16}px` }}
+            onClick={() => file.type === 'dir' ? onToggleFolder(file.path) : onSelectFile(file)}
+          >
+            <span className="file-tree-icon">{getFileIcon(file)}</span>
+            <span className="file-tree-name">{file.name}</span>
+            {pendingChanges[file.path] && (
+              <span className="file-tree-modified">M</span>
+            )}
+          </div>
+          {file.type === 'dir' && expandedFolders[file.path] && (
+            <FileTree
+              files={expandedFolders[file.path]}
+              expandedFolders={expandedFolders}
+              selectedFile={selectedFile}
+              onToggleFolder={onToggleFolder}
+              onSelectFile={onSelectFile}
+              pendingChanges={pendingChanges}
+              depth={depth + 1}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// Knowledge Graph Component - Interactive graph (user-controlled movement only)
+function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
+  const svgRef = useRef(null)
+  const containerRef = useRef(null)
+  const [nodes, setNodes] = useState([])
+  const [edges, setEdges] = useState([])
+  const [selectedNode, setSelectedNode] = useState(null)
+  const [hoveredNode, setHoveredNode] = useState(null)
+  const [dimensions, setDimensions] = useState({ width: 800, height: 500 })
+  const [zoom, setZoom] = useState(1)
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const [dragNode, setDragNode] = useState(null)
+  // 3D rotation state
+  const [rotation, setRotation] = useState({ x: 15, y: 0 })
+  const [isRotating, setIsRotating] = useState(false)
+  const [rotateStart, setRotateStart] = useState({ x: 0, y: 0 })
+
+  // Node type colors
+  const nodeColors = {
+    memory: { fill: '#10b981', stroke: '#059669', label: 'Memory' },
+    document: { fill: '#6366f1', stroke: '#4f46e5', label: 'Document' },
+    pdf: { fill: '#ef4444', stroke: '#dc2626', label: 'PDF' },
+    image: { fill: '#f59e0b', stroke: '#d97706', label: 'Image' },
+    preference: { fill: '#14b8a6', stroke: '#0d9488', label: 'Preference' },
+    personal_detail: { fill: '#ec4899', stroke: '#db2777', label: 'Personal' },
+    project_context: { fill: '#3b82f6', stroke: '#2563eb', label: 'Project' },
+    fact: { fill: '#8b5cf6', stroke: '#7c3aed', label: 'Fact' },
+  }
+
+  // Detect document type from metadata or filename
+  const getDocumentType = (doc) => {
+    const filename = doc.title?.toLowerCase() || doc.metadata?.filename?.toLowerCase() || ''
+    const mime = doc.metadata?.mime?.toLowerCase() || ''
+    
+    if (mime.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg|bmp)$/i.test(filename)) {
+      return 'image'
+    }
+    if (mime.includes('pdf') || filename.endsWith('.pdf')) {
+      return 'pdf'
+    }
+    return 'document'
+  }
+
+  // Generate nodes and edges from memories and documents
+  useEffect(() => {
+    if (memories.length === 0 && documents.length === 0) {
+      setNodes([])
+      setEdges([])
+      return
+    }
+
+    const centerX = dimensions.width / 2
+    const centerY = dimensions.height / 2
+    const radius = Math.min(dimensions.width, dimensions.height) * 0.35
+
+    // Create nodes
+    const newNodes = []
+    const newEdges = []
+    
+    // Add memory nodes
+    memories.forEach((mem, i) => {
+      const angle = (i / memories.length) * Math.PI * 2
+      const nodeType = mem.memory_type || 'memory'
+      newNodes.push({
+        id: `mem-${mem.memory_id}`,
+        type: nodeColors[nodeType] ? nodeType : 'memory',
+        label: mem.content?.substring(0, 30) + (mem.content?.length > 30 ? '...' : ''),
+        fullContent: mem.content,
+        x: centerX + Math.cos(angle) * radius * 0.6,
+        y: centerY + Math.sin(angle) * radius * 0.6,
+        radius: 20,
+        data: mem,
+        confidence: mem.confidence || 0.5,
+        created: new Date(mem.created_at)
+      })
+    })
+
+    // Add document nodes with type detection
+    documents.forEach((doc, i) => {
+      const angle = (i / documents.length) * Math.PI * 2 + Math.PI
+      const docType = getDocumentType(doc)
+      newNodes.push({
+        id: `doc-${doc.document_id}`,
+        type: docType,
+        label: doc.title?.substring(0, 25) + (doc.title?.length > 25 ? '...' : '') || 'Untitled',
+        fullContent: doc.title || 'Untitled document',
+        x: centerX + Math.cos(angle) * radius,
+        y: centerY + Math.sin(angle) * radius,
+        radius: 24,
+        data: doc,
+        sourceType: doc.source_type,
+        isEmbedded: doc.is_embedded || false,
+        embeddedCount: doc.embedded_count || 0,
+        created: new Date(doc.created_at)
+      })
+    })
+
+    // Create edges based on relationships
+    // Connect memories of the same type
+    const memoryByType = {}
+    newNodes.filter(n => n.id.startsWith('mem-')).forEach(node => {
+      const type = node.type
+      if (!memoryByType[type]) memoryByType[type] = []
+      memoryByType[type].push(node)
+    })
+
+    Object.values(memoryByType).forEach(typeNodes => {
+      for (let i = 0; i < typeNodes.length; i++) {
+        for (let j = i + 1; j < typeNodes.length; j++) {
+          // Only connect if created within 7 days of each other
+          const timeDiff = Math.abs(typeNodes[i].created - typeNodes[j].created)
+          const daysDiff = timeDiff / (1000 * 60 * 60 * 24)
+          if (daysDiff < 7) {
+            newEdges.push({
+              id: `edge-${typeNodes[i].id}-${typeNodes[j].id}`,
+              source: typeNodes[i].id,
+              target: typeNodes[j].id,
+              strength: 0.3,
+              type: 'same-type'
+            })
+          }
+        }
+      }
+    })
+
+    // Connect documents to memories created around same time (within 1 day)
+    newNodes.filter(n => n.id.startsWith('doc-')).forEach(docNode => {
+      newNodes.filter(n => n.id.startsWith('mem-')).forEach(memNode => {
+        const timeDiff = Math.abs(docNode.created - memNode.created)
+        const daysDiff = timeDiff / (1000 * 60 * 60 * 24)
+        if (daysDiff < 1) {
+          newEdges.push({
+            id: `edge-${docNode.id}-${memNode.id}`,
+            source: docNode.id,
+            target: memNode.id,
+            strength: 0.5,
+            type: 'temporal'
+          })
+        }
+      })
+    })
+
+    // Connect nodes with similar content (basic keyword matching)
+    const getKeywords = (text) => {
+      if (!text) return []
+      return text.toLowerCase()
+        .replace(/[^a-z0-9\s]/g, '')
+        .split(/\s+/)
+        .filter(w => w.length > 4)
+    }
+
+    for (let i = 0; i < newNodes.length; i++) {
+      const keywords1 = getKeywords(newNodes[i].fullContent)
+      for (let j = i + 1; j < newNodes.length; j++) {
+        const keywords2 = getKeywords(newNodes[j].fullContent)
+        const commonWords = keywords1.filter(w => keywords2.includes(w))
+        if (commonWords.length >= 2) {
+          // Check if edge already exists
+          const existingEdge = newEdges.find(e => 
+            (e.source === newNodes[i].id && e.target === newNodes[j].id) ||
+            (e.source === newNodes[j].id && e.target === newNodes[i].id)
+          )
+          if (!existingEdge) {
+            newEdges.push({
+              id: `edge-content-${newNodes[i].id}-${newNodes[j].id}`,
+              source: newNodes[i].id,
+              target: newNodes[j].id,
+              strength: Math.min(commonWords.length / 5, 1),
+              type: 'content'
+            })
+          }
+        }
+      }
+    }
+
+    setNodes(newNodes)
+    setEdges(newEdges)
+  }, [memories, documents, dimensions])
+
+  // Handle container resize
+  useEffect(() => {
+    const container = containerRef.current
+    if (!container) return
+
+    const resizeObserver = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setDimensions({
+          width: entry.contentRect.width || 800,
+          height: entry.contentRect.height || 500
+        })
+      }
+    })
+
+    resizeObserver.observe(container)
+    return () => resizeObserver.disconnect()
+  }, [])
+
+  // Mouse handlers - only user can move nodes
+  const handleMouseDown = (e, node) => {
+    e.stopPropagation()
+    setDragNode(node)
+    setSelectedNode(node)
+  }
+
+  // Handle background click for 3D rotation
+  const handleBackgroundMouseDown = (e) => {
+    if (e.target === svgRef.current || e.target.tagName === 'svg') {
+      setIsRotating(true)
+      setRotateStart({ x: e.clientX, y: e.clientY })
+    }
+  }
+
+  const handleMouseMove = (e) => {
+    // Handle 3D rotation
+    if (isRotating) {
+      const deltaX = e.clientX - rotateStart.x
+      const deltaY = e.clientY - rotateStart.y
+      setRotation(prev => ({
+        x: Math.max(-60, Math.min(60, prev.x - deltaY * 0.3)),
+        y: prev.y + deltaX * 0.3
+      }))
+      setRotateStart({ x: e.clientX, y: e.clientY })
+      return
+    }
+
+    // Handle node dragging
+    if (!dragNode || !svgRef.current) return
+    const svg = svgRef.current
+    const rect = svg.getBoundingClientRect()
+    const x = (e.clientX - rect.left - pan.x) / zoom
+    const y = (e.clientY - rect.top - pan.y) / zoom
+    
+    // Update only the dragged node
+    setNodes(prevNodes => prevNodes.map(n => 
+      n.id === dragNode.id ? { ...n, x, y } : n
+    ))
+  }
+
+  const handleMouseUp = () => {
+    setDragNode(null)
+    setIsRotating(false)
+  }
+
+  const handleWheel = (e) => {
+    e.preventDefault()
+    const delta = e.deltaY > 0 ? 0.9 : 1.1
+    setZoom(z => Math.max(0.3, Math.min(3, z * delta)))
+  }
+
+  // Calculate 3D transform for a node based on rotation
+  const get3DTransform = (node) => {
+    // Convert 2D position to 3D with rotation
+    const centerX = dimensions.width / 2
+    const centerY = dimensions.height / 2
+    
+    // Offset from center
+    const dx = node.x - centerX
+    const dy = node.y - centerY
+    
+    // Apply rotation (simplified 3D projection)
+    const radX = (rotation.x * Math.PI) / 180
+    const radY = (rotation.y * Math.PI) / 180
+    
+    // Rotate around Y axis
+    const rotatedX = dx * Math.cos(radY)
+    const z = dx * Math.sin(radY)
+    
+    // Rotate around X axis
+    const rotatedY = dy * Math.cos(radX) - z * Math.sin(radX)
+    const finalZ = dy * Math.sin(radX) + z * Math.cos(radX)
+    
+    // Apply perspective
+    const perspective = 800
+    const scale = perspective / (perspective - finalZ)
+    
+    return {
+      x: centerX + rotatedX * scale,
+      y: centerY + rotatedY * scale,
+      scale: Math.max(0.5, Math.min(1.5, scale)),
+      z: finalZ,
+      opacity: Math.max(0.3, Math.min(1, 0.5 + scale * 0.5))
+    }
+  }
+
+  const getNodeById = (id) => nodes.find(n => n.id === id)
+
+  // Empty state
+  if (memories.length === 0 && documents.length === 0 && !isLoading) {
+    return (
+      <div className="kb-panel">
+        <div className="kb-panel-header">
+          <div className="kb-panel-info">
+            <h2>Knowledge Graph</h2>
+            <p>Interactive visualization of your knowledge connections.</p>
+          </div>
+        </div>
+        <div className="kb-empty-state">
+          <div className="kb-empty-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="6" cy="6" r="3"/>
+              <circle cx="18" cy="18" r="3"/>
+              <circle cx="6" cy="18" r="3"/>
+              <circle cx="18" cy="6" r="3"/>
+              <line x1="9" y1="6" x2="15" y2="6"/>
+              <line x1="6" y1="9" x2="6" y2="15"/>
+              <line x1="18" y1="9" x2="18" y2="15"/>
+              <line x1="9" y1="18" x2="15" y2="18"/>
+            </svg>
+          </div>
+          <h3>No knowledge yet</h3>
+          <p>Chat with agents and upload documents to build your knowledge graph.</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="kb-panel kb-graph-panel">
+      <div className="kb-panel-header">
+        <div className="kb-panel-info">
+          <h2>Knowledge Graph</h2>
+          <p>Interactive visualization of your knowledge connections. Drag nodes to rearrange.</p>
+        </div>
+        <div className="kb-graph-controls">
+          <button 
+            className="kb-zoom-btn" 
+            onClick={() => setZoom(z => Math.min(3, z * 1.2))}
+            title="Zoom in"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              <line x1="11" y1="8" x2="11" y2="14"/>
+              <line x1="8" y1="11" x2="14" y2="11"/>
+            </svg>
+          </button>
+          <button 
+            className="kb-zoom-btn" 
+            onClick={() => setZoom(z => Math.max(0.3, z * 0.8))}
+            title="Zoom out"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              <line x1="8" y1="11" x2="14" y2="11"/>
+            </svg>
+          </button>
+          <button 
+            className="kb-zoom-btn" 
+            onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); setRotation({ x: 15, y: 0 }); }}
+            title="Reset view"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+              <path d="M3 3v5h5"/>
+            </svg>
+          </button>
+        </div>
+        <div className="kb-graph-rotation-hint">
+          Drag background to rotate in 3D • Drag nodes to move
+        </div>
+      </div>
+
+      <div className="kb-graph-container" ref={containerRef}>
+        {isLoading ? (
+          <div className="kb-loading">
+            <div className="kb-loading-spinner"></div>
+            <span>Building knowledge graph...</span>
+          </div>
+        ) : (
+          <svg
+            ref={svgRef}
+            className="kb-graph-svg"
+            viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
+            onMouseDown={handleBackgroundMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onWheel={handleWheel}
+            style={{ cursor: isRotating ? 'grabbing' : 'grab' }}
+          >
+            <defs>
+              {/* Gradient for depth effect */}
+              <radialGradient id="depthGradient" cx="50%" cy="50%" r="50%">
+                <stop offset="0%" stopColor="rgba(255,255,255,0.1)" />
+                <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+              </radialGradient>
+            </defs>
+            
+            {/* Background grid for 3D effect */}
+            <g opacity="0.1" transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+              {Array.from({ length: 11 }).map((_, i) => {
+                const pos = (i / 10) * dimensions.width
+                return (
+                  <line 
+                    key={`grid-v-${i}`} 
+                    x1={pos} y1={0} 
+                    x2={pos} y2={dimensions.height} 
+                    stroke="white" 
+                    strokeWidth="0.5"
+                  />
+                )
+              })}
+              {Array.from({ length: 11 }).map((_, i) => {
+                const pos = (i / 10) * dimensions.height
+                return (
+                  <line 
+                    key={`grid-h-${i}`} 
+                    x1={0} y1={pos} 
+                    x2={dimensions.width} y2={pos} 
+                    stroke="white" 
+                    strokeWidth="0.5"
+                  />
+                )
+              })}
+            </g>
+
+            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+              {/* Edges with 3D transforms */}
+              {edges.map(edge => {
+                const source = getNodeById(edge.source)
+                const target = getNodeById(edge.target)
+                if (!source || !target) return null
+                
+                const source3D = get3DTransform(source)
+                const target3D = get3DTransform(target)
+                const avgOpacity = (source3D.opacity + target3D.opacity) / 2
+                
+                const isHighlighted = selectedNode && 
+                  (selectedNode.id === edge.source || selectedNode.id === edge.target)
+                return (
+                  <line
+                    key={edge.id}
+                    x1={source3D.x}
+                    y1={source3D.y}
+                    x2={target3D.x}
+                    y2={target3D.y}
+                    stroke={isHighlighted ? '#10b981' : 'rgba(255,255,255,0.15)'}
+                    strokeWidth={isHighlighted ? 2 : 1}
+                    strokeDasharray={edge.type === 'content' ? '4,4' : 'none'}
+                    opacity={avgOpacity}
+                  />
+                )
+              })}
+
+              {/* Nodes - sorted by depth for proper 3D layering */}
+              {nodes
+                .map(node => ({ ...node, transform3D: get3DTransform(node) }))
+                .sort((a, b) => a.transform3D.z - b.transform3D.z)
+                .map(node => {
+                const color = nodeColors[node.type] || nodeColors.memory
+                const isSelected = selectedNode?.id === node.id
+                const isHovered = hoveredNode?.id === node.id
+                const t3d = node.transform3D
+                const nodeScale = t3d.scale * (isSelected ? 1.2 : isHovered ? 1.1 : 1)
+                return (
+                  <g
+                    key={node.id}
+                    transform={`translate(${t3d.x}, ${t3d.y}) scale(${nodeScale})`}
+                    onMouseDown={(e) => handleMouseDown(e, node)}
+                    onMouseEnter={() => setHoveredNode(node)}
+                    onMouseLeave={() => setHoveredNode(null)}
+                    style={{ cursor: dragNode ? 'grabbing' : 'grab' }}
+                    opacity={t3d.opacity}
+                  >
+                    {/* Glow effect for selected */}
+                    {isSelected && (
+                      <circle
+                        r={node.radius + 8}
+                        fill="none"
+                        stroke={color.fill}
+                        strokeWidth="3"
+                        opacity="0.3"
+                      />
+                    )}
+                    {/* Node circle */}
+                    <circle
+                      r={node.radius}
+                      fill={color.fill}
+                      stroke={isSelected ? '#fff' : color.stroke}
+                      strokeWidth={isSelected ? 3 : 2}
+                      opacity={0.9}
+                    />
+                    {/* Icon - different for each document type */}
+                    {node.type === 'pdf' ? (
+                      <g transform="translate(-10, -10)">
+                        {/* PDF icon */}
+                        <rect x="2" y="0" width="16" height="20" rx="2" fill="none" stroke="#fff" strokeWidth="1.5"/>
+                        <text x="10" y="14" textAnchor="middle" fill="#fff" fontSize="7" fontWeight="bold">PDF</text>
+                      </g>
+                    ) : node.type === 'image' ? (
+                      <g transform="translate(-10, -10)">
+                        {/* Image icon */}
+                        <rect x="2" y="2" width="16" height="16" rx="2" fill="none" stroke="#fff" strokeWidth="1.5"/>
+                        <circle cx="7" cy="8" r="2" fill="#fff"/>
+                        <path d="M2 16l5-5 3 3 4-4 4 4v2H2z" fill="#fff" opacity="0.8"/>
+                      </g>
+                    ) : node.type === 'document' ? (
+                      <g transform="translate(-8, -10)">
+                        {/* Document icon */}
+                        <path
+                          d="M12 2H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6l-5-4z"
+                          fill="none"
+                          stroke="white"
+                          strokeWidth="1.5"
+                          transform="scale(0.9)"
+                        />
+                        <path d="M12 2v4h4" fill="none" stroke="white" strokeWidth="1.5" transform="scale(0.9)"/>
+                      </g>
+                    ) : (
+                      <g transform="translate(-7, -7)">
+                        <circle cx="7" cy="7" r="5" fill="none" stroke="white" strokeWidth="1.5"/>
+                        <circle cx="7" cy="5" r="1.5" fill="white"/>
+                        <path d="M4 10c0-1.5 1.5-2.5 3-2.5s3 1 3 2.5" fill="none" stroke="white" strokeWidth="1.5"/>
+                      </g>
+                    )}
+                    
+                    {/* Embedded badge indicator */}
+                    {node.isEmbedded && (
+                      <g transform={`translate(${node.radius - 6}, ${-node.radius + 2})`}>
+                        <circle r="8" fill="#10b981" stroke="#fff" strokeWidth="1.5"/>
+                        <path 
+                          d="M-3 0l2 2 4-4" 
+                          fill="none" 
+                          stroke="#fff" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round"
+                        />
+                      </g>
+                    )}
+                  </g>
+                )
+              })}
+            </g>
+          </svg>
+        )}
+
+        {/* Tooltip */}
+        {hoveredNode && !dragNode && !isRotating && (() => {
+          const t3d = get3DTransform(hoveredNode)
+          return (
+          <div 
+            className="kb-graph-tooltip"
+            style={{
+              left: t3d.x * zoom + pan.x + 30,
+              top: t3d.y * zoom + pan.y - 20
+            }}
+          >
+            <div className="kb-tooltip-type" style={{ color: nodeColors[hoveredNode.type]?.fill }}>
+              {nodeColors[hoveredNode.type]?.label || 'Node'}
+            </div>
+            <div className="kb-tooltip-content">{hoveredNode.fullContent}</div>
+            {hoveredNode.confidence !== undefined && (
+              <div className="kb-tooltip-meta">
+                Confidence: {Math.round(hoveredNode.confidence * 100)}%
+              </div>
+            )}
+            {hoveredNode.sourceType && (
+              <div className="kb-tooltip-meta">Type: {hoveredNode.sourceType}</div>
+            )}
+            {hoveredNode.isEmbedded && (
+              <div className="kb-tooltip-meta" style={{ color: '#10b981' }}>
+                ✓ Embedded ({hoveredNode.embeddedCount} chunks)
+              </div>
+            )}
+          </div>
+          )
+        })()}
+      </div>
+
+      {/* Stats bar */}
+      <div className="kb-graph-stats-bar">
+        <div className="kb-graph-stat">
+          <span className="kb-stat-dot" style={{ background: nodeColors.memory.fill }}></span>
+          {memories.length} Memories
+        </div>
+        <div className="kb-graph-stat">
+          <span className="kb-stat-dot" style={{ background: nodeColors.document.fill }}></span>
+          {documents.length} Documents
+        </div>
+        <div className="kb-graph-stat">
+          <span className="kb-stat-dot" style={{ background: '#fff' }}></span>
+          {edges.length} Connections
+        </div>
+        {selectedNode && (
+          <div className="kb-graph-selected">
+            Selected: <strong>{selectedNode.label}</strong>
+            <button onClick={() => setSelectedNode(null)} className="kb-deselect-btn">×</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Isolated textarea component for smooth typing - prevents parent re-renders during input
+const ChatTextarea = memo(forwardRef(function ChatTextarea({ 
+  externalValue, 
+  onSubmit, 
+  onHistoryNav,
+  placeholder, 
+  disabled,
+  userMessages = []
+}, ref) {
+  const [localValue, setLocalValue] = useState('')
+  const textareaRef = useRef(null)
+  const historyIndexRef = useRef(-1)
+  
+  // Sync external value when it changes (e.g., cleared after submit, or history navigation)
+  useEffect(() => {
+    if (externalValue !== undefined && externalValue !== localValue) {
+      setLocalValue(externalValue)
+    }
+  }, [externalValue])
+  
+  // Expose methods to parent via ref
+  useImperativeHandle(ref, () => ({
+    clear: () => {
+      setLocalValue('')
+      historyIndexRef.current = -1
+    },
+    getValue: () => localValue,
+    setValue: (val) => setLocalValue(val),
+    focus: () => textareaRef.current?.focus()
+  }), [localValue])
+  
+  // Auto-resize with requestAnimationFrame
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.style.height = 'auto'
+        textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 200) + 'px'
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [localValue])
+  
+  const handleChange = useCallback((e) => {
+    setLocalValue(e.target.value)
+  }, [])
+  
+  const handleKeyDown = useCallback((e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (localValue.trim()) {
+        onSubmit?.(localValue.trim())
+        setLocalValue('')
+        historyIndexRef.current = -1
+      }
+      return
+    }
+    
+    // History navigation
+    if (e.key === 'ArrowUp' && userMessages.length > 0) {
+      const textarea = e.target
+      if (textarea.selectionStart === 0 || !localValue) {
+        e.preventDefault()
+        const newIndex = Math.min(historyIndexRef.current + 1, userMessages.length - 1)
+        historyIndexRef.current = newIndex
+        setLocalValue(userMessages[newIndex] || '')
+        onHistoryNav?.(newIndex)
+      }
+    }
+    
+    if (e.key === 'ArrowDown' && historyIndexRef.current >= 0) {
+      const textarea = e.target
+      if (textarea.selectionStart === textarea.value.length) {
+        e.preventDefault()
+        const newIndex = historyIndexRef.current - 1
+        if (newIndex < 0) {
+          historyIndexRef.current = -1
+          setLocalValue('')
+        } else {
+          historyIndexRef.current = newIndex
+          setLocalValue(userMessages[newIndex] || '')
+        }
+        onHistoryNav?.(newIndex)
+      }
+    }
+  }, [localValue, userMessages, onSubmit, onHistoryNav])
+  
+  return (
+    <textarea
+      ref={textareaRef}
+      value={localValue}
+      onChange={handleChange}
+      onKeyDown={handleKeyDown}
+      placeholder={placeholder}
+      rows={1}
+      disabled={disabled}
+      spellCheck="false"
+      autoComplete="off"
+      autoCorrect="off"
+      autoCapitalize="off"
+    />
+  )
+}))
+
+function App() {
+  const [authUser, setAuthUser] = useState(null)
+  const initialConversationIdRef = useRef(crypto.randomUUID())
+  const [conversations, setConversations] = useState(() => [
+    { id: initialConversationIdRef.current, title: 'New chat', messages: [] },
+  ])
+  // Restore active conversation from session storage on refresh
+  const [activeConversation, setActiveConversation] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('activeConversation')
+      // Return null if not found, empty, or literal "null" string
+      return saved && saved !== 'null' ? saved : null
+    } catch {
+      return null
+    }
+  })
+  const chatInputRef = useRef(null) // Ref for the isolated chat textarea
+  const [inputHistoryIndex, setInputHistoryIndex] = useState(-1) // -1 = not navigating history
+  const [isTyping, setIsTyping] = useState(false)
+  const [typingStatus, setTypingStatus] = useState('') // 'generating' | 'image' | 'searching'
+  // NOTE: We render responses fully formatted once they arrive (no simulated token streaming)
+  const generationAbortRef = useRef(null)
+  const generationRunIdRef = useRef(0)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarChatSearchOpen, setSidebarChatSearchOpen] = useState(false)
+  const [sidebarChatSearchQuery, setSidebarChatSearchQuery] = useState('')
+  const [chatsExpanded, setChatsExpanded] = useState(true)
+  const [copiedMessageId, setCopiedMessageId] = useState(null)
+  const [newlyGeneratedMessageId, setNewlyGeneratedMessageId] = useState(null) // For typing animation
+  const [reactions, setReactions] = useState({}) // { messageId: 'liked' | 'disliked' | null }
+  const [toast, setToast] = useState(null)
+  const [showAttachMenu, setShowAttachMenu] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [showSettingsPage, setShowSettingsPage] = useState(() => {
+    try {
+      return sessionStorage.getItem('ui_showSettingsPage') === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [showProfilePage, setShowProfilePage] = useState(false)
+  const [showGalleryPage, setShowGalleryPage] = useState(false)
+  const [showKnowledgeBasePage, setShowKnowledgeBasePage] = useState(false)
+  const [knowledgeBaseTab, setKnowledgeBaseTab] = useState('memory') // memory | rag | graph
+  
+  // Code Page - Local Projects & GitHub integration
+  const [showCodePage, setShowCodePage] = useState(false)
+  const [githubToken, setGithubToken] = useState(() => localStorage.getItem('githubToken') || '')
+  const [githubConnected, setGithubConnected] = useState(false)
+  const [githubUser, setGithubUser] = useState(null)
+  const [githubRepos, setGithubRepos] = useState([])
+  const [githubReposLoading, setGithubReposLoading] = useState(false)
+  const [selectedRepo, setSelectedRepo] = useState(null)
+  const [repoFiles, setRepoFiles] = useState([]) // File tree of selected repo
+  const [repoFilesLoading, setRepoFilesLoading] = useState(false)
+  const [selectedFile, setSelectedFile] = useState(null) // Currently selected file
+  const [fileContent, setFileContent] = useState('') // Content of selected file
+  const [fileContentLoading, setFileContentLoading] = useState(false)
+  const [codeInput, setCodeInput] = useState('') // Chat input for code page
+  const [codeMessages, setCodeMessages] = useState([]) // Chat history for code page
+  const [codeGenerating, setCodeGenerating] = useState(false)
+  const [expandedFolders, setExpandedFolders] = useState({}) // Track expanded folders in file tree
+  const [repoBranch, setRepoBranch] = useState('main') // Current branch
+  const [repoBranches, setRepoBranches] = useState([]) // Available branches
+  const [pendingFileChanges, setPendingFileChanges] = useState({}) // path -> { content, action: 'create'|'update'|'delete' }
+  const [codeTheme, setCodeTheme] = useState('dark')
+
+  // Local Code Editor - Projects stored in localStorage
+  const [codeEditorMode, setCodeEditorMode] = useState('local') // 'local' | 'github'
+  const [localProjects, setLocalProjects] = useState(() => {
+    const saved = localStorage.getItem('codeEditorProjects')
+    return saved ? JSON.parse(saved) : []
+  })
+  const [activeLocalProject, setActiveLocalProject] = useState(null)
+  const [localProjectFiles, setLocalProjectFiles] = useState({}) // projectId -> { files: [...], expandedFolders: {} }
+  const [openTabs, setOpenTabs] = useState([]) // Array of { id, path, name, projectId }
+  const [activeTabId, setActiveTabId] = useState(null)
+  const [editorContent, setEditorContent] = useState('') // Current content being edited
+  const [unsavedChanges, setUnsavedChanges] = useState({}) // tabId -> true/false
+  const [showNewFileModal, setShowNewFileModal] = useState(false)
+  const [showNewFolderModal, setShowNewFolderModal] = useState(false)
+  const [newItemName, setNewItemName] = useState('')
+  const [newItemParent, setNewItemParent] = useState('') // Parent path for new file/folder
+  const [contextMenuFile, setContextMenuFile] = useState(null) // File for context menu
+  const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 })
+  const [showRenameModal, setShowRenameModal] = useState(false)
+  const [renameValue, setRenameValue] = useState('')
+  const [showPreviewPanel, setShowPreviewPanel] = useState(false)
+  const [previewContent, setPreviewContent] = useState('')
+  const [consoleOutput, setConsoleOutput] = useState([])
+  const [showConsole, setShowConsole] = useState(false)
+  const [showDeployMenu, setShowDeployMenu] = useState(false)
+  const [showCodeChat, setShowCodeChat] = useState(true) // Show/hide chat panel
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false)
+  const [newLocalProjectName, setNewLocalProjectName] = useState('')
+  const [newLocalProjectType, setNewLocalProjectType] = useState('html') // 'html' | 'react' | 'node' | 'python' | 'blank'
+  const editorRef = useRef(null)
+  const previewIframeRef = useRef(null)
+
+  // GitHub file editing
+  const [githubFileEditing, setGithubFileEditing] = useState(false) // Is editing mode active
+  const [githubEditContent, setGithubEditContent] = useState('') // Edited content
+  const [githubFileSaving, setGithubFileSaving] = useState(false) // Saving in progress
+  const [showGithubNewFileModal, setShowGithubNewFileModal] = useState(false)
+  const [githubNewFileName, setGithubNewFileName] = useState('')
+  const [githubNewFileContent, setGithubNewFileContent] = useState('')
+  const [creatingGithubFile, setCreatingGithubFile] = useState(false)
+
+  // Vercel Integration
+  const [vercelToken, setVercelToken] = useState(() => localStorage.getItem('vercelToken') || '')
+  const [vercelConnected, setVercelConnected] = useState(false)
+  const [vercelUser, setVercelUser] = useState(null)
+  const [vercelProjects, setVercelProjects] = useState([])
+  const [vercelDeployments, setVercelDeployments] = useState([])
+  const [vercelLoading, setVercelLoading] = useState(false)
+  const [showVercelModal, setShowVercelModal] = useState(false)
+  const [showVercelDeployModal, setShowVercelDeployModal] = useState(false)
+  const [vercelDeployName, setVercelDeployName] = useState('')
+  const [vercelDeploying, setVercelDeploying] = useState(false)
+  const [vercelSelectedProject, setVercelSelectedProject] = useState(null)
+  const [showVercelDeployments, setShowVercelDeployments] = useState(false)
+  const [vercelDeploymentsLoading, setVercelDeploymentsLoading] = useState(false)
+  const [deletingDeployment, setDeletingDeployment] = useState(null)
+
+  // Sidebar Tab Navigation
+  const [sidebarTab, setSidebarTab] = useState('code') // 'code' | 'supabase' | 'git' | 'vercel'
+
+  // Supabase Integration
+  const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('supabaseUrl') || '')
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => localStorage.getItem('supabaseAnonKey') || '')
+  const [supabaseServiceKey, setSupabaseServiceKey] = useState(() => localStorage.getItem('supabaseServiceKey') || '')
+  const [supabaseConnected, setSupabaseConnected] = useState(false)
+  const [supabaseTables, setSupabaseTables] = useState([])
+  const [supabaseLoading, setSupabaseLoading] = useState(false)
+  const [supabaseSelectedTable, setSupabaseSelectedTable] = useState(null)
+  const [supabaseTableData, setSupabaseTableData] = useState([])
+
+  // Local Git Operations
+  const [gitRepoName, setGitRepoName] = useState('')
+  const [gitBranches, setGitBranches] = useState(['main'])
+  const [gitCurrentBranch, setGitCurrentBranch] = useState('main')
+  const [gitCommits, setGitCommits] = useState([])
+  const [gitStagedFiles, setGitStagedFiles] = useState([])
+  const [gitCommitMessage, setGitCommitMessage] = useState('')
+  const [gitInitialized, setGitInitialized] = useState(false)
+
+  // Repo lifecycle (create/delete) UI
+  const [showCreateRepoModal, setShowCreateRepoModal] = useState(false)
+  const [creatingRepo, setCreatingRepo] = useState(false)
+  const [createRepoError, setCreateRepoError] = useState('')
+  const [createRepoForm, setCreateRepoForm] = useState({ name: '', description: '', private: true })
+
+  const [showDeleteRepoModal, setShowDeleteRepoModal] = useState(false)
+  const [deleteRepoConfirm, setDeleteRepoConfirm] = useState('')
+  const [deletingRepo, setDeletingRepo] = useState(false)
+  const [deleteRepoError, setDeleteRepoError] = useState('')
+  
+  // Projects feature
+  const [projects, setProjects] = useState(() => {
+    const saved = localStorage.getItem('projects')
+    return saved ? JSON.parse(saved) : []
+  })
+  const [showCreateProjectModal, setShowCreateProjectModal] = useState(false)
+  const [projectsExpanded, setProjectsExpanded] = useState(true)
+  const [selectedProjectId, setSelectedProjectId] = useState(null)
+  const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectColor, setNewProjectColor] = useState('#10b981')
+  const [newProjectInstructions, setNewProjectInstructions] = useState('')
+  const [userMemories, setUserMemories] = useState([])
+  const [ragDocuments, setRagDocuments] = useState([])
+  const [kbLoading, setKbLoading] = useState(false)
+  // Knowledge Graph needs full (unpaginated) data to represent true counts
+  const [graphMemories, setGraphMemories] = useState([])
+  const [graphDocuments, setGraphDocuments] = useState([])
+  const [graphLoading, setGraphLoading] = useState(false)
+  // Pagination state
+  const [memoriesPage, setMemoriesPage] = useState(1)
+  const [memoriesTotalCount, setMemoriesTotalCount] = useState(0)
+  const [documentsPage, setDocumentsPage] = useState(1)
+  const [documentsTotalCount, setDocumentsTotalCount] = useState(0)
+  const KB_PAGE_SIZE = 10
+  const [attachedFiles, setAttachedFiles] = useState([])
+  // Per-file upload progress (id -> progress 0-100)
+  const [attachmentProgress, setAttachmentProgress] = useState({})
+  const [attachmentsUploading, setAttachmentsUploading] = useState(false)
+  // Pre-processed OCR context (processed on file attach, used on send)
+  const [preProcessedOcr, setPreProcessedOcr] = useState({ ocrContext: '', postedMessage: '' })
+  const [n8nWebhookUrl, setN8nWebhookUrl] = useState(() => {
+    return localStorage.getItem('n8nWebhookUrl') || ''
+  })
+  const [importingAgents, setImportingAgents] = useState(false)
+  // Agents are stored per-user to avoid cross-account leakage
+  const [agents, setAgents] = useState([])
+  const [selectedAgent, setSelectedAgent] = useState(null)
+  const [showAgentSelector, setShowAgentSelector] = useState(false)
+  const [webhookError, setWebhookError] = useState('')
+  const [testingWebhook, setTestingWebhook] = useState(false)
+  const [showAddAgentForm, setShowAddAgentForm] = useState(false)
+  const [newAgent, setNewAgent] = useState({ name: '', description: '', tags: '', webhookUrl: '' })
+  
+  
+  // Search Configuration
+  const [searchUrl, setSearchUrl] = useState(() => {
+    return localStorage.getItem('searchUrl') || 'https://search.brainstormnodes.org/'
+  })
+
+  // Settings tabs
+  const [settingsTab, setSettingsTab] = useState(() => {
+    try {
+      return sessionStorage.getItem('ui_settingsTab') || 'n8n'
+    } catch {
+      return 'n8n'
+    }
+  }) // n8n | openrouter | lmstudio | embeddings | ocr | images | mcp
+
+  // MCP Servers config (supports multiple servers via JSON import)
+  const [mcpServers, setMcpServers] = useState(() => {
+    const saved = localStorage.getItem('mcpServers')
+    if (!saved) return []
+    try {
+      const parsed = JSON.parse(saved)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })
+  const [mcpImportJson, setMcpImportJson] = useState('')
+  const [mcpImportError, setMcpImportError] = useState('')
+  const [mcpFlowFilter, setMcpFlowFilter] = useState('')
+  const mcpRpcIdRef = useRef(1)
+
+  // OpenRouter config
+  // NOTE: Vite env vars (VITE_*) are bundled into the client and are not secret.
+  // We support env as a convenience fallback, but localStorage wins.
+  const [openRouterApiKey, setOpenRouterApiKey] = useState(() => {
+    return (
+      localStorage.getItem('openRouterApiKey') ||
+      import.meta.env.VITE_OPENROUTER_API_KEY ||
+      ''
+    )
+  })
+  const [openRouterConnectState, setOpenRouterConnectState] = useState(() => {
+    return localStorage.getItem('openRouterConnectState') || 'disconnected' // disconnected | connecting | connected | error
+  })
+  const [openRouterConnectError, setOpenRouterConnectError] = useState('')
+  const [openRouterModels, setOpenRouterModels] = useState(() => {
+    const saved = localStorage.getItem('openRouterModels')
+    if (!saved) return []
+    try {
+      const parsed = JSON.parse(saved)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })
+  const [openRouterModelFilter, setOpenRouterModelFilter] = useState('')
+  // OpenRouter agents are also user-scoped (loaded in useEffect below)
+  const [openRouterAgents, setOpenRouterAgents] = useState([])
+  const [newOpenRouterAgent, setNewOpenRouterAgent] = useState({
+    name: '',
+    model: 'openai/gpt-4o-mini',
+    systemPrompt: 'You are a helpful assistant.',
+    temperature: 0.7,
+  })
+
+  // LM Studio (OpenAI-compatible local server) config
+  const [lmStudioBaseUrl, setLmStudioBaseUrl] = useState(() => {
+    return localStorage.getItem('lmStudioBaseUrl') || 'http://localhost:1234/v1'
+  })
+  const [lmStudioApiKey, setLmStudioApiKey] = useState(() => {
+    return localStorage.getItem('lmStudioApiKey') || ''
+  })
+  const [lmStudioConnectState, setLmStudioConnectState] = useState(() => {
+    return localStorage.getItem('lmStudioConnectState') || 'disconnected'
+  })
+  const [lmStudioConnectError, setLmStudioConnectError] = useState('')
+  const [lmStudioModels, setLmStudioModels] = useState(() => {
+    const saved = localStorage.getItem('lmStudioModels')
+    if (!saved) return []
+    try {
+      const parsed = JSON.parse(saved)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })
+  const [lmStudioModelFilter, setLmStudioModelFilter] = useState('')
+  const [lmStudioAgents, setLmStudioAgents] = useState([])
+  const [newLmStudioAgent, setNewLmStudioAgent] = useState({
+    name: '',
+    model: '',
+    systemPrompt: 'You are a helpful assistant.',
+    temperature: 0.7,
+  })
+
+  // Embeddings / RAG config
+  const OPENAI_EMBEDDINGS_MODEL = 'text-embedding-3-small'
+  // NOTE: Vite env vars (VITE_*) are bundled into the client and are not secret.
+  // We support env as a convenience fallback, but localStorage wins.
+  const [openAiApiKey, setOpenAiApiKey] = useState(() => {
+    return (
+      localStorage.getItem('openAiApiKey') ||
+      import.meta.env.VITE_OPENAI_API_KEY ||
+      ''
+    )
+  })
+  // For embeddings/RAG we prefer the env key (VITE_OPENAI_API_KEY) if present,
+  // so localStorage/UI edits can't accidentally override a working env setup.
+  const openAiEmbeddingsApiKey = (import.meta.env.VITE_OPENAI_API_KEY || openAiApiKey || '').trim()
+  const [openAiConnectState, setOpenAiConnectState] = useState('disconnected') // disconnected | connecting | connected | error
+  const [openAiConnectError, setOpenAiConnectError] = useState('')
+  const openAiKeyTestedRef = useRef('') // tracks last tested key to avoid duplicate tests
+
+  const [ragUploadFiles, setRagUploadFiles] = useState([]) // [{ id, file, name, size, type }]
+  const [ragIngestState, setRagIngestState] = useState('idle') // idle | ingesting | done | error
+  const [ragIngestProgress, setRagIngestProgress] = useState({ fileIndex: 0, fileCount: 0, message: '' })
+  const [ragIngestError, setRagIngestError] = useState('')
+
+  // OCR (chat uploads)
+  const [ocrModel, setOcrModel] = useState(() => {
+    return localStorage.getItem('ocrModel') || 'gpt-4o'
+  })
+  const [ocrAutoProcessChatUploads, setOcrAutoProcessChatUploads] = useState(() => {
+    const v = localStorage.getItem('ocrAutoProcessChatUploads')
+    return v == null ? true : v === 'true'
+  })
+  const [ocrAutoIngestToRag, setOcrAutoIngestToRag] = useState(() => {
+    const v = localStorage.getItem('ocrAutoIngestToRag')
+    return v == null ? true : v === 'true'
+  })
+  const [ocrAutoPostSummaryToChat, setOcrAutoPostSummaryToChat] = useState(() => {
+    const v = localStorage.getItem('ocrAutoPostSummaryToChat')
+    return v == null ? true : v === 'true'
+  })
+
+  // Image generation (chat)
+  const [imageGenModel, setImageGenModel] = useState(() => {
+    return localStorage.getItem('imageGenModel') || 'dall-e-3'
+  })
+  const [autoImageGenFromChat, setAutoImageGenFromChat] = useState(() => {
+    const v = localStorage.getItem('autoImageGenFromChat')
+    return v == null ? true : v === 'true'
+  })
+
+  // Code Canvas state
+  const [canvasFiles, setCanvasFiles] = useState({ html: '', css: '', js: '' })
+  const [canvasActiveTab, setCanvasActiveTab] = useState('html') // html | css | js
+  const [canvasOpen, setCanvasOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const canvasIframeRef = useRef(null)
+
+  const canvasEditorRef = useRef(null)
+  const canvasHighlightRef = useRef(null)
+
+  // User profile (Supabase)
+  const [profileRow, setProfileRow] = useState(null) // { user_id, display_name, avatar_url, settings }
+  const [profileDraft, setProfileDraft] = useState({
+    display_name: '',
+    role: '',
+    timezone: '',
+    about: '',
+  })
+  const [profileSaveState, setProfileSaveState] = useState('idle') // idle | saving | error
+  const [profileSaveError, setProfileSaveError] = useState('')
+
+  // Generated images gallery
+  const [generatedImages, setGeneratedImages] = useState([]) // [{ image_id, prompt, model, storage_bucket, storage_path, created_at, url }]
+  const [galleryLoading, setGalleryLoading] = useState(false)
+  const [galleryError, setGalleryError] = useState('')
+
+  const user = authUser
+    ? {
+        name: profileDraft.display_name?.trim() || profileRow?.display_name || authUser.email?.split('@')?.[0] || 'User',
+        email: authUser.email || '',
+        avatar: (authUser.email?.[0] || 'U').toUpperCase(),
+      }
+    : {
+        name: 'John Doe',
+        email: 'john@example.com',
+        avatar: 'JD',
+      }
+
+  const [isDragging, setIsDragging] = useState(false)
+  const [isDraggingOnInput, setIsDraggingOnInput] = useState(false)
+  const messagesEndRef = useRef(null)
+  const fileInputRef = useRef(null)
+  const attachMenuRef = useRef(null)
+  const uploadModalRef = useRef(null)
+  const sidebarSearchInputRef = useRef(null)
+
+  const currentConversation = conversations.find(c => c.id === activeConversation)
+
+  const filteredConversations = useMemo(() => {
+    const q = sidebarChatSearchQuery.trim().toLowerCase()
+    if (!q) return conversations
+    return (conversations || []).filter((c) => (c?.title || '').toLowerCase().includes(q))
+  }, [conversations, sidebarChatSearchQuery])
+
+  const showToast = (message) => {
+    setToast(message)
+    setTimeout(() => setToast(null), 2000)
+  }
+
+  // Persist active conversation so refresh stays on the same chat
+  useEffect(() => {
+    try {
+      if (activeConversation) {
+        sessionStorage.setItem('activeConversation', activeConversation)
+      } else {
+        sessionStorage.removeItem('activeConversation')
+      }
+    } catch {}
+  }, [activeConversation])
+
+  // Keep Settings open while user is there (prevents unexpected navigation on remount)
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('ui_showSettingsPage', showSettingsPage ? 'true' : 'false')
+    } catch {}
+  }, [showSettingsPage])
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('ui_settingsTab', settingsTab || 'n8n')
+    } catch {}
+  }, [settingsTab])
+
+  const dbEnabled = Boolean(isSupabaseConfigured && supabase && authUser)
+
+  const loadGeneratedImages = async () => {
+    if (!dbEnabled) return
+    setGalleryError('')
+    setGalleryLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('generated_images')
+        .select('image_id,prompt,model,parameters,storage_bucket,storage_path,created_at')
+        .eq('owner_user_id', authUser.id)
+        .order('created_at', { ascending: false })
+        .limit(200)
+      if (error) throw error
+
+      const rows = data || []
+      const withUrls = await Promise.all(
+        rows.map(async (row) => {
+          try {
+            const bucket = row.storage_bucket || 'generated-images'
+            const path = row.storage_path
+            if (!path) return { ...row, url: '' }
+            const { data: signed, error: signErr } = await supabase
+              .storage
+              .from(bucket)
+              .createSignedUrl(path, 60 * 60) // 1 hour
+            if (signErr) throw signErr
+            return { ...row, url: signed?.signedUrl || '' }
+          } catch {
+            return { ...row, url: '' }
+          }
+        })
+      )
+      setGeneratedImages(withUrls)
+    } catch (e) {
+      console.error(e)
+      setGalleryError(e.message || 'Failed to load images')
+    } finally {
+      setGalleryLoading(false)
+    }
+  }
+
+  const loadUserMemories = async (page = 1) => {
+    if (!dbEnabled) return
+    try {
+      // Get total count
+      const { count, error: countError } = await supabase
+        .from('user_memories')
+        .select('*', { count: 'exact', head: true })
+        .eq('owner_user_id', authUser.id)
+      if (!countError) setMemoriesTotalCount(count || 0)
+
+      // Get paginated data
+      const offset = (page - 1) * KB_PAGE_SIZE
+      const { data, error } = await supabase
+        .from('user_memories')
+        .select('memory_id,memory_type,content,confidence,is_active,created_at,updated_at')
+        .eq('owner_user_id', authUser.id)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + KB_PAGE_SIZE - 1)
+      if (error) throw error
+      setUserMemories(data || [])
+      setMemoriesPage(page)
+    } catch (e) {
+      console.error('Failed to load memories:', e)
+    }
+  }
+
+  const loadRagDocuments = async (page = 1) => {
+    if (!dbEnabled) return
+    try {
+      // Get total count
+      const { count, error: countError } = await supabase
+        .from('documents')
+        .select('*', { count: 'exact', head: true })
+        .eq('owner_user_id', authUser.id)
+      if (!countError) setDocumentsTotalCount(count || 0)
+
+      // Get paginated documents
+      const offset = (page - 1) * KB_PAGE_SIZE
+      const { data: docs, error } = await supabase
+        .from('documents')
+        .select('document_id,title,source_type,storage_bucket,storage_path,metadata,created_at')
+        .eq('owner_user_id', authUser.id)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + KB_PAGE_SIZE - 1)
+      if (error) throw error
+      
+      // Then get chunk counts with embeddings for each document
+      if (docs && docs.length > 0) {
+        const docIds = docs.map(d => d.document_id)
+        const { data: chunkData, error: chunkError } = await supabase
+          .from('document_chunks')
+          .select('document_id,embedding')
+          .in('document_id', docIds)
+        
+        if (!chunkError && chunkData) {
+          // Count embedded chunks per document
+          const embeddedCounts = {}
+          const totalCounts = {}
+          chunkData.forEach(chunk => {
+            totalCounts[chunk.document_id] = (totalCounts[chunk.document_id] || 0) + 1
+            if (chunk.embedding) {
+              embeddedCounts[chunk.document_id] = (embeddedCounts[chunk.document_id] || 0) + 1
+            }
+          })
+          
+          // Attach counts to documents
+          const docsWithStatus = docs.map(doc => ({
+            ...doc,
+            chunk_count: totalCounts[doc.document_id] || 0,
+            embedded_count: embeddedCounts[doc.document_id] || 0,
+            is_embedded: (embeddedCounts[doc.document_id] || 0) > 0
+          }))
+          setRagDocuments(docsWithStatus)
+        } else {
+          setRagDocuments(docs || [])
+        }
+      } else {
+        setRagDocuments([])
+      }
+      setDocumentsPage(page)
+    } catch (e) {
+      console.error('Failed to load documents:', e)
+    }
+  }
+
+  const loadKnowledgeBaseData = async () => {
+    if (!dbEnabled) return
+    setKbLoading(true)
+    try {
+      await Promise.all([loadUserMemories(), loadRagDocuments()])
+    } finally {
+      setKbLoading(false)
+    }
+  }
+
+  const loadGraphData = async () => {
+    if (!dbEnabled) return
+    setGraphLoading(true)
+    try {
+      const PAGE = 200
+      const MAX = 2000 // safety cap for UI performance
+
+      // Load all memories
+      const allMem = []
+      for (let offset = 0; offset < MAX; offset += PAGE) {
+        const { data, error } = await supabase
+          .from('user_memories')
+          .select('memory_id,memory_type,content,confidence,is_active,created_at,updated_at')
+          .eq('owner_user_id', authUser.id)
+          .order('created_at', { ascending: false })
+          .range(offset, offset + PAGE - 1)
+        if (error) throw error
+        const rows = data || []
+        allMem.push(...rows)
+        if (rows.length < PAGE) break
+      }
+      setGraphMemories(allMem)
+
+      // Load all documents (note: we don't compute chunk counts here to avoid huge reads)
+      const allDocs = []
+      for (let offset = 0; offset < MAX; offset += PAGE) {
+        const { data, error } = await supabase
+          .from('documents')
+          .select('document_id,title,source_type,storage_bucket,storage_path,metadata,created_at')
+          .eq('owner_user_id', authUser.id)
+          .order('created_at', { ascending: false })
+          .range(offset, offset + PAGE - 1)
+        if (error) throw error
+        const rows = data || []
+        allDocs.push(...rows)
+        if (rows.length < PAGE) break
+      }
+      setGraphDocuments(allDocs)
+    } catch (e) {
+      console.error('Failed to load graph data:', e)
+      // fall back to paginated data
+      setGraphMemories(userMemories || [])
+      setGraphDocuments(ragDocuments || [])
+    } finally {
+      setGraphLoading(false)
+    }
+  }
+
+  // When user opens the Knowledge Graph tab, load the full dataset so counts are accurate
+  useEffect(() => {
+    if (!dbEnabled) return
+    if (!showKnowledgeBasePage) return
+    if (knowledgeBaseTab !== 'graph') return
+    loadGraphData()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbEnabled, showKnowledgeBasePage, knowledgeBaseTab, authUser?.id])
+
+  const deleteMemory = async (memoryId) => {
+    if (!dbEnabled) return
+    try {
+      const { error } = await supabase
+        .from('user_memories')
+        .delete()
+        .eq('memory_id', memoryId)
+        .eq('owner_user_id', authUser.id)
+      if (error) throw error
+      setUserMemories(prev => prev.filter(m => m.memory_id !== memoryId))
+      showToast('Memory deleted')
+    } catch (e) {
+      console.error('Failed to delete memory:', e)
+      showToast('Failed to delete memory')
+    }
+  }
+
+  const deleteDocument = async (documentId) => {
+    if (!dbEnabled) return
+    try {
+      const { error } = await supabase
+        .from('documents')
+        .delete()
+        .eq('document_id', documentId)
+        .eq('owner_user_id', authUser.id)
+      if (error) throw error
+      setRagDocuments(prev => prev.filter(d => d.document_id !== documentId))
+      showToast('Document deleted')
+    } catch (e) {
+      console.error('Failed to delete document:', e)
+      showToast('Failed to delete document')
+    }
+  }
+
+  // Project management functions
+  const saveProjectsToStorage = (projectsList) => {
+    localStorage.setItem('projects', JSON.stringify(projectsList))
+  }
+
+  const createProject = () => {
+    if (!newProjectName.trim()) {
+      showToast('Please enter a project name')
+      return
+    }
+    
+    const newProject = {
+      id: crypto.randomUUID(),
+      name: newProjectName.trim(),
+      color: newProjectColor,
+      instructions: newProjectInstructions.trim(),
+      chatIds: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+    
+    const updatedProjects = [...projects, newProject]
+    setProjects(updatedProjects)
+    saveProjectsToStorage(updatedProjects)
+    
+    // Reset form
+    setNewProjectName('')
+    setNewProjectColor('#10b981')
+    setNewProjectInstructions('')
+    setShowCreateProjectModal(false)
+    showToast(`Project "${newProject.name}" created!`)
+  }
+
+  const deleteProject = (projectId) => {
+    const project = projects.find(p => p.id === projectId)
+    if (!project) return
+    
+    // Remove project assignment from all chats
+    if (project.chatIds && project.chatIds.length > 0) {
+      setConversations(prev => prev.map(conv => ({
+        ...conv,
+        projectId: conv.projectId === projectId ? null : conv.projectId
+      })))
+    }
+    
+    const updatedProjects = projects.filter(p => p.id !== projectId)
+    setProjects(updatedProjects)
+    saveProjectsToStorage(updatedProjects)
+    
+    if (selectedProjectId === projectId) {
+      setSelectedProjectId(null)
+    }
+    
+    showToast(`Project "${project.name}" deleted`)
+  }
+
+  const addChatToProject = (chatId, projectId) => {
+    // Remove from any existing project first
+    const updatedProjects = projects.map(p => ({
+      ...p,
+      chatIds: p.chatIds.filter(id => id !== chatId)
+    }))
+    
+    // Add to new project
+    const projectIndex = updatedProjects.findIndex(p => p.id === projectId)
+    if (projectIndex !== -1) {
+      updatedProjects[projectIndex].chatIds.push(chatId)
+      updatedProjects[projectIndex].updatedAt = new Date().toISOString()
+    }
+    
+    setProjects(updatedProjects)
+    saveProjectsToStorage(updatedProjects)
+    
+    // Update conversation's projectId
+    setConversations(prev => prev.map(conv => 
+      conv.id === chatId ? { ...conv, projectId } : conv
+    ))
+    
+    const project = updatedProjects.find(p => p.id === projectId)
+    showToast(`Chat added to "${project?.name}"`)
+  }
+
+  const removeChatFromProject = (chatId) => {
+    const updatedProjects = projects.map(p => ({
+      ...p,
+      chatIds: p.chatIds.filter(id => id !== chatId)
+    }))
+    
+    setProjects(updatedProjects)
+    saveProjectsToStorage(updatedProjects)
+    
+    setConversations(prev => prev.map(conv => 
+      conv.id === chatId ? { ...conv, projectId: null } : conv
+    ))
+  }
+
+  const getProjectForChat = (chatId) => {
+    return projects.find(p => p.chatIds?.includes(chatId))
+  }
+
+  const getChatsInProject = (projectId) => {
+    const project = projects.find(p => p.id === projectId)
+    if (!project) return []
+    return conversations.filter(conv => project.chatIds?.includes(conv.id))
+  }
+
+  // Extract memories from conversation using AI
+  const extractMemoriesFromConversation = async (userMessage, assistantResponse) => {
+    if (!dbEnabled || !openAiApiKey) return
+    
+    try {
+      const extractionPrompt = `Analyze this conversation and extract any personal facts, preferences, or details about the user that would be worth remembering for future conversations.
+
+User message: "${userMessage}"
+Assistant response: "${assistantResponse}"
+
+If you find memorable information, respond with a JSON array of objects with these fields:
+- memory_type: one of "preference", "personal_detail", "project_context", or "fact"
+- content: a concise statement about the user (e.g., "User prefers dark mode" or "User is a software engineer")
+- confidence: a number between 0 and 1 indicating how confident you are this is a real fact
+
+Only extract clear, useful facts. If no memorable information is found, respond with an empty array [].
+Respond ONLY with valid JSON, no other text.`
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openAiApiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: extractionPrompt }],
+          temperature: 0.3,
+          max_tokens: 500
+        })
+      })
+
+      if (!response.ok) return
+
+      const data = await response.json()
+      const content = data.choices?.[0]?.message?.content?.trim()
+      
+      if (!content) return
+
+      // Parse the JSON response
+      let memories = []
+      try {
+        // Handle potential markdown code blocks
+        const jsonStr = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+        memories = JSON.parse(jsonStr)
+      } catch (e) {
+        console.log('Could not parse memory extraction response:', content)
+        return
+      }
+
+      if (!Array.isArray(memories) || memories.length === 0) return
+
+      // Save each memory to the database
+      for (const mem of memories) {
+        if (!mem.content || !mem.memory_type) continue
+        
+        // Check for duplicate content
+        const isDuplicate = userMemories.some(existing => 
+          existing.content.toLowerCase().includes(mem.content.toLowerCase().substring(0, 30)) ||
+          mem.content.toLowerCase().includes(existing.content.toLowerCase().substring(0, 30))
+        )
+        
+        if (isDuplicate) continue
+
+        const { error } = await supabase
+          .from('user_memories')
+          .insert({
+            owner_user_id: authUser.id,
+            memory_type: mem.memory_type,
+            content: mem.content,
+            confidence: mem.confidence || 0.7,
+            is_active: true
+          })
+        
+        if (!error) {
+          // Refresh memories list
+          loadUserMemories()
+          console.log('Memory saved:', mem.content)
+        }
+      }
+    } catch (e) {
+      console.error('Memory extraction error:', e)
+    }
+  }
+
+  useEffect(() => {
+    if (!dbEnabled) {
+      setProfileRow(null)
+      setProfileDraft({ display_name: '', role: '', timezone: '', about: '' })
+      setProfileSaveState('idle')
+      setProfileSaveError('')
+      setGeneratedImages([])
+      return
+    }
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('user_id,display_name,avatar_url,settings')
+          .eq('user_id', authUser.id)
+          .single()
+        if (error) throw error
+        if (cancelled) return
+
+        const settings = data?.settings && typeof data.settings === 'object' ? data.settings : {}
+        setProfileRow(data)
+        setProfileDraft({
+          display_name: data?.display_name || '',
+          role: settings.role || '',
+          timezone: settings.timezone || '',
+          about: settings.about || '',
+        })
+      } catch (e) {
+        console.error('Failed to load profile:', e)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [dbEnabled, authUser?.id])
+
+  useEffect(() => {
+    if (!dbEnabled) return
+    loadGeneratedImages().catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbEnabled, authUser?.id])
+
+  // Refresh gallery when opening the gallery page
+  useEffect(() => {
+    if (showGalleryPage && dbEnabled) {
+      loadGeneratedImages().catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showGalleryPage])
+
+  // Load knowledge base data when opening the KB page
+  useEffect(() => {
+    if (showKnowledgeBasePage && dbEnabled) {
+      loadKnowledgeBaseData().catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showKnowledgeBasePage])
+
+  const saveUserProfile = async () => {
+    if (!dbEnabled) {
+      showToast('Sign in (Supabase) to save your profile')
+      return
+    }
+    setProfileSaveError('')
+    setProfileSaveState('saving')
+    try {
+      const nextSettings = {
+        ...(profileRow?.settings && typeof profileRow.settings === 'object' ? profileRow.settings : {}),
+        role: profileDraft.role || '',
+        timezone: profileDraft.timezone || '',
+        about: profileDraft.about || '',
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({
+          display_name: profileDraft.display_name || '',
+          settings: nextSettings,
+        })
+        .eq('user_id', authUser.id)
+        .select('user_id,display_name,avatar_url,settings')
+        .single()
+
+      if (error) throw error
+      setProfileRow(data)
+      setProfileSaveState('idle')
+      showToast('Profile saved')
+    } catch (e) {
+      console.error(e)
+      setProfileSaveState('error')
+      setProfileSaveError(e.message || 'Failed to save profile')
+      showToast('Failed to save profile')
+    }
+  }
+
+  const dataUrlToPngBlob = (dataUrl) => {
+    const [meta, b64] = String(dataUrl || '').split(',')
+    if (!b64) throw new Error('Invalid image data')
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    const mime = meta?.match(/data:([^;]+);base64/)?.[1] || 'image/png'
+    return new Blob([bytes], { type: mime })
+  }
+
+  const urlToBlob = async (url) => {
+    const response = await fetch(url)
+    if (!response.ok) throw new Error('Failed to fetch image from URL')
+    return await response.blob()
+  }
+
+  const persistGeneratedImage = async ({ prompt, model, dataUrl }) => {
+    // Best-effort: store permanently in Supabase if enabled, otherwise local-only
+    if (!dbEnabled) return { ok: false, reason: 'db_disabled' }
+    
+    let blob
+    const isDataUrl = String(dataUrl || '').startsWith('data:')
+    
+    if (isDataUrl) {
+      blob = dataUrlToPngBlob(dataUrl)
+    } else {
+      // It's a regular URL - fetch it and convert to blob
+      blob = await urlToBlob(dataUrl)
+    }
+    
+    const bucket = 'generated-images'
+    const path = `${authUser.id}/${crypto.randomUUID()}.png`
+
+    // Upload to Storage
+    const { error: upErr } = await supabase.storage.from(bucket).upload(path, blob, {
+      contentType: blob.type || 'image/png',
+      upsert: false,
+    })
+    if (upErr) throw upErr
+
+    // Insert DB row
+    const { data, error } = await supabase
+      .from('generated_images')
+      .insert({
+        owner_user_id: authUser.id,
+        prompt: String(prompt || '').trim(),
+        model: model || imageGenModel || 'dall-e-3',
+        parameters: { source: 'chat' },
+        storage_bucket: bucket,
+        storage_path: path,
+      })
+      .select('image_id,prompt,model,storage_bucket,storage_path,created_at')
+      .single()
+    if (error) throw error
+
+    // Refresh gallery list
+    loadGeneratedImages().catch(() => {})
+    return { ok: true, row: data }
+  }
+
+  const deleteGeneratedImage = async (imageId, storageBucket, storagePath) => {
+    if (!dbEnabled) return
+    try {
+      // Delete from storage first
+      if (storagePath) {
+        const bucket = storageBucket || 'generated-images'
+        await supabase.storage.from(bucket).remove([storagePath])
+      }
+      // Delete from database
+      const { error } = await supabase
+        .from('generated_images')
+        .delete()
+        .eq('image_id', imageId)
+        .eq('owner_user_id', authUser.id)
+      if (error) throw error
+      
+      // Update local state
+      setGeneratedImages(prev => prev.filter(img => img.image_id !== imageId))
+      showToast('Image deleted')
+    } catch (e) {
+      console.error('Failed to delete image:', e)
+      showToast('Failed to delete image: ' + (e.message || 'Unknown error'))
+    }
+  }
+
+  const downloadImage = async (imageUrl, prompt) => {
+    // Create a filename from the prompt or use a default
+    const filename = (prompt || 'generated-image')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .slice(0, 50) + '.png'
+
+    // Use canvas approach to bypass CORS and force download
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
+        const ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0)
+        
+        canvas.toBlob((blob) => {
+          if (blob) {
+            const blobUrl = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = blobUrl
+            link.download = filename
+            document.body.appendChild(link)
+            link.click()
+            document.body.removeChild(link)
+            URL.revokeObjectURL(blobUrl)
+            showToast('Image downloaded!')
+          } else {
+            throw new Error('Failed to create blob')
+          }
+        }, 'image/png')
+      } catch (e) {
+        console.error('Canvas download failed:', e)
+        // Fallback: open in new tab
+        window.open(imageUrl, '_blank')
+        showToast('Image opened in new tab - right-click to save')
+      }
+    }
+    
+    img.onerror = () => {
+      console.error('Image load failed, opening in new tab')
+      window.open(imageUrl, '_blank')
+      showToast('Image opened in new tab - right-click to save')
+    }
+    
+    // Add cache buster to avoid CORS caching issues
+    const separator = imageUrl.includes('?') ? '&' : '?'
+    img.src = imageUrl + separator + 't=' + Date.now()
+  }
+
+  const buildUserProfileBlock = () => {
+    if (!authUser) return ''
+    const name = profileDraft.display_name?.trim() || profileRow?.display_name || authUser.email?.split('@')?.[0] || 'User'
+    const parts = []
+    parts.push(`- name: ${name}`)
+    if (profileDraft.role?.trim()) parts.push(`- role: ${profileDraft.role.trim()}`)
+    if (profileDraft.timezone?.trim()) parts.push(`- timezone: ${profileDraft.timezone.trim()}`)
+    if (profileDraft.about?.trim()) parts.push(`- about: ${profileDraft.about.trim()}`)
+    return parts.length ? `User profile:\n${parts.join('\n')}` : ''
+  }
+
+  const loadChatsFromDb = async () => {
+    const { data, error } = await supabase
+      .from('chats')
+      .select('chat_id,title,updated_at')
+      .order('updated_at', { ascending: false })
+      .limit(50)
+    if (error) throw error
+    return (data || []).map((c) => ({ id: c.chat_id, title: c.title, messages: [] }))
+  }
+
+  const loadMessagesFromDb = async (chatId) => {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('message_id,role,content,metadata,created_at')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true })
+    if (error) throw error
+    return (data || []).map((m) => {
+      if (m.metadata?.content_type === 'search' && m.metadata?.search_html) {
+        return {
+          id: m.message_id,
+          role: m.role,
+          content: { type: 'search', html: m.metadata.search_html, query: m.metadata.search_query || '' },
+        }
+      }
+      return { id: m.message_id, role: m.role, content: m.content }
+    })
+  }
+
+  const createChatInDb = async () => {
+    const { data, error } = await supabase
+      .from('chats')
+      .insert({ owner_user_id: authUser.id, title: 'New chat' })
+      .select('chat_id,title')
+      .single()
+    if (error) throw error
+    return { id: data.chat_id, title: data.title, messages: [] }
+  }
+
+  const deleteChatInDb = async (chatId) => {
+    const { error } = await supabase.from('chats').delete().eq('chat_id', chatId)
+    if (error) throw error
+  }
+
+  const insertMessageInDb = async (chatId, role, content) => {
+    const isSearch = content?.type === 'search'
+    const payload = {
+      chat_id: chatId,
+      role,
+      content: isSearch ? (content.query || '') : String(content ?? ''),
+      metadata: isSearch
+        ? { content_type: 'search', search_html: content.html, search_query: content.query }
+        : {},
+    }
+    const { data, error } = await supabase.from('messages').insert(payload).select('message_id').single()
+    if (error) throw error
+    return data.message_id
+  }
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [currentConversation?.messages])
+
+  // DB mode: load chats once authenticated
+  useEffect(() => {
+    if (!dbEnabled) return
+    ;(async () => {
+      try {
+        const chats = await loadChatsFromDb()
+        if (chats.length === 0) {
+          // No chats - just show welcome screen, don't auto-create
+          setConversations([])
+          setActiveConversation(null)
+          return
+        }
+        setConversations(chats)
+        // Keep current selection if it exists in loaded chats, otherwise show welcome screen
+        setActiveConversation((prev) => (prev && chats.some(c => c.id === prev) ? prev : null))
+      } catch (e) {
+        console.error(e)
+        showToast('Failed to load chats')
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbEnabled, authUser?.id])
+
+  // DB mode: load messages for active chat
+  useEffect(() => {
+    if (!dbEnabled || !activeConversation) return
+    ;(async () => {
+      try {
+        const msgs = await loadMessagesFromDb(activeConversation)
+        setConversations(prev =>
+          prev.map(c => (c.id === activeConversation ? { ...c, messages: msgs } : c))
+        )
+      } catch (e) {
+        console.error(e)
+        showToast('Failed to load messages')
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbEnabled, activeConversation])
+
+  // Persist settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('n8nWebhookUrl', n8nWebhookUrl)
+  }, [n8nWebhookUrl])
+
+  // Load agents when user changes (user-scoped storage)
+  useEffect(() => {
+    if (!authUser?.id) {
+      setAgents([])
+      setSelectedAgent(null)
+      return
+    }
+    const userAgentsKey = `agents_${authUser.id}`
+    const userSelectedKey = `selectedAgent_${authUser.id}`
+    const savedAgents = localStorage.getItem(userAgentsKey)
+    const savedSelected = localStorage.getItem(userSelectedKey)
+    setAgents(savedAgents ? JSON.parse(savedAgents) : [])
+    setSelectedAgent(savedSelected ? JSON.parse(savedSelected) : null)
+  }, [authUser?.id])
+
+  // Save agents with user-scoped key
+  useEffect(() => {
+    if (!authUser?.id) return
+    localStorage.setItem(`agents_${authUser.id}`, JSON.stringify(agents))
+  }, [agents, authUser?.id])
+
+  useEffect(() => {
+    if (!authUser?.id) return
+    localStorage.setItem(`selectedAgent_${authUser.id}`, JSON.stringify(selectedAgent))
+  }, [selectedAgent, authUser?.id])
+
+
+  useEffect(() => {
+    localStorage.setItem('searchUrl', searchUrl)
+  }, [searchUrl])
+
+
+  useEffect(() => {
+    localStorage.setItem('openRouterApiKey', openRouterApiKey)
+  }, [openRouterApiKey])
+
+  // Load openRouterAgents when user changes
+  useEffect(() => {
+    if (!authUser?.id) {
+      setOpenRouterAgents([])
+      return
+    }
+    const key = `openRouterAgents_${authUser.id}`
+    const saved = localStorage.getItem(key)
+    setOpenRouterAgents(saved ? JSON.parse(saved) : [])
+  }, [authUser?.id])
+
+  // Save openRouterAgents with user-scoped key
+  useEffect(() => {
+    if (!authUser?.id) return
+    localStorage.setItem(`openRouterAgents_${authUser.id}`, JSON.stringify(openRouterAgents))
+  }, [openRouterAgents, authUser?.id])
+
+  // Persist LM Studio settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('lmStudioBaseUrl', lmStudioBaseUrl)
+  }, [lmStudioBaseUrl])
+
+  useEffect(() => {
+    localStorage.setItem('lmStudioApiKey', lmStudioApiKey)
+  }, [lmStudioApiKey])
+
+  useEffect(() => {
+    localStorage.setItem('lmStudioConnectState', lmStudioConnectState)
+  }, [lmStudioConnectState])
+
+  useEffect(() => {
+    localStorage.setItem('lmStudioModels', JSON.stringify(lmStudioModels))
+  }, [lmStudioModels])
+
+  // Load lmStudioAgents when user changes
+  useEffect(() => {
+    if (!authUser?.id) {
+      setLmStudioAgents([])
+      return
+    }
+    const key = `lmStudioAgents_${authUser.id}`
+    const saved = localStorage.getItem(key)
+    setLmStudioAgents(saved ? JSON.parse(saved) : [])
+  }, [authUser?.id])
+
+  // Save lmStudioAgents with user-scoped key
+  useEffect(() => {
+    if (!authUser?.id) return
+    localStorage.setItem(`lmStudioAgents_${authUser.id}`, JSON.stringify(lmStudioAgents))
+  }, [lmStudioAgents, authUser?.id])
+
+  useEffect(() => {
+    localStorage.setItem('openRouterModels', JSON.stringify(openRouterModels))
+  }, [openRouterModels])
+
+  useEffect(() => {
+    localStorage.setItem('openRouterConnectState', openRouterConnectState)
+  }, [openRouterConnectState])
+
+  useEffect(() => {
+    localStorage.setItem('openAiApiKey', openAiApiKey)
+  }, [openAiApiKey])
+
+  useEffect(() => {
+    localStorage.setItem('mcpServers', JSON.stringify(mcpServers))
+  }, [mcpServers])
+
+  useEffect(() => {
+    localStorage.setItem('ocrModel', ocrModel)
+  }, [ocrModel])
+
+  useEffect(() => {
+    localStorage.setItem('ocrAutoProcessChatUploads', ocrAutoProcessChatUploads.toString())
+  }, [ocrAutoProcessChatUploads])
+
+  useEffect(() => {
+    localStorage.setItem('ocrAutoIngestToRag', ocrAutoIngestToRag.toString())
+  }, [ocrAutoIngestToRag])
+
+  useEffect(() => {
+    localStorage.setItem('ocrAutoPostSummaryToChat', ocrAutoPostSummaryToChat.toString())
+  }, [ocrAutoPostSummaryToChat])
+
+  useEffect(() => {
+    localStorage.setItem('imageGenModel', imageGenModel)
+  }, [imageGenModel])
+
+  useEffect(() => {
+    localStorage.setItem('autoImageGenFromChat', autoImageGenFromChat.toString())
+  }, [autoImageGenFromChat])
+
+  const filteredOpenRouterModels = useMemo(() => {
+    const q = openRouterModelFilter.trim() // case-sensitive search
+    const sorted = [...(openRouterModels || [])].sort((a, b) => {
+      const aid = a?.id || ''
+      const bid = b?.id || ''
+      return aid.localeCompare(bid, undefined, { numeric: true })
+    })
+
+    if (!q) return sorted
+
+    return sorted.filter((m) => {
+      const id = m?.id || ''
+      const name = m?.name || ''
+      const desc = m?.description || ''
+      return id.includes(q) || name.includes(q) || desc.includes(q)
+    })
+  }, [openRouterModels, openRouterModelFilter])
+
+  const normalizeOpenAiCompatibleBaseUrl = (raw) => {
+    const v = String(raw || '').trim()
+    if (!v) return ''
+    // Ensure it ends with /v1 for OpenAI-compatible servers (LM Studio, etc.)
+    if (/\/v1\/?$/.test(v)) return v.replace(/\/+$/, '')
+    return v.replace(/\/+$/, '') + '/v1'
+  }
+
+  const filteredLmStudioModels = useMemo(() => {
+    const q = (lmStudioModelFilter || '').trim().toLowerCase()
+    const sorted = [...(lmStudioModels || [])].sort((a, b) => {
+      const aid = a?.id || ''
+      const bid = b?.id || ''
+      return aid.localeCompare(bid, undefined, { numeric: true })
+    })
+    if (!q) return sorted
+    return sorted.filter((m) => {
+      const id = (m?.id || '').toLowerCase()
+      const name = (m?.name || '').toLowerCase()
+      return id.includes(q) || name.includes(q)
+    })
+  }, [lmStudioModels, lmStudioModelFilter])
+
+  const allAgents = useMemo(() => {
+    const n8nAgents = (agents || []).map(a => ({ ...a, provider: a.provider || 'n8n' }))
+    const orAgents = (openRouterAgents || []).map(a => ({ ...a, provider: 'openrouter' }))
+    const lmAgents = (lmStudioAgents || []).map(a => ({ ...a, provider: 'lmstudio' }))
+    return [...orAgents, ...lmAgents, ...n8nAgents]
+  }, [agents, openRouterAgents, lmStudioAgents])
+
+  // Function to handle opening file in code editor - called by event handler
+  const openFileInCodeEditor = useRef((filename, code, language, conversationId, conversationTitle) => {
+    // This ref will be updated with the actual function after component definitions
+  })
+
+  // Function to add code to canvas - called by event handler
+  const addCodeToCanvas = useRef((code, language) => {
+    const l = (language || '').toLowerCase()
+    const target =
+      ['css', 'scss'].includes(l) ? 'css'
+        : ['js', 'jsx', 'ts', 'tsx', 'javascript', 'typescript'].includes(l) ? 'js'
+          : 'html'
+
+    const separator =
+      target === 'html'
+        ? '\n<!-- --- Added code block --- -->\n'
+        : target === 'css'
+          ? '\n\n/* --- Added code block --- */\n'
+          : '\n\n// --- Added code block ---\n'
+
+    setCanvasFiles(prev => {
+      const existing = prev[target] || ''
+      const next = existing.trim() ? existing + separator + code : code
+      return { ...prev, [target]: next }
+    })
+
+    setCanvasActiveTab(target)
+    setCanvasOpen(true)
+  })
+
+  // Set up click handlers for code blocks and file cards using event delegation
+  useEffect(() => {
+    const handleCodeBlockClick = (e) => {
+      // Handle copy button click (code block)
+      const copyBtn = e.target.closest('.code-block-copy')
+      if (copyBtn) {
+        const wrapper = copyBtn.closest('.code-block-wrapper')
+        const codeElement = wrapper?.querySelector('code')
+        if (codeElement) {
+          const text = codeElement.textContent
+          navigator.clipboard.writeText(text).then(() => {
+            copyBtn.classList.add('copied')
+            setTimeout(() => copyBtn.classList.remove('copied'), 2000)
+          })
+        }
+        return
+      }
+
+      // Handle add to canvas button click
+      const canvasBtn = e.target.closest('.code-block-canvas')
+      if (canvasBtn) {
+        const wrapper = canvasBtn.closest('.code-block-wrapper')
+        const codeElement = wrapper?.querySelector('code')
+        if (codeElement) {
+          const rawB64 = codeElement.dataset.raw
+          const code = rawB64 ? safeAtob(rawB64) : codeElement.textContent
+          const language = codeElement.dataset.lang || 'html'
+
+          console.log('Canvas button clicked, adding:', language)
+          addCodeToCanvas.current(code, language)
+
+          // Visual feedback
+          canvasBtn.classList.add('added')
+          setTimeout(() => canvasBtn.classList.remove('added'), 1500)
+        }
+        return
+      }
+
+      // Handle "Open" button click on file card
+      const openBtn = e.target.closest('.code-file-open')
+      if (openBtn) {
+        const card = openBtn.closest('.code-file-card')
+        if (card) {
+          const filename = card.dataset.filename
+          const rawB64 = card.dataset.raw
+          const lang = card.dataset.lang
+          const code = rawB64 ? safeAtob(rawB64) : ''
+
+          // Find conversation context from the message element
+          const messageEl = card.closest('.message')
+          const conversationId = messageEl?.dataset?.conversationId
+
+          openFileInCodeEditor.current(filename, code, lang, conversationId, null)
+
+          // Visual feedback
+          openBtn.textContent = 'Opened!'
+          setTimeout(() => { openBtn.textContent = 'Open' }, 1500)
+        }
+        return
+      }
+
+      // Handle "Copy" button click on file card
+      const fileCopyBtn = e.target.closest('.code-file-copy')
+      if (fileCopyBtn) {
+        const card = fileCopyBtn.closest('.code-file-card')
+        if (card) {
+          const rawB64 = card.dataset.raw
+          const code = rawB64 ? safeAtob(rawB64) : ''
+          navigator.clipboard.writeText(code).then(() => {
+            fileCopyBtn.textContent = 'Copied!'
+            setTimeout(() => { fileCopyBtn.textContent = 'Copy' }, 2000)
+          })
+        }
+        return
+      }
+    }
+
+    document.addEventListener('click', handleCodeBlockClick)
+    return () => {
+      document.removeEventListener('click', handleCodeBlockClick)
+    }
+  }, [])
+
+  const activeCanvasCode = canvasFiles[canvasActiveTab] || ''
+
+  const highlightedCanvasHtml = useMemo(() => {
+    const escaped = escapeHtmlText(activeCanvasCode)
+    const highlighted = highlightCode(escaped, canvasActiveTab)
+    // Keep the highlight layer aligned with textarea line wrapping
+    return highlighted
+  }, [activeCanvasCode, canvasActiveTab])
+
+  const syncCanvasScroll = () => {
+    const ta = canvasEditorRef.current
+    const pre = canvasHighlightRef.current
+    if (!ta || !pre) return
+    pre.scrollTop = ta.scrollTop
+    pre.scrollLeft = ta.scrollLeft
+  }
+
+  // Run code in canvas iframe (opens preview modal)
+  const runCanvasCode = () => {
+    setPreviewOpen(true)
+    // Wait for modal to render, then write to iframe
+    setTimeout(() => {
+      if (!canvasIframeRef.current) return
+      
+      const iframe = canvasIframeRef.current
+      const doc = iframe.contentDocument || iframe.contentWindow.document
+
+      const html = canvasFiles.html || ''
+      const css = canvasFiles.css || ''
+      const js = (canvasFiles.js || '').replace(/<\/script>/gi, '<\\/script>')
+
+      const looksLikeFullDoc =
+        /<!doctype/i.test(html) || /<html[\s>]/i.test(html) || /<head[\s>]/i.test(html) || /<body[\s>]/i.test(html)
+
+      const errorWrapperStart = `try {\n`
+      const errorWrapperEnd = `\n} catch(e) {\n  document.body.innerHTML = '<pre style="color:#dc2626;padding:20px;">Error: ' + e.message + '</pre>';\n}\n`
+
+      let htmlContent = ''
+
+      if (looksLikeFullDoc) {
+        // Start from the provided full HTML document
+        htmlContent = html
+
+        // Remove common external placeholders so the combined inline CSS/JS wins
+        htmlContent = htmlContent.replace(/<link[^>]*href=["']style\.css["'][^>]*>\s*/gi, '')
+        htmlContent = htmlContent.replace(/<script[^>]*src=["']script\.js["'][^>]*>\s*<\/script>\s*/gi, '')
+
+        // Inject CSS before </head>
+        if (css.trim()) {
+          if (/<\/head>/i.test(htmlContent)) {
+            htmlContent = htmlContent.replace(/<\/head>/i, `<style>${css}</style></head>`)
+          } else {
+            htmlContent = `<style>${css}</style>\n` + htmlContent
+          }
+        }
+
+        // Inject JS before </body> (wrapped with try/catch)
+        if (js.trim()) {
+          const scriptTag = `<script>\n${errorWrapperStart}${js}${errorWrapperEnd}</script>`
+          if (/<\/body>/i.test(htmlContent)) {
+            htmlContent = htmlContent.replace(/<\/body>/i, `${scriptTag}</body>`)
+          } else {
+            htmlContent = htmlContent + `\n${scriptTag}\n`
+          }
+        }
+      } else {
+        // Treat as fragment: wrap it
+        const htmlBody = html.trim() ? html : '<div id="root"></div>'
+        htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body{font-family:system-ui;margin:0;padding:20px;background:#fff;color:#111;}
+  </style>
+  <style>${css}</style>
+</head>
+<body>
+${htmlBody}
+<script>
+${errorWrapperStart}${js}${errorWrapperEnd}
+</script>
+</body>
+</html>`
+      }
+      
+      doc.open()
+      doc.write(htmlContent)
+      doc.close()
+    }, 100)
+  }
+
+  const clearCanvas = () => {
+    setCanvasFiles({ html: '', css: '', js: '' })
+    setCanvasOpen(false)
+    if (canvasIframeRef.current) {
+      const doc = canvasIframeRef.current.contentDocument
+      doc.open()
+      doc.write('')
+      doc.close()
+    }
+  }
+
+  const createNewChat = () => {
+    if (dbEnabled) {
+      ;(async () => {
+        try {
+          const chat = await createChatInDb()
+          setConversations(prev => [chat, ...prev])
+          setActiveConversation(chat.id)
+        } catch (e) {
+          console.error(e)
+          showToast('Failed to create chat')
+        }
+      })()
+      return
+    }
+
+    const newId = crypto.randomUUID()
+    setConversations(prev => [...prev, { id: newId, title: 'New chat', messages: [] }])
+    setActiveConversation(newId)
+  }
+
+  const deleteConversation = (id) => {
+    if (dbEnabled) {
+      ;(async () => {
+        try {
+          await deleteChatInDb(id)
+          startTransition(() => {
+          setConversations(prev => {
+            const next = prev.filter(c => c.id !== id)
+              // If we deleted the active chat, switch to another or clear
+            if (activeConversation === id) {
+              const fallback = next[0]?.id ?? null
+                startTransition(() => setActiveConversation(fallback)) // null if no chats left
+            }
+            return next
+            })
+          })
+        } catch (e) {
+          console.error(e)
+          showToast('Failed to delete chat')
+        }
+      })()
+      return
+    }
+
+    startTransition(() => {
+    setConversations(prev => {
+      const next = prev.filter(c => c.id !== id)
+        if (activeConversation === id) {
+          startTransition(() => setActiveConversation(next[0]?.id ?? null)) // null if no chats left
+        }
+      return next
+      })
+    })
+  }
+
+  const simulateResponse = (userMessage) => {
+    const responses = [
+      "That's an interesting question! Let me think about that for a moment. Based on what you've shared, I can provide some helpful insights that might guide you in the right direction.",
+      "I understand what you're asking. Here's my perspective on that topic. There are multiple angles to consider, and I'll try to cover the most important aspects for you.",
+      "Great question! There are several ways to approach this. Let me break it down into manageable parts so you can better understand the concepts involved.",
+      "I'd be happy to help you with that. Let me explain in detail. This is a topic that many people find interesting, and there's quite a bit to unpack here.",
+      "That's a thoughtful observation. Here's what I think about it. The key considerations include both practical and theoretical aspects that we should explore.",
+    ]
+    return responses[Math.floor(Math.random() * responses.length)]
+  }
+
+  // Copy message to clipboard
+  const handleCopy = async (content, messageId) => {
+    try {
+      await navigator.clipboard.writeText(content)
+      setCopiedMessageId(messageId)
+      showToast('Copied to clipboard!')
+      setTimeout(() => setCopiedMessageId(null), 2000)
+    } catch (err) {
+      showToast('Failed to copy')
+    }
+  }
+
+  // Handle thumbs up/down reactions
+  const handleReaction = (messageId, type) => {
+    // Keep this super fast: avoid toasts (extra renders) and run as a transition.
+    startTransition(() => {
+    setReactions(prev => {
+      const current = prev[messageId]
+      if (current === type) {
+          const next = { ...prev }
+          delete next[messageId]
+          return next
+        }
+      return { ...prev, [messageId]: type }
+      })
+    })
+  }
+
+  // Share/Export message
+  const handleShare = async (content) => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'ChatGPT Response',
+          text: content,
+        })
+      } catch (err) {
+        if (err.name !== 'AbortError') {
+          // Fallback to copy
+          await navigator.clipboard.writeText(content)
+          showToast('Copied to clipboard!')
+        }
+      }
+    } else {
+      // Fallback: copy to clipboard
+      await navigator.clipboard.writeText(content)
+      showToast('Copied to clipboard!')
+    }
+  }
+
+  // Regenerate response
+  const handleRegenerate = (messageId) => {
+    if (isTyping) return
+    
+    setConversations(prev => prev.map(conv => {
+      if (conv.id === activeConversation) {
+        // Find the message index and get the user message before it
+        const messageIndex = conv.messages.findIndex(m => m.id === messageId)
+        if (messageIndex === -1) return conv
+        
+        // Remove the assistant message
+        const newMessages = conv.messages.slice(0, messageIndex)
+        return { ...conv, messages: newMessages }
+      }
+      return conv
+    }))
+
+    // Find the last user message
+    const conv = conversations.find(c => c.id === activeConversation)
+    const messageIndex = conv.messages.findIndex(m => m.id === messageId)
+    const userMessage = conv.messages[messageIndex - 1]
+
+    if (userMessage && userMessage.role === 'user') {
+      setIsTyping(true)
+      setTimeout(() => {
+        const assistantMessage = {
+          id: Date.now(),
+          role: 'assistant',
+          content: simulateResponse(userMessage.content)
+        }
+
+        setConversations(prev => prev.map(conv => {
+          if (conv.id === activeConversation) {
+            return {
+              ...conv,
+              messages: [...conv.messages, assistantMessage]
+            }
+          }
+          return conv
+        }))
+        setIsTyping(false)
+        setTypingStatus('')
+        showToast('Response regenerated')
+      }, 1000 + Math.random() * 1000)
+    }
+  }
+
+  const handleSubmit = async (e, messageContent = null) => {
+    if (e) e.preventDefault()
+    // Get message content from parameter or from ref
+    const inputText = messageContent || chatInputRef.current?.getValue() || ''
+    if (!inputText.trim() || isTyping) return
+ 
+    // New generation run (used to ignore late responses)
+    const runId = ++generationRunIdRef.current
+    // Cancel any previous run
+    if (generationAbortRef.current) {
+      try { generationAbortRef.current.abort() } catch {}
+    }
+    const abortController = new AbortController()
+    generationAbortRef.current = abortController
+
+    // If we're in DB mode and the user is on the welcome screen (no active chat),
+    // create a chat first so message inserts pass RLS.
+    let chatIdForThisTurn = activeConversation
+    if (dbEnabled) {
+      if (!authUser?.id) {
+        showToast('Please sign in again')
+        return
+      }
+      if (!chatIdForThisTurn) {
+        try {
+          const chat = await createChatInDb()
+          setConversations((prev) => [chat, ...(Array.isArray(prev) ? prev : [])])
+          setActiveConversation(chat.id)
+          chatIdForThisTurn = chat.id
+        } catch (err) {
+          console.error(err)
+          showToast('Failed to create chat')
+          return
+        }
+      }
+    }
+ 
+    // Start building user message with potential attachments
+    const userMessageBase = {
+      id: Date.now(),
+      role: 'user',
+      content: inputText.trim()
+    }
+
+    let attachments = []
+    
+    // Helper to convert file to base64 data URL for persistence
+    const fileToDataUrl = (file) => new Promise((resolve) => {
+      if (!file.type?.startsWith('image/')) {
+        resolve(null)
+        return
+      }
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => resolve(null)
+      reader.readAsDataURL(file)
+    })
+    
+    // Handle file uploads - skip mock upload when using n8n agent
+    if (attachedFiles.length > 0) {
+      if (selectedAgent) {
+        // When using n8n agent, convert images to base64 for persistence
+        setAttachmentProgress({})
+        attachments = await Promise.all(attachedFiles.map(async (a) => {
+          const dataUrl = await fileToDataUrl(a.file)
+          return {
+          id: a.id,
+          name: a.name,
+          size: a.size,
+          type: a.type,
+            url: dataUrl || a.preview || null
+          }
+        }))
+      } else {
+        // For default model, try mock upload
+        try {
+          const mod = await (async () => {
+            try {
+              const m = await import('./utils/uploadMock.js')
+              return m
+            } catch (importErr) {
+              console.error('Failed to import uploadMock:', importErr)
+              throw new Error('File upload not available for default model')
+            }
+          })()
+          
+          const uploads = await Promise.all(
+            attachedFiles.map(a => {
+              if (a.size > 10 * 1024 * 1024) {
+                throw new Error('One or more files exceed 10MB')
+              }
+              
+              return new Promise(async (resolve) => {
+                const total = 50 + Math.random() * 350
+                let elapsed = 0
+                const step = 20
+                // Pre-convert to base64 for images
+                const dataUrl = await fileToDataUrl(a.file)
+                const tick = () => {
+                  elapsed += step
+                  const p = Math.min(100, Math.round((elapsed / total) * 100))
+                  setAttachmentProgress(prev => ({ ...prev, [a.id]: p }))
+                  if (p < 100) {
+                    setTimeout(tick, 20)
+                  } else {
+                    // Create mock upload result with persistent data URL
+                    resolve({
+                      name: a.name,
+                      size: a.size,
+                      type: a.type,
+                      url: dataUrl || a.preview || null
+                    })
+                  }
+                }
+                tick()
+              })
+            })
+          )
+          
+          attachments = uploads.map((u, idx) => ({
+            id: attachedFiles[idx].id,
+            name: u.name,
+            size: u.size,
+            type: u.type,
+            url: u.url
+          }))
+          
+          setAttachmentProgress({})
+        } catch (err) {
+          console.error('Upload error:', err)
+          showToast(err.message || 'File upload not available. Select an n8n agent to use file attachments.')
+          return
+        }
+      }
+    }
+  
+    // Use pre-processed OCR results (processed on file attach)
+    const ocrContextForThisTurn = preProcessedOcr.ocrContext || ''
+    
+    // Clear pre-processed OCR for next message
+    setPreProcessedOcr({ ocrContext: '', postedMessage: '' })
+
+    // Determine title (first message)
+    const currentConv = conversations.find(c => c.id === (chatIdForThisTurn || activeConversation))
+    const computedTitle =
+      currentConv && currentConv.messages.length === 0
+        ? inputText.slice(0, 30) + (inputText.length > 30 ? '...' : '')
+        : currentConv?.title || 'New chat'
+
+    // In DB mode, persist title + user message first (so refresh keeps it)
+    let userMessageId = Date.now()
+    if (dbEnabled) {
+      try {
+        if (currentConv?.messages.length === 0) {
+          await supabase.from('chats').update({ title: computedTitle }).eq('chat_id', chatIdForThisTurn)
+        }
+        userMessageId = await insertMessageInDb(chatIdForThisTurn, 'user', inputText.trim())
+      } catch (e) {
+        console.error(e)
+        showToast('Failed to save message')
+      }
+    }
+
+    const userMessage = {
+      ...userMessageBase,
+      id: userMessageId,
+      attachments,
+      // Inline render flag for bubble rendering
+      _attachmentsInline: true
+    }
+
+    setConversations(prev =>
+      prev.map(conv => {
+        if (conv.id === (chatIdForThisTurn || activeConversation)) {
+          return {
+            ...conv,
+            title: computedTitle,
+            messages: [...conv.messages, userMessage],
+          }
+        }
+        return conv
+      })
+    )
+    chatInputRef.current?.clear()
+    setAttachedFiles([])
+    // Revoke any previews if exist
+    attachedFiles.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview) })
+    setIsTyping(true)
+
+    try {
+      // OCR context is passed to the AI so it can give one comprehensive response
+      // (No longer posting OCR as a separate message - AI will include analysis in its response)
+
+      let responseContent
+      console.log('Message routing check:', { searchUrl, hasSelectedAgent: !!selectedAgent })
+      
+        const imgReq = isImageGenRequest(userMessage.content)
+        const shouldAuto =
+          imgReq.isRequest &&
+          (imgReq.explicit || autoImageGenFromChat) &&
+          openAiApiKey.trim()
+
+        if (shouldAuto) {
+        setTypingStatus('image')
+          const prompt = imgReq.prompt || ''
+          if (!prompt.trim()) {
+            throw new Error('Use `/image your prompt here` to generate an image.')
+          }
+        const url = await openAiGenerateImage(prompt, abortController.signal)
+        // Permanent storage in Supabase (Gallery)
+        let savedToGallery = false
+          if (dbEnabled) {
+            try {
+            await persistGeneratedImage({ prompt, model: imageGenModel || 'dall-e-3', dataUrl: url })
+            savedToGallery = true
+            showToast('Image saved to gallery!')
+            } catch (e) {
+              console.error('Failed to persist generated image:', e)
+            showToast('Image generated but failed to save to gallery: ' + (e.message || 'Unknown error'))
+            }
+          }
+          responseContent =
+          `**Image generated** (model: \`${imageGenModel || 'dall-e-3'}\`)${savedToGallery ? ' ✓ Saved to gallery' : ''}\n\n` +
+            `Prompt: ${prompt}\n\n` +
+            `![Generated image](${url})`
+        } else if (selectedAgent) {
+        setTypingStatus('generating')
+        responseContent = await sendMessageToAgent(userMessage.content, attachments, ocrContextForThisTurn, abortController.signal)
+        } else {
+        setTypingStatus('generating')
+          await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000))
+          responseContent = simulateResponse(userMessage.content)
+        }
+
+      // If a newer run started or we were cancelled, stop here.
+      if (runId !== generationRunIdRef.current || abortController.signal.aborted) return
+      let assistantMessageId = Date.now() + 1
+      if (dbEnabled) {
+        try {
+          assistantMessageId = await insertMessageInDb(chatIdForThisTurn, 'assistant', responseContent)
+        } catch (e) {
+          console.error(e)
+        }
+      }
+
+      const assistantMessage = { id: assistantMessageId, role: 'assistant', content: responseContent }
+
+      // Add message to conversation (render fully formatted immediately; no simulated streaming)
+      setConversations(prev => prev.map(conv => {
+        if (conv.id === (chatIdForThisTurn || activeConversation)) {
+          return {
+            ...conv,
+            messages: [...conv.messages, assistantMessage]
+          }
+        }
+        return conv
+      }))
+      
+      // Trigger typing animation for code blocks
+      setNewlyGeneratedMessageId(assistantMessageId)
+      // Clear after animation completes (2s for typing + fade)
+      setTimeout(() => setNewlyGeneratedMessageId(null), 2500)
+
+      // Auto-create code files in editor when AI generates them with filename syntax
+      const codeFileRegex = /```(\w+)?:([^\n]+)\n([\s\S]*?)```/g
+      let fileMatch
+      const filesToCreate = []
+      while ((fileMatch = codeFileRegex.exec(responseContent)) !== null) {
+        const [, lang, filename, code] = fileMatch
+        if (filename && filename.trim()) {
+          filesToCreate.push({ filename: filename.trim(), code: code.trim(), lang: lang || '' })
+        }
+      }
+      if (filesToCreate.length > 0) {
+        // Create project and files
+        const convTitle = currentConversation?.title || 'AI Code'
+        const project = getOrCreateChatProject(chatIdForThisTurn || activeConversation, convTitle)
+        filesToCreate.forEach(({ filename, code, lang }) => {
+          addFileToProject(project.id, filename, code, lang)
+        })
+        showToast(`Created ${filesToCreate.length} file${filesToCreate.length > 1 ? 's' : ''} in Code Editor`)
+      }
+
+      // Extract memories from this conversation turn (non-blocking)
+      if (dbEnabled && selectedAgent && !responseContent.startsWith('**Image generated**')) {
+        extractMemoriesFromConversation(userMessage.content, responseContent).catch(console.error)
+      }
+    } catch (err) {
+      // Ignore aborts (Stop generating)
+      if (err?.name === 'AbortError' || /aborted|abort/i.test(String(err?.message || ''))) {
+        return
+      }
+      showToast(err.message || 'Failed to get response')
+      if (dbEnabled) {
+        try {
+          await insertMessageInDb(chatIdForThisTurn, 'assistant', `Error: ${err.message || 'Failed to get response'}`)
+        } catch (e) {
+          console.error(e)
+        }
+      }
+      setConversations(prev => prev.map(conv => {
+        if (conv.id === (chatIdForThisTurn || activeConversation)) {
+          return {
+            ...conv,
+            messages: [...conv.messages, {
+              id: Date.now() + 1,
+              role: 'assistant',
+              content: `Error: ${err.message || 'Failed to get response'}`
+            }]
+          }
+        }
+        return conv
+      }))
+    } finally {
+      setIsTyping(false)
+      setTypingStatus('')
+    }
+  }
+
+  const stopGenerating = () => {
+    // Invalidate current run so late responses are ignored
+    generationRunIdRef.current += 1
+    if (generationAbortRef.current) {
+      try { generationAbortRef.current.abort() } catch {}
+    }
+    setIsTyping(false)
+    setTypingStatus('')
+    showToast('Stopped')
+  }
+
+  // Memoized input change handlers for smooth typing
+  const handleCodeInputChange = useCallback((e) => {
+    setCodeInput(e.target.value)
+  }, [])
+
+  // Memoized user messages for history navigation (passed to ChatTextarea)
+  const userMessagesForHistory = useMemo(() => {
+    return currentConversation?.messages
+      ?.filter(m => m.role === 'user')
+      ?.map(m => typeof m.content === 'string' ? m.content : '')
+      ?.filter(Boolean)
+      ?.reverse() || [] // Most recent first
+  }, [currentConversation?.messages])
+
+  // Close attach menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (attachMenuRef.current && !attachMenuRef.current.contains(e.target)) {
+        setShowAttachMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Close agent selector when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      // Check both main chat selector and code chat selector
+      if (!e.target.closest('.model-selector-container') &&
+          !e.target.closest('.model-selector-mini') &&
+          !e.target.closest('.model-dropdown')) {
+        setShowAgentSelector(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  // Process files for OCR immediately on attach
+  const processFilesForOcr = async (fileObjs) => {
+    if (!ocrAutoProcessChatUploads || fileObjs.length === 0 || !openAiApiKey.trim()) {
+      return
+    }
+    
+    try {
+      const ocrRes = await processChatUploadsForOcrAndRag(fileObjs)
+      setPreProcessedOcr({
+        ocrContext: ocrRes.ocrContext || '',
+        postedMessage: ocrRes.postedMessage || ''
+      })
+    } catch (e) {
+      console.error('OCR pre-processing failed:', e)
+    }
+  }
+
+  // Handle file selection
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files)
+    if (files.length === 0) return
+
+    console.log('Files selected:', files.map(f => ({ name: f.name, type: f.type, size: f.size })))
+    console.log('Selected agent:', selectedAgent?.name)
+ 
+    const newFiles = files.map(file => ({
+      id: Date.now() + Math.random(),
+      file,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+    }))
+
+    setAttachedFiles(prev => {
+      const updated = [...prev, ...newFiles]
+      // Trigger OCR processing immediately with all files
+      processFilesForOcr(updated)
+      return updated
+    })
+    setShowAttachMenu(false)
+    showToast(`${files.length} file${files.length > 1 ? 's' : ''} attached`)
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  // Remove attached file
+  const removeAttachedFile = (fileId) => {
+    setAttachedFiles(prev => {
+      const file = prev.find(f => f.id === fileId)
+      if (file?.preview) {
+        URL.revokeObjectURL(file.preview)
+      }
+      const remaining = prev.filter(f => f.id !== fileId)
+      // Re-process OCR with remaining files, or clear if none left
+      if (remaining.length > 0) {
+        processFilesForOcr(remaining)
+      } else {
+        setPreProcessedOcr({ ocrContext: '', postedMessage: '' })
+      }
+      return remaining
+    })
+  }
+
+  // Format file size
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+  }
+
+  // Get file icon based on type
+  const getFileIcon = (type) => {
+    if (type.startsWith('image/')) return 'image'
+    if (type.startsWith('video/')) return 'video'
+    if (type.startsWith('audio/')) return 'audio'
+    if (type.includes('pdf')) return 'pdf'
+    if (type.includes('word') || type.includes('document')) return 'doc'
+    if (type.includes('sheet') || type.includes('excel')) return 'sheet'
+    if (type.includes('presentation') || type.includes('powerpoint')) return 'presentation'
+    if (type.includes('zip') || type.includes('rar') || type.includes('archive')) return 'archive'
+    if (type.includes('text') || type.includes('code')) return 'code'
+    return 'file'
+  }
+
+  // Handle drag events for upload modal
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }
+
+  const handleDragLeave = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+
+    const files = Array.from(e.dataTransfer.files)
+
+    if (files.length === 0) {
+      showToast('No files dropped')
+      return
+    }
+
+    const newFiles = files.map(file => ({
+      id: Date.now() + Math.random(),
+      file,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+    }))
+
+    setAttachedFiles(prev => {
+      const updated = [...prev, ...newFiles]
+      // Trigger OCR processing immediately
+      processFilesForOcr(updated)
+      return updated
+    })
+    setShowUploadModal(false)
+    showToast(`${files.length} file${files.length > 1 ? 's' : ''} attached`)
+  }
+
+  // Chat input drag and drop handlers
+  const handleInputDragOver = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOnInput(true)
+  }
+
+  const handleInputDragLeave = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // Only set to false if we're leaving the input area entirely
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setIsDraggingOnInput(false)
+    }
+  }
+
+  const handleInputDrop = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDraggingOnInput(false)
+
+    const files = Array.from(e.dataTransfer.files)
+
+    if (files.length === 0) return
+
+    const newFiles = files.map(file => ({
+      id: Date.now() + Math.random(),
+      file,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null
+    }))
+
+    setAttachedFiles(prev => {
+      const updated = [...prev, ...newFiles]
+      // Trigger OCR processing immediately
+      processFilesForOcr(updated)
+      return updated
+    })
+    showToast(`${files.length} file${files.length > 1 ? 's' : ''} attached`)
+  }
+
+  // Handle PDF file selection from modal
+  const handlePdfSelect = (e) => {
+    const files = Array.from(e.target.files).filter(file => 
+      file.type === 'application/pdf'
+    )
+    
+    if (files.length === 0) return
+
+    const newFiles = files.map(file => ({
+      id: Date.now() + Math.random(),
+      file,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      preview: null
+    }))
+
+    setAttachedFiles(prev => {
+      const updated = [...prev, ...newFiles]
+      // Trigger OCR processing immediately
+      processFilesForOcr(updated)
+      return updated
+    })
+    setShowUploadModal(false)
+    showToast(`${files.length} PDF${files.length > 1 ? 's' : ''} attached`)
+    
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleImportAgents = async () => {
+    if (!n8nWebhookUrl.trim()) {
+      setWebhookError('Please enter a webhook URL')
+      return
+    }
+
+    setWebhookError('')
+    setImportingAgents(true)
+    try {
+      console.log('Fetching agents from:', n8nWebhookUrl)
+      
+      const response = await fetch(n8nWebhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'get_agents',
+          timestamp: new Date().toISOString()
+        })
+      })
+
+      console.log('Response status:', response.status, response.statusText)
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Error response:', errorText)
+        throw new Error(`Server error: ${response.status} - ${errorText || response.statusText}`)
+      }
+
+      const text = await response.text()
+      console.log('Raw response:', text)
+
+      let data
+      try {
+        data = JSON.parse(text)
+      } catch (parseErr) {
+        console.error('JSON parse error:', parseErr)
+        throw new Error(`Invalid JSON response: ${text.substring(0, 200)}...`)
+      }
+
+      console.log('Parsed data:', data)
+
+      let agentsArray = null
+      
+      if (Array.isArray(data)) {
+        agentsArray = data
+      } else if (data.agents && Array.isArray(data.agents)) {
+        agentsArray = data.agents
+      }
+
+      if (agentsArray) {
+        setAgents(agentsArray)
+        showToast(`Imported ${agentsArray.length} agent${agentsArray.length > 1 ? 's' : ''}`)
+        setWebhookError('')
+      } else {
+        console.error('Invalid data format:', data)
+        throw new Error('Response must be an array of agents or { "agents": [...] }')
+      }
+    } catch (err) {
+      console.error('Import error:', err)
+      
+      if (err.message && err.message.includes('Invalid JSON response')) {
+        setWebhookError(err.message)
+        showToast('Webhook returned text instead of JSON. Use "Manually Add Agent" instead.')
+      } else {
+        const errorMsg = err.message || 'Failed to import agents'
+        setWebhookError(errorMsg)
+        showToast(errorMsg)
+      }
+    } finally {
+      setImportingAgents(false)
+    }
+  }
+
+  const handleTestWebhook = async () => {
+    if (!n8nWebhookUrl.trim()) {
+      setWebhookError('Please enter a webhook URL')
+      return
+    }
+
+    setWebhookError('')
+    setTestingWebhook(true)
+    try {
+      console.log('Testing webhook:', n8nWebhookUrl)
+
+      const response = await fetch(n8nWebhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'ping',
+          timestamp: new Date().toISOString()
+        })
+      })
+
+      if (response.ok) {
+        const text = await response.text()
+        console.log('Webhook response:', text)
+        showToast('Webhook is connected! ✓')
+        setWebhookError('')
+      } else {
+        const errorText = await response.text()
+        throw new Error(`Server error: ${response.status} - ${errorText || response.statusText}`)
+      }
+    } catch (err) {
+      console.error('Webhook test error:', err)
+      const errorMsg = err.message || 'Webhook connection failed'
+      setWebhookError(errorMsg)
+      showToast(errorMsg)
+    } finally {
+      setTestingWebhook(false)
+    }
+  }
+
+  const handleAddAgent = () => {
+    if (!newAgent.name.trim()) {
+      showToast('Please enter an agent name')
+      return
+    }
+
+    const agent = {
+      id: `agent-${Date.now()}`,
+      name: newAgent.name.trim(),
+      description: newAgent.description.trim() || 'No description',
+      tags: newAgent.tags ? newAgent.tags.split(',').map(t => t.trim()).filter(t => t) : [],
+      webhookUrl: newAgent.webhookUrl.trim() || ''
+    }
+
+    setAgents(prev => [...prev, agent])
+    setNewAgent({ name: '', description: '', tags: '', webhookUrl: '' })
+    setShowAddAgentForm(false)
+    showToast(`Added "${agent.name}"`)
+  }
+
+  const handleClearWebhookError = () => {
+    setWebhookError('')
+  }
+
+  const handleDeleteAgent = (agentId) => {
+    setAgents(prev => prev.filter(agent => agent.id !== agentId))
+    showToast('Agent deleted')
+  }
+
+  const handleAddOpenRouterAgent = () => {
+    if (!newOpenRouterAgent.name.trim()) {
+      showToast('Please enter an agent name')
+      return
+    }
+    if (!newOpenRouterAgent.model.trim()) {
+      showToast('Please enter a model id')
+      return
+    }
+
+    const modelId = newOpenRouterAgent.model.trim()
+
+    const agent = {
+      id: `or-${crypto.randomUUID()}`,
+      provider: 'openrouter',
+      name: newOpenRouterAgent.name.trim(),
+      model: modelId,
+      systemPrompt: newOpenRouterAgent.systemPrompt || 'You are a helpful assistant.',
+      temperature: Number(newOpenRouterAgent.temperature ?? 0.7),
+    }
+
+    // Persist any manually-entered model ids so they show up in the dropdown later
+    setOpenRouterModels((prev) => {
+      const list = Array.isArray(prev) ? prev : []
+      if (list.some((m) => (m?.id || '') === modelId)) return list
+      return [{ id: modelId, name: modelId, description: '' }, ...list]
+    })
+
+    setOpenRouterAgents(prev => [agent, ...prev])
+    setNewOpenRouterAgent({
+      name: '',
+      model: newOpenRouterAgent.model,
+      systemPrompt: newOpenRouterAgent.systemPrompt,
+      temperature: newOpenRouterAgent.temperature,
+    })
+    showToast(`Added "${agent.name}"`)
+  }
+
+  const handleDeleteOpenRouterAgent = (agentId) => {
+    setOpenRouterAgents(prev => prev.filter(a => a.id !== agentId))
+    if (selectedAgent?.id === agentId) setSelectedAgent(null)
+    showToast('Agent deleted')
+  }
+
+  const handleDeleteLmStudioAgent = (agentId) => {
+    setLmStudioAgents(prev => prev.filter(a => a.id !== agentId))
+    if (selectedAgent?.id === agentId) setSelectedAgent(null)
+    showToast('Agent deleted')
+  }
+
+  const connectOpenRouter = async () => {
+    if (!openRouterApiKey.trim()) {
+      showToast('Add your OpenRouter API key first')
+      return
+    }
+    setOpenRouterConnectError('')
+    setOpenRouterConnectState('connecting')
+    try {
+      // 1) Load models (may be public on some setups, so not sufficient alone)
+      const resp = await fetch('https://openrouter.ai/api/v1/models', {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${openRouterApiKey.trim()}`,
+          'Content-Type': 'application/json',
+          // Optional but recommended by OpenRouter:
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'chatgpt-clone',
+        },
+      })
+      if (!resp.ok) {
+        const t = await resp.text()
+        throw new Error(`${resp.status} ${t}`)
+      }
+      const data = await resp.json()
+      const models = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : []
+      setOpenRouterModels((prev) => {
+        const prevList = Array.isArray(prev) ? prev : []
+        const prevById = new Map(prevList.map((m) => [m?.id, m]))
+
+        for (const m of models) {
+          if (!m?.id) continue
+          prevById.set(m.id, {
+            id: m.id,
+            name: m.name || m.id,
+            description: m.description || '',
+            context_length: m.context_length,
+            pricing: m.pricing,
+          })
+        }
+
+        return Array.from(prevById.values()).filter((m) => m?.id)
+      })
+
+      // 2) Validate key against an auth-required endpoint.
+      // Prefer a metadata endpoint if available; otherwise do a tiny completion.
+      let keyValidated = false
+      try {
+        const keyResp = await fetch('https://openrouter.ai/api/v1/auth/key', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${openRouterApiKey.trim()}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': window.location.origin,
+            'X-Title': 'chatgpt-clone',
+          },
+        })
+        if (keyResp.ok) {
+          keyValidated = true
+        }
+      } catch {
+        // ignore and fall back
+      }
+
+      if (!keyValidated) {
+        // Tiny completion: minimal tokens, just to confirm the key works for chat.
+        const testModel =
+          (newOpenRouterAgent?.model && String(newOpenRouterAgent.model)) ||
+          'openai/gpt-4o-mini'
+        const testResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${openRouterApiKey.trim()}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': window.location.origin,
+            'X-Title': 'chatgpt-clone',
+          },
+          body: JSON.stringify({
+            model: testModel,
+            messages: [{ role: 'user', content: 'ping' }],
+            max_tokens: 1,
+            temperature: 0,
+          }),
+        })
+        if (!testResp.ok) {
+          const t = await testResp.text()
+          // Mark as error but keep models cached
+          throw new Error(`OpenRouter auth check failed: ${testResp.status} ${t}`)
+        }
+      }
+
+      setOpenRouterConnectState('connected')
+      showToast(`Connected. Loaded ${models.length} models.`)
+    } catch (e) {
+      console.error(e)
+      setOpenRouterConnectState('error')
+      setOpenRouterConnectError(e.message || 'Failed to connect')
+      showToast('OpenRouter connection failed')
+    }
+  }
+
+  const disconnectOpenRouter = () => {
+    setOpenRouterConnectState('disconnected')
+    setOpenRouterConnectError('')
+    // keep models cached unless user clears key
+  }
+
+  const connectLmStudio = async () => {
+    const base = normalizeOpenAiCompatibleBaseUrl(lmStudioBaseUrl)
+    if (!base) {
+      showToast('Set your LM Studio base URL first (e.g. http://localhost:1234/v1)')
+      return
+    }
+    setLmStudioConnectError('')
+    setLmStudioConnectState('connecting')
+    try {
+      const headers = { 'Content-Type': 'application/json' }
+      if (lmStudioApiKey?.trim()) headers.Authorization = `Bearer ${lmStudioApiKey.trim()}`
+
+      const modelsResp = await fetch(`${base}/models`, { method: 'GET', headers })
+      const modelsText = await modelsResp.text()
+      if (!modelsResp.ok) {
+        throw new Error(
+          `Failed to load models from LM Studio (${modelsResp.status}). ` +
+            `If you see a CORS error, enable CORS in LM Studio or run the app from the same origin.\n\n` +
+            modelsText
+        )
+      }
+      let modelsJson
+      try {
+        modelsJson = JSON.parse(modelsText)
+      } catch {
+        throw new Error(`LM Studio /models did not return JSON: ${modelsText.slice(0, 200)}`)
+      }
+      const models = Array.isArray(modelsJson?.data) ? modelsJson.data : Array.isArray(modelsJson) ? modelsJson : []
+      const normalizedModels = models
+        .map((m) => ({
+          id: m?.id || m?.name || '',
+          name: m?.name || m?.id || '',
+          object: m?.object,
+        }))
+        .filter((m) => m.id)
+      setLmStudioModels(normalizedModels)
+
+      // Tiny completion test (auth + compatibility check)
+      const testModel = normalizedModels?.[0]?.id
+      if (!testModel) {
+        setLmStudioConnectState('connected')
+        showToast('Connected, but no models were returned by /models')
+        return
+      }
+      const testResp = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: testModel,
+          messages: [{ role: 'user', content: 'ping' }],
+          max_tokens: 1,
+          temperature: 0,
+        }),
+      })
+      const testText = await testResp.text()
+      if (!testResp.ok) {
+        throw new Error(`LM Studio chat test failed (${testResp.status}): ${testText}`)
+      }
+
+      setLmStudioConnectState('connected')
+      showToast(`Connected. Loaded ${normalizedModels.length} model(s).`)
+    } catch (e) {
+      console.error(e)
+      setLmStudioConnectState('error')
+      setLmStudioConnectError(e.message || 'Failed to connect')
+      showToast('LM Studio connection failed')
+    }
+  }
+
+  const disconnectLmStudio = () => {
+    setLmStudioConnectState('disconnected')
+    setLmStudioConnectError('')
+    // keep models cached
+  }
+
+  const addLmStudioModelAsAgent = (modelId) => {
+    const base = normalizeOpenAiCompatibleBaseUrl(lmStudioBaseUrl)
+    if (!base) {
+      showToast('Set your LM Studio base URL first')
+      return
+    }
+    if (!modelId) {
+      showToast('Select a model first')
+      return
+    }
+    const model = (lmStudioModels || []).find((m) => m.id === modelId)
+    const friendly = model?.name || modelId
+    const name = (newLmStudioAgent?.name || '').trim() || `LM Studio • ${friendly}`
+    const agent = {
+      id: `lmstudio_${crypto.randomUUID()}`,
+      name,
+      model: modelId,
+      baseUrl: base,
+      apiKey: lmStudioApiKey || '',
+      systemPrompt: newLmStudioAgent.systemPrompt || 'You are a helpful assistant.',
+      temperature: Number(newLmStudioAgent.temperature ?? 0.7),
+      provider: 'lmstudio',
+    }
+    setLmStudioAgents((prev) => [...(Array.isArray(prev) ? prev : []), agent])
+    setNewLmStudioAgent((prev) => ({ ...prev, name: '', model: modelId }))
+    showToast(`Added agent: ${name}`)
+  }
+
+  const mcpRequest = async ({ url, token, method, params }) => {
+    const id = mcpRpcIdRef.current++
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+    }
+    if (token?.trim()) headers.Authorization = `Bearer ${token.trim()}`
+
+    // Use proxy for known MCP servers to avoid CORS
+    let fetchUrl = url
+    try {
+      const parsed = new URL(url)
+      if (parsed.hostname === 'n8nv2.brainstormnodes.org') {
+        fetchUrl = `/api/mcp/n8nv2${parsed.pathname}`
+      }
+      // Add more proxy mappings here as needed
+    } catch {}
+
+    const resp = await fetch(fetchUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id,
+        method,
+        params: params || {},
+      }),
+    })
+    const text = await resp.text()
+    if (!resp.ok) throw new Error(`${resp.status} ${text}`)
+    
+    let data
+    // Check if response is SSE format (starts with "event:" or "data:")
+    if (text.trim().startsWith('event:') || text.trim().startsWith('data:')) {
+      // Parse SSE: extract JSON from "data:" lines
+      const lines = text.split('\n')
+      for (const line of lines) {
+        if (line.startsWith('data:')) {
+          const jsonStr = line.slice(5).trim()
+          if (jsonStr) {
+            try {
+              data = JSON.parse(jsonStr)
+              break
+            } catch {}
+          }
+        }
+      }
+      if (!data) {
+        throw new Error(`Could not parse SSE response: ${text.slice(0, 200)}`)
+      }
+    } else {
+      // Plain JSON response
+      try {
+        data = JSON.parse(text)
+      } catch {
+        throw new Error(`Invalid MCP JSON response: ${text.slice(0, 200)}`)
+      }
+    }
+    
+    if (data?.error) {
+      throw new Error(data.error?.message || 'MCP error')
+    }
+    return data?.result
+  }
+
+  // ============ GitHub API Functions ============
+  
+  const githubApi = async (endpoint, options = {}) => {
+    const headers = {
+      'Accept': 'application/vnd.github.v3+json',
+      'Authorization': `Bearer ${githubToken}`,
+      ...options.headers
+    }
+    // Use proxy to avoid CORS issues
+    const resp = await fetch(`/api/github${endpoint}`, {
+      ...options,
+      headers
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      throw new Error(err.message || `GitHub API error: ${resp.status}`)
+    }
+    if (resp.status === 204) return null
+    return resp.json()
+  }
+
+  const connectGitHub = async () => {
+    if (!githubToken.trim()) {
+      showToast('Please enter a GitHub token')
+      return
+    }
+    try {
+      const user = await githubApi('/user')
+      setGithubUser(user)
+      setGithubConnected(true)
+      localStorage.setItem('githubToken', githubToken)
+      showToast(`Connected as ${user.login}`)
+      loadGitHubRepos()
+    } catch (err) {
+      showToast(`GitHub connection failed: ${err.message}`)
+      setGithubConnected(false)
+    }
+  }
+
+  const disconnectGitHub = () => {
+    setGithubConnected(false)
+    setGithubUser(null)
+    setGithubRepos([])
+    setSelectedRepo(null)
+    setRepoFiles([])
+    setSelectedFile(null)
+    setFileContent('')
+    setRepoBranches([])
+    setRepoBranch('main')
+    setExpandedFolders({})
+    setPendingFileChanges({})
+    localStorage.removeItem('githubToken')
+    showToast('Disconnected from GitHub')
+  }
+
+  const exitRepo = () => {
+    setSelectedRepo(null)
+    setRepoFiles([])
+    setSelectedFile(null)
+    setFileContent('')
+    setRepoBranches([])
+    setRepoBranch('main')
+    setExpandedFolders({})
+    setPendingFileChanges({})
+    showToast('Back to repositories')
+  }
+
+  const loadGitHubRepos = async () => {
+    setGithubReposLoading(true)
+    try {
+      const repos = await githubApi('/user/repos?sort=updated&per_page=100')
+      setGithubRepos(repos)
+    } catch (err) {
+      showToast(`Failed to load repos: ${err.message}`)
+    } finally {
+      setGithubReposLoading(false)
+    }
+  }
+
+  const loadRepoBranches = async (owner, repo) => {
+    try {
+      const branches = await githubApi(`/repos/${owner}/${repo}/branches`)
+      setRepoBranches(branches.map(b => b.name))
+      // Try to find default branch
+      const repoInfo = await githubApi(`/repos/${owner}/${repo}`)
+      setRepoBranch(repoInfo.default_branch || 'main')
+    } catch (err) {
+      console.error('Failed to load branches:', err)
+      setRepoBranches(['main', 'master'])
+    }
+  }
+
+  const loadRepoFiles = async (owner, repo, path = '', branch = repoBranch) => {
+    setRepoFilesLoading(true)
+    try {
+      const contents = await githubApi(`/repos/${owner}/${repo}/contents/${path}?ref=${branch}`)
+      // Sort: folders first, then files
+      const sorted = Array.isArray(contents) 
+        ? contents.sort((a, b) => {
+            if (a.type === 'dir' && b.type !== 'dir') return -1
+            if (a.type !== 'dir' && b.type === 'dir') return 1
+            return a.name.localeCompare(b.name)
+          })
+        : [contents]
+      if (!path) {
+        setRepoFiles(sorted)
+      }
+      return sorted
+    } catch (err) {
+      showToast(`Failed to load files: ${err.message}`)
+      return []
+    } finally {
+      setRepoFilesLoading(false)
+    }
+  }
+
+  const loadFileContent = async (owner, repo, path, branch = repoBranch) => {
+    setFileContentLoading(true)
+    try {
+      const file = await githubApi(`/repos/${owner}/${repo}/contents/${path}?ref=${branch}`)
+      if (file.content) {
+        const content = atob(file.content)
+        setFileContent(content)
+        setSelectedFile({ ...file, decodedContent: content })
+      }
+    } catch (err) {
+      showToast(`Failed to load file: ${err.message}`)
+    } finally {
+      setFileContentLoading(false)
+    }
+  }
+
+  const createOrUpdateFile = async (owner, repo, path, content, message, sha = null) => {
+    const body = {
+      message: message || `Update ${path}`,
+      content: btoa(unescape(encodeURIComponent(content))),
+      branch: repoBranch
+    }
+    if (sha) body.sha = sha
+    
+    try {
+      await githubApi(`/repos/${owner}/${repo}/contents/${path}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      showToast(`File ${sha ? 'updated' : 'created'}: ${path}`)
+      return true
+    } catch (err) {
+      showToast(`Failed to save file: ${err.message}`)
+      return false
+    }
+  }
+
+  const deleteFile = async (owner, repo, path, sha, message) => {
+    try {
+      await githubApi(`/repos/${owner}/${repo}/contents/${path}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: message || `Delete ${path}`,
+          sha,
+          branch: repoBranch
+        })
+      })
+      showToast(`File deleted: ${path}`)
+      return true
+    } catch (err) {
+      showToast(`Failed to delete file: ${err.message}`)
+      return false
+    }
+  }
+
+  // Start editing a GitHub file
+  const startGithubEdit = () => {
+    if (!selectedFile || !fileContent) return
+    setGithubEditContent(fileContent)
+    setGithubFileEditing(true)
+  }
+
+  // Cancel GitHub file editing
+  const cancelGithubEdit = () => {
+    setGithubFileEditing(false)
+    setGithubEditContent('')
+  }
+
+  // Save GitHub file changes
+  const saveGithubFile = async () => {
+    if (!selectedRepo || !selectedFile || !githubEditContent) return
+
+    setGithubFileSaving(true)
+    try {
+      const success = await createOrUpdateFile(
+        selectedRepo.owner.login,
+        selectedRepo.name,
+        selectedFile.path,
+        githubEditContent,
+        `Update ${selectedFile.path}`,
+        selectedFile.sha
+      )
+
+      if (success) {
+        setFileContent(githubEditContent)
+        setGithubFileEditing(false)
+        setGithubEditContent('')
+        // Reload file to get new SHA
+        await loadFileContent(selectedRepo.owner.login, selectedRepo.name, selectedFile.path)
+      }
+    } catch (err) {
+      showToast(`Failed to save: ${err.message}`)
+    } finally {
+      setGithubFileSaving(false)
+    }
+  }
+
+  // Create a new file in GitHub repo
+  const createGithubFile = async () => {
+    if (!selectedRepo || !githubNewFileName.trim()) {
+      showToast('Please enter a file name')
+      return
+    }
+
+    setCreatingGithubFile(true)
+    try {
+      const success = await createOrUpdateFile(
+        selectedRepo.owner.login,
+        selectedRepo.name,
+        githubNewFileName.trim(),
+        githubNewFileContent || '// New file\n',
+        `Create ${githubNewFileName.trim()}`
+      )
+
+      if (success) {
+        setShowGithubNewFileModal(false)
+        setGithubNewFileName('')
+        setGithubNewFileContent('')
+        // Reload files
+        await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
+        showToast(`Created ${githubNewFileName.trim()}`)
+      }
+    } catch (err) {
+      showToast(`Failed to create file: ${err.message}`)
+    } finally {
+      setCreatingGithubFile(false)
+    }
+  }
+
+  // Delete a GitHub file
+  const deleteGithubFile = async () => {
+    if (!selectedRepo || !selectedFile) return
+
+    if (!confirm(`Delete "${selectedFile.path}" from ${selectedRepo.name}?`)) return
+
+    try {
+      const success = await deleteFile(
+        selectedRepo.owner.login,
+        selectedRepo.name,
+        selectedFile.path,
+        selectedFile.sha,
+        `Delete ${selectedFile.path}`
+      )
+
+      if (success) {
+        setSelectedFile(null)
+        setFileContent('')
+        setGithubFileEditing(false)
+        // Reload files
+        await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
+      }
+    } catch (err) {
+      showToast(`Failed to delete: ${err.message}`)
+    }
+  }
+
+  const selectRepo = async (repo) => {
+    setSelectedRepo(repo)
+    setSelectedFile(null)
+    setFileContent('')
+    setExpandedFolders({})
+    setPendingFileChanges({})
+    await loadRepoBranches(repo.owner.login, repo.name)
+    await loadRepoFiles(repo.owner.login, repo.name)
+  }
+
+  const createRepo = async () => {
+    const name = String(createRepoForm.name || '').trim()
+    const description = String(createRepoForm.description || '').trim()
+    const isPrivate = !!createRepoForm.private
+    if (!name) {
+      setCreateRepoError('Repository name is required')
+      return
+    }
+    // basic validation (GitHub will enforce the real rules)
+    if (!/^[A-Za-z0-9_.-]+$/.test(name)) {
+      setCreateRepoError('Use only letters, numbers, dot, underscore, and hyphen')
+      return
+    }
+
+    setCreateRepoError('')
+    setCreatingRepo(true)
+    try {
+      const repo = await githubApi('/user/repos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description: description || undefined,
+          private: isPrivate,
+          auto_init: true,
+        }),
+      })
+      setShowCreateRepoModal(false)
+      setCreateRepoForm({ name: '', description: '', private: true })
+      showToast(`Created repo: ${repo?.full_name || name}`)
+      await loadGitHubRepos()
+      if (repo?.id) {
+        // auto-select the newly created repo
+        await selectRepo(repo)
+      }
+    } catch (e) {
+      console.error(e)
+      setCreateRepoError(e.message || 'Failed to create repository')
+    } finally {
+      setCreatingRepo(false)
+    }
+  }
+
+  const deleteSelectedRepo = async () => {
+    if (!selectedRepo) return
+    const full = selectedRepo.full_name || `${selectedRepo.owner?.login}/${selectedRepo.name}`
+    if (deleteRepoConfirm.trim() !== full) {
+      setDeleteRepoError(`Type "${full}" to confirm deletion`)
+      return
+    }
+    setDeleteRepoError('')
+    setDeletingRepo(true)
+    try {
+      await githubApi(`/repos/${selectedRepo.owner.login}/${selectedRepo.name}`, { method: 'DELETE' })
+      setShowDeleteRepoModal(false)
+      setDeleteRepoConfirm('')
+      showToast(`Deleted repo: ${full}`)
+      exitRepo()
+      await loadGitHubRepos()
+    } catch (e) {
+      console.error(e)
+      setDeleteRepoError(e.message || 'Failed to delete repository')
+    } finally {
+      setDeletingRepo(false)
+    }
+  }
+
+  // Handle folder expansion in file tree
+  const toggleFolder = async (path) => {
+    if (expandedFolders[path]) {
+      setExpandedFolders(prev => ({ ...prev, [path]: null }))
+    } else {
+      const contents = await loadRepoFiles(
+        selectedRepo.owner.login,
+        selectedRepo.name,
+        path
+      )
+      setExpandedFolders(prev => ({ ...prev, [path]: contents }))
+    }
+  }
+
+  // Code chat handler - sends message to selected agent with GitHub context
+  const handleCodeChat = async () => {
+    if (!codeInput.trim() || codeGenerating) return
+    if (!selectedAgent) {
+      showToast('Please select an agent first')
+      return
+    }
+
+    const userMessage = codeInput.trim()
+    setCodeInput('')
+    setCodeMessages(prev => [...prev, { role: 'user', content: userMessage }])
+    setCodeGenerating(true)
+
+    try {
+      // Build context about current GitHub state
+      let githubContext = ''
+      if (selectedRepo) {
+        githubContext += `\n[Connected Repository: ${selectedRepo.full_name}]`
+        githubContext += `\n[Current Branch: ${repoBranch}]`
+        if (selectedFile) {
+          githubContext += `\n[Selected File: ${selectedFile.path}]`
+          githubContext += `\n[File Content:\n\`\`\`\n${fileContent}\n\`\`\`]`
+        }
+      }
+
+      // System prompt for code assistance
+      const systemPrompt = `You are a code assistant with access to the user's GitHub repository.
+You can help with:
+- Reading and understanding code files
+- Writing new code
+- Modifying existing code
+- Creating, updating, and deleting files
+- Explaining code structure
+
+When the user asks you to modify or create files, respond with the complete file content in a code block with the filename like:
+\`\`\`filename:path/to/file.js
+// file content here
+\`\`\`
+
+The user will then be able to apply these changes to their repository.
+
+Current GitHub Context:${githubContext || '\nNo repository selected'}
+
+Be concise but thorough. When showing code, always include the full file or the complete modified section.`
+
+      // Build messages array
+      const messagesForApi = [
+        { role: 'system', content: systemPrompt },
+        ...codeMessages.slice(-10), // Last 10 messages for context
+        { role: 'user', content: userMessage }
+      ]
+
+      let response
+      if (selectedAgent?.provider === 'openrouter') {
+        const openRouterKey = (openRouterApiKey || '').trim()
+        if (!openRouterKey) throw new Error('OpenRouter API key not set (Settings → OpenRouter)')
+        const resp = await fetch('/api/openrouter/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openRouterKey.trim()}`,
+          },
+          body: JSON.stringify({
+            model: selectedAgent.model || 'openai/gpt-4o',
+            messages: messagesForApi,
+            max_tokens: 4096,
+            temperature: Number(selectedAgent.temperature ?? 0.7),
+          })
+        })
+        const data = await resp.json()
+        if (data.error) throw new Error(data.error.message)
+        response = data.choices?.[0]?.message?.content || ''
+      } else if (selectedAgent?.provider === 'lmstudio') {
+        const base = normalizeOpenAiCompatibleBaseUrl(selectedAgent?.baseUrl || lmStudioBaseUrl)
+        if (!base) throw new Error('LM Studio base URL not set (Settings → LM Studio)')
+        if (!selectedAgent?.model) throw new Error('LM Studio agent missing model')
+        const headers = { 'Content-Type': 'application/json' }
+        const key = (selectedAgent?.apiKey || lmStudioApiKey || '').trim()
+        if (key) headers.Authorization = `Bearer ${key}`
+        const resp = await fetch(`${base}/chat/completions`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: selectedAgent.model,
+            messages: messagesForApi,
+            max_tokens: 4096,
+            temperature: Number(selectedAgent.temperature ?? 0.7),
+          })
+        })
+        const text = await resp.text()
+        if (!resp.ok) throw new Error(`LM Studio error: ${resp.status} ${text}`)
+        let data
+        try { data = JSON.parse(text) } catch { throw new Error(`LM Studio returned non-JSON response: ${text.slice(0, 200)}`) }
+        response = data.choices?.[0]?.message?.content || ''
+      } else if ((openAiApiKey || '').trim()) {
+        const resp = await fetch('/api/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${(openAiApiKey || '').trim()}`,
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o',
+            messages: messagesForApi,
+            max_tokens: 4096,
+          })
+        })
+        const data = await resp.json()
+        if (data.error) throw new Error(data.error.message)
+        response = data.choices?.[0]?.message?.content || ''
+      } else {
+        // Fall back to the agent router (n8n/mcp)
+        response = await sendMessageToAgent(userMessage, [], systemPrompt, undefined)
+      }
+
+      // Parse response for file changes - supports both explicit filenames and language-based code blocks
+      const fileChangeRegex = /```filename:([^\n]+)\n([\s\S]*?)```/g
+      let match
+      const newPendingChanges = { ...pendingFileChanges }
+      
+      // First, parse explicit filename:path code blocks
+      while ((match = fileChangeRegex.exec(response)) !== null) {
+        const filePath = match[1].trim()
+        const fileContent = match[2]
+        newPendingChanges[filePath] = {
+          content: fileContent,
+          action: 'update'
+        }
+      }
+      
+      // For local projects: Also parse standard code blocks and create discrete files
+      if (codeEditorMode === 'local' && activeLocalProject) {
+        const projectData = localProjectFiles[activeLocalProject.id] || { files: [], fileContents: {}, expandedFolders: {} }
+        const existingFiles = projectData.files || []
+        const existingContents = projectData.fileContents || {}
+        
+        // Map language to file extension
+        const langToExt = {
+          'javascript': 'js', 'js': 'js', 'jsx': 'jsx',
+          'typescript': 'ts', 'ts': 'ts', 'tsx': 'tsx',
+          'html': 'html', 'htm': 'html',
+          'css': 'css', 'scss': 'scss', 'sass': 'scss',
+          'python': 'py', 'py': 'py',
+          'json': 'json',
+          'sql': 'sql',
+          'bash': 'sh', 'shell': 'sh', 'sh': 'sh',
+          'markdown': 'md', 'md': 'md',
+          'yaml': 'yaml', 'yml': 'yaml',
+          'xml': 'xml',
+          'java': 'java',
+          'c': 'c', 'cpp': 'cpp', 'csharp': 'cs', 'cs': 'cs',
+          'go': 'go', 'rust': 'rs', 'ruby': 'rb', 'php': 'php',
+          'swift': 'swift', 'kotlin': 'kt',
+        }
+        
+        // Map extension to default filename
+        const extToDefaultName = {
+          'js': 'script.js', 'jsx': 'App.jsx', 'ts': 'script.ts', 'tsx': 'App.tsx',
+          'html': 'index.html', 'css': 'styles.css', 'scss': 'styles.scss',
+          'py': 'main.py', 'json': 'data.json', 'sql': 'query.sql',
+          'sh': 'script.sh', 'md': 'README.md', 'yaml': 'config.yaml',
+          'xml': 'data.xml', 'java': 'Main.java',
+          'c': 'main.c', 'cpp': 'main.cpp', 'cs': 'Program.cs',
+          'go': 'main.go', 'rs': 'main.rs', 'rb': 'main.rb', 'php': 'index.php',
+          'swift': 'main.swift', 'kt': 'Main.kt',
+        }
+        
+        // Parse standard code blocks with language specifiers
+        const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g
+        let codeMatch
+        const generatedFiles = {}
+        const fileTypeCounters = {}
+        
+        while ((codeMatch = codeBlockRegex.exec(response)) !== null) {
+          const lang = (codeMatch[1] || '').toLowerCase()
+          const code = codeMatch[2].trim()
+          
+          // Skip if this was already matched by filename: pattern
+          if (response.substring(codeMatch.index - 10, codeMatch.index).includes('filename:')) {
+            continue
+          }
+          
+          if (!lang || !code) continue
+          
+          const ext = langToExt[lang]
+          if (!ext) continue
+          
+          // Find existing file with matching extension or create new one
+          const existingFile = existingFiles.find(f => 
+            f.type === 'file' && f.name.endsWith('.' + ext)
+          )
+          
+          let targetPath
+          if (existingFile) {
+            targetPath = existingFile.path
+          } else {
+            // Create new file with unique name if multiple of same type
+            fileTypeCounters[ext] = (fileTypeCounters[ext] || 0) + 1
+            const count = fileTypeCounters[ext]
+            const defaultName = extToDefaultName[ext] || `file.${ext}`
+            
+            if (count === 1) {
+              targetPath = defaultName
+            } else {
+              const baseName = defaultName.replace(`.${ext}`, '')
+              targetPath = `${baseName}_${count}.${ext}`
+            }
+          }
+          
+          // Accumulate code for the same file type
+          if (generatedFiles[targetPath]) {
+            generatedFiles[targetPath] += '\n\n' + code
+          } else {
+            generatedFiles[targetPath] = code
+          }
+        }
+        
+        // Update local project files with generated code
+        if (Object.keys(generatedFiles).length > 0) {
+          const updatedFiles = [...existingFiles]
+          const updatedContents = { ...existingContents }
+          const filesToOpen = []
+          
+          Object.entries(generatedFiles).forEach(([filePath, content]) => {
+            const existingFileIndex = updatedFiles.findIndex(f => f.path === filePath)
+            
+            if (existingFileIndex === -1) {
+              // Create new file
+              const newFile = {
+                id: generateId(),
+                name: filePath.split('/').pop(),
+                path: filePath,
+                type: 'file'
+              }
+              updatedFiles.push(newFile)
+            }
+            
+            updatedContents[filePath] = content
+            filesToOpen.push({ name: filePath.split('/').pop(), path: filePath, type: 'file' })
+          })
+          
+          // Save to local project files
+          setLocalProjectFiles(prev => {
+            const updated = { ...prev }
+            updated[activeLocalProject.id] = {
+              ...projectData,
+              files: updatedFiles,
+              fileContents: updatedContents
+            }
+            localStorage.setItem('codeEditorProjectFiles', JSON.stringify(updated))
+            return updated
+          })
+          
+          // Update project's updatedAt
+          setLocalProjects(prev => prev.map(p =>
+            p.id === activeLocalProject.id ? { ...p, updatedAt: new Date().toISOString() } : p
+          ))
+          
+          // Open generated files in tabs
+          filesToOpen.forEach((file, index) => {
+            setTimeout(() => {
+              openFileInTab(file, activeLocalProject.id)
+            }, index * 100) // Stagger to avoid race conditions
+          })
+          
+          showToast(`Generated ${Object.keys(generatedFiles).length} file(s)`)
+        }
+      }
+      
+      // For GitHub mode, keep the pending changes behavior
+      if (Object.keys(newPendingChanges).length > Object.keys(pendingFileChanges).length) {
+        setPendingFileChanges(newPendingChanges)
+      }
+
+      setCodeMessages(prev => [...prev, { role: 'assistant', content: response }])
+    } catch (err) {
+      showToast(`Error: ${err.message}`)
+      setCodeMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: `Error: ${err.message}` 
+      }])
+    } finally {
+      setCodeGenerating(false)
+    }
+  }
+
+  // Apply pending file changes to GitHub
+  const applyPendingChange = async (path) => {
+    if (!selectedRepo || !pendingFileChanges[path]) return
+    
+    const change = pendingFileChanges[path]
+    const owner = selectedRepo.owner.login
+    const repo = selectedRepo.name
+
+    // Check if file exists to get SHA
+    let sha = null
+    try {
+      const existing = await githubApi(`/repos/${owner}/${repo}/contents/${path}?ref=${repoBranch}`)
+      sha = existing.sha
+    } catch {
+      // File doesn't exist, will create
+    }
+
+    const success = await createOrUpdateFile(
+      owner,
+      repo,
+      path,
+      change.content,
+      `Update ${path} via Code Assistant`,
+      sha
+    )
+
+    if (success) {
+      setPendingFileChanges(prev => {
+        const next = { ...prev }
+        delete next[path]
+        return next
+      })
+      // Refresh file tree
+      await loadRepoFiles(owner, repo)
+    }
+  }
+
+  // =============== LOCAL CODE EDITOR FUNCTIONS ===============
+
+  // Save local projects to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem('codeEditorProjects', JSON.stringify(localProjects))
+  }, [localProjects])
+
+  // Generate unique ID
+  const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+
+  // Get project templates
+  const getProjectTemplate = (type) => {
+    const templates = {
+      html: [
+        { name: 'index.html', path: 'index.html', type: 'file', content: '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>My Project</title>\n  <link rel="stylesheet" href="styles.css">\n</head>\n<body>\n  <h1>Hello World</h1>\n  <script src="script.js"></script>\n</body>\n</html>' },
+        { name: 'styles.css', path: 'styles.css', type: 'file', content: '* {\n  margin: 0;\n  padding: 0;\n  box-sizing: border-box;\n}\n\nbody {\n  font-family: system-ui, sans-serif;\n  padding: 20px;\n}\n\nh1 {\n  color: #333;\n}' },
+        { name: 'script.js', path: 'script.js', type: 'file', content: '// Your JavaScript code here\nconsole.log("Hello from script.js!");' }
+      ],
+      react: [
+        { name: 'index.html', path: 'index.html', type: 'file', content: '<!DOCTYPE html>\n<html lang="en">\n<head>\n  <meta charset="UTF-8">\n  <meta name="viewport" content="width=device-width, initial-scale=1.0">\n  <title>React App</title>\n</head>\n<body>\n  <div id="root"></div>\n  <script type="module" src="main.jsx"></script>\n</body>\n</html>' },
+        { name: 'main.jsx', path: 'main.jsx', type: 'file', content: 'import React from "react";\nimport ReactDOM from "react-dom/client";\nimport App from "./App";\n\nReactDOM.createRoot(document.getElementById("root")).render(\n  <React.StrictMode>\n    <App />\n  </React.StrictMode>\n);' },
+        { name: 'App.jsx', path: 'App.jsx', type: 'file', content: 'import React, { useState } from "react";\n\nfunction App() {\n  const [count, setCount] = useState(0);\n\n  return (\n    <div className="app">\n      <h1>React App</h1>\n      <button onClick={() => setCount(c => c + 1)}>\n        Count: {count}\n      </button>\n    </div>\n  );\n}\n\nexport default App;' }
+      ],
+      node: [
+        { name: 'index.js', path: 'index.js', type: 'file', content: 'const http = require("http");\n\nconst server = http.createServer((req, res) => {\n  res.writeHead(200, { "Content-Type": "text/plain" });\n  res.end("Hello from Node.js!");\n});\n\nserver.listen(3000, () => {\n  console.log("Server running at http://localhost:3000/");\n});' },
+        { name: 'package.json', path: 'package.json', type: 'file', content: '{\n  "name": "node-project",\n  "version": "1.0.0",\n  "main": "index.js",\n  "scripts": {\n    "start": "node index.js"\n  }\n}' }
+      ],
+      python: [
+        { name: 'main.py', path: 'main.py', type: 'file', content: '# Python Project\n\ndef main():\n    print("Hello from Python!")\n\nif __name__ == "__main__":\n    main()' },
+        { name: 'requirements.txt', path: 'requirements.txt', type: 'file', content: '# Add your dependencies here\n# requests==2.28.0' }
+      ],
+      blank: []
+    }
+    return templates[type] || []
+  }
+
+  // Create a new local project
+  const createLocalProject = () => {
+    const name = newLocalProjectName.trim()
+    if (!name) {
+      showToast('Please enter a project name')
+      return
+    }
+
+    const projectId = generateId()
+    const template = getProjectTemplate(newLocalProjectType)
+
+    // Convert template to file structure
+    const files = template.map(f => ({
+      ...f,
+      id: generateId()
+    }))
+
+    const newProject = {
+      id: projectId,
+      name,
+      type: newLocalProjectType,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+
+    // Save files separately
+    const projectFiles = { ...localProjectFiles }
+    projectFiles[projectId] = {
+      files,
+      fileContents: template.reduce((acc, f) => {
+        acc[f.path] = f.content
+        return acc
+      }, {}),
+      expandedFolders: {}
+    }
+    setLocalProjectFiles(projectFiles)
+    localStorage.setItem('codeEditorProjectFiles', JSON.stringify(projectFiles))
+
+    setLocalProjects(prev => [...prev, newProject])
+    setActiveLocalProject(newProject)
+    setShowNewProjectModal(false)
+    setNewLocalProjectName('')
+    setNewLocalProjectType('html')
+    showToast(`Created project: ${name}`)
+
+    // Open first file if available
+    if (files.length > 0) {
+      const firstFile = files.find(f => f.type === 'file')
+      if (firstFile) {
+        openFileInTab(firstFile, projectId)
+      }
+    }
+  }
+
+  // Load project files from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('codeEditorProjectFiles')
+    if (saved) {
+      setLocalProjectFiles(JSON.parse(saved))
+    }
+  }, [])
+
+  // Select a local project
+  const selectLocalProject = (project) => {
+    setActiveLocalProject(project)
+    setOpenTabs([])
+    setActiveTabId(null)
+    setEditorContent('')
+
+    // Load first file if available
+    const projectData = localProjectFiles[project.id]
+    if (projectData?.files?.length > 0) {
+      const firstFile = projectData.files.find(f => f.type === 'file')
+      if (firstFile) {
+        openFileInTab(firstFile, project.id)
+      }
+    }
+  }
+
+  // Open file in a new tab
+  const openFileInTab = (file, projectId) => {
+    const tabId = `${projectId}-${file.path}`
+
+    // Check if tab already exists
+    const existingTab = openTabs.find(t => t.id === tabId)
+    if (existingTab) {
+      setActiveTabId(tabId)
+      const projectData = localProjectFiles[projectId]
+      setEditorContent(projectData?.fileContents?.[file.path] || '')
+      return
+    }
+
+    // Add new tab
+    const newTab = {
+      id: tabId,
+      path: file.path,
+      name: file.name,
+      projectId
+    }
+    setOpenTabs(prev => [...prev, newTab])
+    setActiveTabId(tabId)
+
+    // Load file content
+    const projectData = localProjectFiles[projectId]
+    setEditorContent(projectData?.fileContents?.[file.path] || '')
+  }
+
+  // Get or create a project for a chat conversation (for AI-generated code files)
+  const getOrCreateChatProject = (conversationId, conversationTitle) => {
+    const projectId = `chat-${conversationId}`
+    const existing = localProjects.find(p => p.id === projectId)
+    if (existing) return existing
+
+    const newProject = {
+      id: projectId,
+      name: conversationTitle || 'AI Generated Code',
+      type: 'blank',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    }
+
+    // Initialize project files synchronously in localStorage first
+    const currentFiles = JSON.parse(localStorage.getItem('codeEditorProjectFiles') || '{}')
+    if (!currentFiles[projectId]) {
+      currentFiles[projectId] = { files: [], fileContents: {}, expandedFolders: {} }
+      localStorage.setItem('codeEditorProjectFiles', JSON.stringify(currentFiles))
+    }
+
+    // Then update state
+    setLocalProjectFiles(prev => {
+      const updated = { ...prev }
+      if (!updated[projectId]) {
+        updated[projectId] = { files: [], fileContents: {}, expandedFolders: {} }
+      }
+      return updated
+    })
+
+    setLocalProjects(prev => {
+      // Check if already added (in case of rapid calls)
+      if (prev.find(p => p.id === projectId)) return prev
+      return [...prev, newProject]
+    })
+
+    return newProject
+  }
+
+  // Add a file to a project and open it in editor (for AI-generated code)
+  const addFileToProject = (projectId, filename, content, language) => {
+    const filePath = filename
+    const tabId = `${projectId}-${filePath}`
+
+    // Update project files state
+    setLocalProjectFiles(prev => {
+      const updated = { ...prev }
+      const projectData = updated[projectId] || { files: [], fileContents: {}, expandedFolders: {} }
+
+      // Check if file exists, update or create
+      const existingFile = projectData.files.find(f => f.path === filePath)
+      if (existingFile) {
+        // Update existing file content
+        updated[projectId] = {
+          ...projectData,
+          fileContents: { ...projectData.fileContents, [filePath]: content }
+        }
+      } else {
+        // Create new file
+        const newFile = { id: generateId(), name: filename, path: filePath, type: 'file' }
+        updated[projectId] = {
+          ...projectData,
+          files: [...projectData.files, newFile],
+          fileContents: { ...projectData.fileContents, [filePath]: content }
+        }
+      }
+
+      localStorage.setItem('codeEditorProjectFiles', JSON.stringify(updated))
+      return updated
+    })
+
+    // Set active project
+    setLocalProjects(prev => {
+      const project = prev.find(p => p.id === projectId)
+      if (project) {
+        setActiveLocalProject(project)
+      }
+      return prev
+    })
+
+    // Add tab and set content directly (don't rely on state which may not be updated yet)
+    const existingTab = openTabs.find(t => t.id === tabId)
+    if (!existingTab) {
+      const newTab = { id: tabId, path: filePath, name: filename, projectId }
+      setOpenTabs(prev => [...prev, newTab])
+    }
+    setActiveTabId(tabId)
+    setEditorContent(content) // Set content directly since state may not be updated
+  }
+
+  // Update ref for opening files in code editor (used by click handler)
+  useEffect(() => {
+    openFileInCodeEditor.current = (filename, code, language, conversationId, conversationTitle) => {
+      // Fall back to active conversation if no ID provided
+      const convId = conversationId || activeConversation
+      const convTitle = conversationTitle || currentConversation?.title
+      const project = getOrCreateChatProject(convId, convTitle)
+      addFileToProject(project.id, filename, code, language)
+      setShowCodePage(true)
+      setCodeEditorMode('local')
+    }
+  }, [localProjects, activeConversation, currentConversation?.title])
+
+  // Close a tab
+  const closeTab = (tabId, e) => {
+    e?.stopPropagation()
+
+    // Check for unsaved changes
+    if (unsavedChanges[tabId]) {
+      if (!confirm('You have unsaved changes. Close anyway?')) return
+    }
+
+    setOpenTabs(prev => prev.filter(t => t.id !== tabId))
+    setUnsavedChanges(prev => {
+      const next = { ...prev }
+      delete next[tabId]
+      return next
+    })
+
+    // If closing active tab, switch to another
+    if (activeTabId === tabId) {
+      const remaining = openTabs.filter(t => t.id !== tabId)
+      if (remaining.length > 0) {
+        const newActive = remaining[remaining.length - 1]
+        setActiveTabId(newActive.id)
+        const projectData = localProjectFiles[newActive.projectId]
+        setEditorContent(projectData?.fileContents?.[newActive.path] || '')
+      } else {
+        setActiveTabId(null)
+        setEditorContent('')
+      }
+    }
+  }
+
+  // Switch to a tab
+  const switchToTab = (tab) => {
+    // Save current content before switching
+    if (activeTabId && unsavedChanges[activeTabId]) {
+      const currentTab = openTabs.find(t => t.id === activeTabId)
+      if (currentTab) {
+        saveFileContent(currentTab.projectId, currentTab.path, editorContent)
+      }
+    }
+
+    setActiveTabId(tab.id)
+    const projectData = localProjectFiles[tab.projectId]
+    setEditorContent(projectData?.fileContents?.[tab.path] || '')
+  }
+
+  // Handle editor content change
+  const handleEditorChange = (e) => {
+    const newContent = e.target.value
+    setEditorContent(newContent)
+    if (activeTabId) {
+      setUnsavedChanges(prev => ({ ...prev, [activeTabId]: true }))
+    }
+  }
+
+  // Save file content
+  const saveFileContent = (projectId, path, content) => {
+    setLocalProjectFiles(prev => {
+      const updated = { ...prev }
+      if (!updated[projectId]) {
+        updated[projectId] = { files: [], fileContents: {}, expandedFolders: {} }
+      }
+      updated[projectId] = {
+        ...updated[projectId],
+        fileContents: {
+          ...updated[projectId].fileContents,
+          [path]: content
+        }
+      }
+      localStorage.setItem('codeEditorProjectFiles', JSON.stringify(updated))
+      return updated
+    })
+
+    // Update project's updatedAt
+    setLocalProjects(prev => prev.map(p =>
+      p.id === projectId ? { ...p, updatedAt: new Date().toISOString() } : p
+    ))
+  }
+
+  // Save current file (Cmd+S handler)
+  const saveCurrentFile = () => {
+    if (!activeTabId) return
+    const currentTab = openTabs.find(t => t.id === activeTabId)
+    if (currentTab) {
+      saveFileContent(currentTab.projectId, currentTab.path, editorContent)
+      setUnsavedChanges(prev => ({ ...prev, [activeTabId]: false }))
+      showToast(`Saved ${currentTab.name}`)
+    }
+  }
+
+  // Create new file in project
+  const createNewFile = () => {
+    if (!activeLocalProject || !newItemName.trim()) {
+      showToast('Please enter a file name')
+      return
+    }
+
+    const fileName = newItemName.trim()
+    const filePath = newItemParent ? `${newItemParent}/${fileName}` : fileName
+
+    setLocalProjectFiles(prev => {
+      const updated = { ...prev }
+      const projectData = updated[activeLocalProject.id] || { files: [], fileContents: {}, expandedFolders: {} }
+
+      const newFile = {
+        id: generateId(),
+        name: fileName,
+        path: filePath,
+        type: 'file'
+      }
+
+      updated[activeLocalProject.id] = {
+        ...projectData,
+        files: [...projectData.files, newFile],
+        fileContents: {
+          ...projectData.fileContents,
+          [filePath]: ''
+        }
+      }
+
+      localStorage.setItem('codeEditorProjectFiles', JSON.stringify(updated))
+      return updated
+    })
+
+    setShowNewFileModal(false)
+    setNewItemName('')
+    setNewItemParent('')
+    showToast(`Created ${fileName}`)
+
+    // Open the new file
+    openFileInTab({ name: fileName, path: filePath, type: 'file' }, activeLocalProject.id)
+  }
+
+  // Create new folder in project
+  const createNewFolder = () => {
+    if (!activeLocalProject || !newItemName.trim()) {
+      showToast('Please enter a folder name')
+      return
+    }
+
+    const folderName = newItemName.trim()
+    const folderPath = newItemParent ? `${newItemParent}/${folderName}` : folderName
+
+    setLocalProjectFiles(prev => {
+      const updated = { ...prev }
+      const projectData = updated[activeLocalProject.id] || { files: [], fileContents: {}, expandedFolders: {} }
+
+      const newFolder = {
+        id: generateId(),
+        name: folderName,
+        path: folderPath,
+        type: 'dir'
+      }
+
+      updated[activeLocalProject.id] = {
+        ...projectData,
+        files: [...projectData.files, newFolder],
+        expandedFolders: {
+          ...projectData.expandedFolders,
+          [folderPath]: true
+        }
+      }
+
+      localStorage.setItem('codeEditorProjectFiles', JSON.stringify(updated))
+      return updated
+    })
+
+    setShowNewFolderModal(false)
+    setNewItemName('')
+    setNewItemParent('')
+    showToast(`Created folder ${folderName}`)
+  }
+
+  // Delete file or folder
+  const deleteLocalFile = (file) => {
+    if (!activeLocalProject) return
+    if (!confirm(`Delete "${file.name}"?`)) return
+
+    // Close tab if open
+    const tabId = `${activeLocalProject.id}-${file.path}`
+    if (openTabs.find(t => t.id === tabId)) {
+      closeTab(tabId)
+    }
+
+    setLocalProjectFiles(prev => {
+      const updated = { ...prev }
+      const projectData = updated[activeLocalProject.id]
+      if (!projectData) return prev
+
+      // Remove file and all children if folder
+      const pathPrefix = file.path + '/'
+      const newFiles = projectData.files.filter(f =>
+        f.path !== file.path && !f.path.startsWith(pathPrefix)
+      )
+
+      const newContents = { ...projectData.fileContents }
+      delete newContents[file.path]
+      Object.keys(newContents).forEach(p => {
+        if (p.startsWith(pathPrefix)) delete newContents[p]
+      })
+
+      updated[activeLocalProject.id] = {
+        ...projectData,
+        files: newFiles,
+        fileContents: newContents
+      }
+
+      localStorage.setItem('codeEditorProjectFiles', JSON.stringify(updated))
+      return updated
+    })
+
+    setContextMenuFile(null)
+    showToast(`Deleted ${file.name}`)
+  }
+
+  // Rename file or folder
+  const renameLocalFile = () => {
+    if (!activeLocalProject || !contextMenuFile || !renameValue.trim()) return
+
+    const oldPath = contextMenuFile.path
+    const oldName = contextMenuFile.name
+    const newName = renameValue.trim()
+    const parentPath = oldPath.includes('/') ? oldPath.substring(0, oldPath.lastIndexOf('/')) : ''
+    const newPath = parentPath ? `${parentPath}/${newName}` : newName
+
+    setLocalProjectFiles(prev => {
+      const updated = { ...prev }
+      const projectData = updated[activeLocalProject.id]
+      if (!projectData) return prev
+
+      // Update file path
+      const newFiles = projectData.files.map(f => {
+        if (f.path === oldPath) {
+          return { ...f, name: newName, path: newPath }
+        }
+        // Update children paths if folder
+        if (f.path.startsWith(oldPath + '/')) {
+          const newChildPath = newPath + f.path.substring(oldPath.length)
+          return { ...f, path: newChildPath }
+        }
+        return f
+      })
+
+      // Update file contents
+      const newContents = {}
+      Object.entries(projectData.fileContents).forEach(([p, content]) => {
+        if (p === oldPath) {
+          newContents[newPath] = content
+        } else if (p.startsWith(oldPath + '/')) {
+          const newChildPath = newPath + p.substring(oldPath.length)
+          newContents[newChildPath] = content
+        } else {
+          newContents[p] = content
+        }
+      })
+
+      updated[activeLocalProject.id] = {
+        ...projectData,
+        files: newFiles,
+        fileContents: newContents
+      }
+
+      localStorage.setItem('codeEditorProjectFiles', JSON.stringify(updated))
+      return updated
+    })
+
+    // Update open tabs
+    setOpenTabs(prev => prev.map(t => {
+      if (t.path === oldPath) {
+        return { ...t, path: newPath, name: newName, id: `${t.projectId}-${newPath}` }
+      }
+      if (t.path.startsWith(oldPath + '/')) {
+        const newTabPath = newPath + t.path.substring(oldPath.length)
+        return { ...t, path: newTabPath, id: `${t.projectId}-${newTabPath}` }
+      }
+      return t
+    }))
+
+    if (activeTabId?.includes(oldPath)) {
+      setActiveTabId(activeTabId.replace(oldPath, newPath))
+    }
+
+    setShowRenameModal(false)
+    setContextMenuFile(null)
+    setRenameValue('')
+    showToast(`Renamed to ${newName}`)
+  }
+
+  // Delete local project
+  const deleteLocalProject = (project) => {
+    if (!confirm(`Delete project "${project.name}" and all its files?`)) return
+
+    // Close all tabs from this project
+    setOpenTabs(prev => prev.filter(t => t.projectId !== project.id))
+
+    // Remove project files
+    setLocalProjectFiles(prev => {
+      const updated = { ...prev }
+      delete updated[project.id]
+      localStorage.setItem('codeEditorProjectFiles', JSON.stringify(updated))
+      return updated
+    })
+
+    // Remove project
+    setLocalProjects(prev => prev.filter(p => p.id !== project.id))
+
+    if (activeLocalProject?.id === project.id) {
+      setActiveLocalProject(null)
+      setActiveTabId(null)
+      setEditorContent('')
+    }
+
+    showToast(`Deleted project: ${project.name}`)
+  }
+
+  // Toggle local folder expansion
+  const toggleLocalFolder = (path) => {
+    if (!activeLocalProject) return
+
+    setLocalProjectFiles(prev => {
+      const updated = { ...prev }
+      const projectData = updated[activeLocalProject.id]
+      if (!projectData) return prev
+
+      updated[activeLocalProject.id] = {
+        ...projectData,
+        expandedFolders: {
+          ...projectData.expandedFolders,
+          [path]: !projectData.expandedFolders[path]
+        }
+      }
+
+      localStorage.setItem('codeEditorProjectFiles', JSON.stringify(updated))
+      return updated
+    })
+  }
+
+  // Build file tree structure from flat files array
+  const buildFileTree = (files) => {
+    if (!files || !Array.isArray(files)) return []
+
+    // Group files by parent directory
+    const tree = []
+    const dirs = {}
+
+    files.forEach(file => {
+      const parts = file.path.split('/')
+      if (parts.length === 1) {
+        // Root level file/folder
+        tree.push(file)
+      } else {
+        // Nested - ensure parent directories exist
+        const parentPath = parts.slice(0, -1).join('/')
+        if (!dirs[parentPath]) {
+          dirs[parentPath] = []
+        }
+        dirs[parentPath].push(file)
+      }
+    })
+
+    // Sort: folders first, then alphabetically
+    const sortItems = (items) => items.sort((a, b) => {
+      if (a.type === 'dir' && b.type !== 'dir') return -1
+      if (a.type !== 'dir' && b.type === 'dir') return 1
+      return a.name.localeCompare(b.name)
+    })
+
+    return sortItems(tree)
+  }
+
+  // Run preview for HTML/CSS/JS projects
+  const runLocalPreview = () => {
+    if (!activeLocalProject) return
+
+    const projectData = localProjectFiles[activeLocalProject.id]
+    if (!projectData) return
+
+    // Get HTML file
+    const htmlContent = projectData.fileContents['index.html'] || ''
+    const cssContent = projectData.fileContents['styles.css'] || projectData.fileContents['style.css'] || ''
+    const jsContent = projectData.fileContents['script.js'] || projectData.fileContents['main.js'] || ''
+
+    // Build preview HTML
+    let previewHtml = htmlContent
+
+    // Inject CSS if not already linked
+    if (cssContent && !htmlContent.includes('<link') && !htmlContent.includes('<style>')) {
+      previewHtml = previewHtml.replace('</head>', `<style>${cssContent}</style></head>`)
+    } else if (cssContent) {
+      // Replace external CSS link with inline
+      previewHtml = previewHtml.replace(/<link[^>]*href=["']styles?\.css["'][^>]*>/gi, `<style>${cssContent}</style>`)
+    }
+
+    // Inject JS if not already linked
+    if (jsContent && !htmlContent.includes('<script src')) {
+      previewHtml = previewHtml.replace('</body>', `<script>${jsContent}</script></body>`)
+    } else if (jsContent) {
+      // Replace external JS link with inline
+      previewHtml = previewHtml.replace(/<script[^>]*src=["'](script|main)\.js["'][^>]*><\/script>/gi, `<script>${jsContent}</script>`)
+    }
+
+    // Add console capture
+    const consoleCapture = `
+      <script>
+        (function() {
+          const originalLog = console.log;
+          const originalError = console.error;
+          const originalWarn = console.warn;
+
+          function sendToParent(type, args) {
+            window.parent.postMessage({
+              type: 'console',
+              level: type,
+              message: Array.from(args).map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')
+            }, '*');
+          }
+
+          console.log = function() { sendToParent('log', arguments); originalLog.apply(console, arguments); };
+          console.error = function() { sendToParent('error', arguments); originalError.apply(console, arguments); };
+          console.warn = function() { sendToParent('warn', arguments); originalWarn.apply(console, arguments); };
+
+          window.onerror = function(msg, url, line) {
+            sendToParent('error', ['Error: ' + msg + ' (line ' + line + ')']);
+          };
+        })();
+      </script>
+    `
+    previewHtml = previewHtml.replace('<head>', '<head>' + consoleCapture)
+
+    setPreviewContent(previewHtml)
+    setShowPreviewPanel(true)
+    setConsoleOutput([{ level: 'info', message: 'Preview started...' }])
+  }
+
+  // Listen for console messages from preview iframe
+  useEffect(() => {
+    const handleMessage = (event) => {
+      if (event.data?.type === 'console') {
+        setConsoleOutput(prev => [...prev, { level: event.data.level, message: event.data.message }])
+      }
+    }
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
+  }, [])
+
+  // Export project as ZIP
+  const exportProjectAsZip = async () => {
+    if (!activeLocalProject) return
+
+    const projectData = localProjectFiles[activeLocalProject.id]
+    if (!projectData) return
+
+    // Simple ZIP creation (without external library)
+    // For now, just download files as a text bundle
+    const files = Object.entries(projectData.fileContents)
+    let content = `# ${activeLocalProject.name}\n# Exported from Code Editor\n\n`
+
+    files.forEach(([path, fileContent]) => {
+      content += `\n--- ${path} ---\n${fileContent}\n`
+    })
+
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${activeLocalProject.name}-export.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+
+    showToast('Project exported')
+    setShowDeployMenu(false)
+  }
+
+  // Keyboard shortcut handler for code editor
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (!showCodePage) return
+
+      // Cmd/Ctrl + S to save
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault()
+        saveCurrentFile()
+      }
+
+      // Escape to close context menu
+      if (e.key === 'Escape') {
+        setContextMenuFile(null)
+        setShowDeployMenu(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [showCodePage, activeTabId, editorContent])
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handleClick = () => setContextMenuFile(null)
+    if (contextMenuFile) {
+      document.addEventListener('click', handleClick)
+      return () => document.removeEventListener('click', handleClick)
+    }
+  }, [contextMenuFile])
+
+  // =============== END LOCAL CODE EDITOR FUNCTIONS ===============
+
+  // ============ Vercel API Functions ============
+
+  const vercelApi = async (endpoint, options = {}) => {
+    const headers = {
+      'Authorization': `Bearer ${vercelToken}`,
+      'Content-Type': 'application/json',
+      ...options.headers
+    }
+    const resp = await fetch(`/api/vercel${endpoint}`, {
+      ...options,
+      headers
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}))
+      throw new Error(err.error?.message || `Vercel API error: ${resp.status}`)
+    }
+    if (resp.status === 204) return null
+    return resp.json()
+  }
+
+  const connectVercel = async () => {
+    if (!vercelToken.trim()) {
+      showToast('Please enter a Vercel token')
+      return
+    }
+    setVercelLoading(true)
+    try {
+      const user = await vercelApi('/v2/user')
+      setVercelUser(user.user)
+      setVercelConnected(true)
+      localStorage.setItem('vercelToken', vercelToken)
+      showToast(`Connected as ${user.user.username || user.user.email}`)
+      loadVercelProjects()
+    } catch (err) {
+      showToast(`Vercel connection failed: ${err.message}`)
+      setVercelConnected(false)
+    } finally {
+      setVercelLoading(false)
+    }
+  }
+
+  const disconnectVercel = () => {
+    setVercelConnected(false)
+    setVercelUser(null)
+    setVercelProjects([])
+    setVercelDeployments([])
+    setVercelSelectedProject(null)
+    localStorage.removeItem('vercelToken')
+    showToast('Disconnected from Vercel')
+  }
+
+  const loadVercelProjects = async () => {
+    setVercelLoading(true)
+    try {
+      const response = await vercelApi('/v9/projects')
+      setVercelProjects(response.projects || [])
+    } catch (err) {
+      showToast(`Failed to load projects: ${err.message}`)
+    } finally {
+      setVercelLoading(false)
+    }
+  }
+
+  const loadVercelDeployments = async (projectId = null) => {
+    setVercelDeploymentsLoading(true)
+    try {
+      const endpoint = projectId
+        ? `/v6/deployments?projectId=${projectId}&limit=20`
+        : '/v6/deployments?limit=20'
+      const response = await vercelApi(endpoint)
+      setVercelDeployments(response.deployments || [])
+    } catch (err) {
+      showToast(`Failed to load deployments: ${err.message}`)
+    } finally {
+      setVercelDeploymentsLoading(false)
+    }
+  }
+
+  const deployToVercel = async () => {
+    if (!activeLocalProject) {
+      showToast('No project selected')
+      return
+    }
+
+    const projectData = localProjectFiles[activeLocalProject.id]
+    if (!projectData || !projectData.fileContents) {
+      showToast('No files to deploy')
+      return
+    }
+
+    setVercelDeploying(true)
+    try {
+      // Prepare files for deployment
+      const files = Object.entries(projectData.fileContents).map(([path, content]) => ({
+        file: path.startsWith('/') ? path.slice(1) : path,
+        data: content
+      }))
+
+      // Create deployment
+      const deploymentName = vercelDeployName.trim() || activeLocalProject.name
+      const deployment = await vercelApi('/v13/deployments', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: deploymentName.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+          files: files,
+          projectSettings: {
+            framework: null
+          },
+          target: 'production'
+        })
+      })
+
+      showToast(`Deployed! URL: ${deployment.url}`)
+      setShowVercelDeployModal(false)
+      setVercelDeployName('')
+
+      // Refresh deployments list
+      if (showVercelDeployments) {
+        loadVercelDeployments()
+      }
+    } catch (err) {
+      showToast(`Deployment failed: ${err.message}`)
+    } finally {
+      setVercelDeploying(false)
+    }
+  }
+
+  const deleteVercelDeployment = async (deploymentId) => {
+    setDeletingDeployment(deploymentId)
+    try {
+      await vercelApi(`/v13/deployments/${deploymentId}`, {
+        method: 'DELETE'
+      })
+      showToast('Deployment deleted')
+      setVercelDeployments(prev => prev.filter(d => d.uid !== deploymentId))
+    } catch (err) {
+      showToast(`Failed to delete: ${err.message}`)
+    } finally {
+      setDeletingDeployment(null)
+    }
+  }
+
+  const cancelVercelDeployment = async (deploymentId) => {
+    try {
+      await vercelApi(`/v12/deployments/${deploymentId}/cancel`, {
+        method: 'PATCH'
+      })
+      showToast('Deployment cancelled')
+      loadVercelDeployments()
+    } catch (err) {
+      showToast(`Failed to cancel: ${err.message}`)
+    }
+  }
+
+  // Auto-connect Vercel on mount if token exists
+  useEffect(() => {
+    if (vercelToken && !vercelConnected) {
+      vercelApi('/v2/user')
+        .then(response => {
+          setVercelUser(response.user)
+          setVercelConnected(true)
+          loadVercelProjects()
+        })
+        .catch(() => {
+          localStorage.removeItem('vercelToken')
+          setVercelToken('')
+        })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // =============== END VERCEL FUNCTIONS ===============
+
+  // ============ Supabase Functions ============
+
+  const connectSupabase = async () => {
+    if (!supabaseUrl.trim() || !supabaseAnonKey.trim()) {
+      showToast('Please enter Supabase URL and Anon Key')
+      return
+    }
+    setSupabaseLoading(true)
+    try {
+      // Test connection by fetching tables
+      const response = await fetch(`${supabaseUrl}/rest/v1/`, {
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${supabaseAnonKey}`
+        }
+      })
+      if (!response.ok) throw new Error('Connection failed')
+
+      localStorage.setItem('supabaseUrl', supabaseUrl)
+      localStorage.setItem('supabaseAnonKey', supabaseAnonKey)
+      if (supabaseServiceKey) {
+        localStorage.setItem('supabaseServiceKey', supabaseServiceKey)
+      }
+      setSupabaseConnected(true)
+      showToast('Connected to Supabase')
+      loadSupabaseTables()
+    } catch (err) {
+      showToast(`Supabase connection failed: ${err.message}`)
+    } finally {
+      setSupabaseLoading(false)
+    }
+  }
+
+  const disconnectSupabase = () => {
+    setSupabaseConnected(false)
+    setSupabaseTables([])
+    setSupabaseSelectedTable(null)
+    setSupabaseTableData([])
+    localStorage.removeItem('supabaseUrl')
+    localStorage.removeItem('supabaseAnonKey')
+    localStorage.removeItem('supabaseServiceKey')
+    showToast('Disconnected from Supabase')
+  }
+
+  const loadSupabaseTables = async () => {
+    if (!supabaseUrl || !supabaseAnonKey) return
+    setSupabaseLoading(true)
+    try {
+      // Use the OpenAPI endpoint to get table info
+      const response = await fetch(`${supabaseUrl}/rest/v1/`, {
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${supabaseAnonKey}`
+        }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        // Parse OpenAPI spec to get table names
+        const paths = data.paths || {}
+        const tables = Object.keys(paths)
+          .filter(p => p.startsWith('/') && !p.includes('{'))
+          .map(p => p.slice(1))
+          .filter(t => t && !t.startsWith('rpc/'))
+        setSupabaseTables(tables)
+      }
+    } catch (err) {
+      console.error('Failed to load tables:', err)
+    } finally {
+      setSupabaseLoading(false)
+    }
+  }
+
+  const loadSupabaseTableData = async (tableName) => {
+    if (!supabaseUrl || !supabaseAnonKey) return
+    setSupabaseLoading(true)
+    try {
+      const response = await fetch(`${supabaseUrl}/rest/v1/${tableName}?limit=100`, {
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${supabaseAnonKey}`
+        }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setSupabaseTableData(data)
+        setSupabaseSelectedTable(tableName)
+      }
+    } catch (err) {
+      showToast(`Failed to load table data: ${err.message}`)
+    } finally {
+      setSupabaseLoading(false)
+    }
+  }
+
+  const generateSupabaseCode = (tableName, operation = 'select') => {
+    const code = {
+      select: `// Fetch data from ${tableName}
+const { data, error } = await supabase
+  .from('${tableName}')
+  .select('*')
+
+if (error) console.error('Error:', error)
+else console.log('Data:', data)`,
+      insert: `// Insert data into ${tableName}
+const { data, error } = await supabase
+  .from('${tableName}')
+  .insert([
+    { column1: 'value1', column2: 'value2' }
+  ])
+  .select()
+
+if (error) console.error('Error:', error)
+else console.log('Inserted:', data)`,
+      update: `// Update data in ${tableName}
+const { data, error } = await supabase
+  .from('${tableName}')
+  .update({ column1: 'new_value' })
+  .eq('id', 1)
+  .select()
+
+if (error) console.error('Error:', error)
+else console.log('Updated:', data)`,
+      delete: `// Delete data from ${tableName}
+const { error } = await supabase
+  .from('${tableName}')
+  .delete()
+  .eq('id', 1)
+
+if (error) console.error('Error:', error)
+else console.log('Deleted successfully')`
+    }
+    return code[operation] || code.select
+  }
+
+  // Auto-connect Supabase on mount
+  useEffect(() => {
+    if (supabaseUrl && supabaseAnonKey && !supabaseConnected) {
+      fetch(`${supabaseUrl}/rest/v1/`, {
+        headers: {
+          'apikey': supabaseAnonKey,
+          'Authorization': `Bearer ${supabaseAnonKey}`
+        }
+      })
+        .then(response => {
+          if (response.ok) {
+            setSupabaseConnected(true)
+            loadSupabaseTables()
+          }
+        })
+        .catch(() => {})
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // =============== END SUPABASE FUNCTIONS ===============
+
+  // ============ Local Git Functions ============
+
+  const initGitRepo = () => {
+    if (!activeLocalProject) {
+      showToast('Select a project first')
+      return
+    }
+    setGitInitialized(true)
+    setGitRepoName(activeLocalProject.name)
+    setGitCurrentBranch('main')
+    setGitBranches(['main'])
+    setGitCommits([{
+      id: Date.now().toString(),
+      message: 'Initial commit',
+      date: new Date().toISOString(),
+      files: Object.keys(localProjectFiles[activeLocalProject.id]?.fileContents || {})
+    }])
+    showToast('Git repository initialized')
+  }
+
+  const createGitBranch = (branchName) => {
+    if (!branchName.trim()) return
+    if (gitBranches.includes(branchName)) {
+      showToast('Branch already exists')
+      return
+    }
+    setGitBranches([...gitBranches, branchName])
+    setGitCurrentBranch(branchName)
+    showToast(`Created and switched to branch: ${branchName}`)
+  }
+
+  const switchGitBranch = (branchName) => {
+    setGitCurrentBranch(branchName)
+    showToast(`Switched to branch: ${branchName}`)
+  }
+
+  const stageFile = (filePath) => {
+    if (gitStagedFiles.includes(filePath)) {
+      setGitStagedFiles(gitStagedFiles.filter(f => f !== filePath))
+    } else {
+      setGitStagedFiles([...gitStagedFiles, filePath])
+    }
+  }
+
+  const stageAllFiles = () => {
+    if (!activeLocalProject) return
+    const files = Object.keys(localProjectFiles[activeLocalProject.id]?.fileContents || {})
+    setGitStagedFiles(files)
+  }
+
+  const commitChanges = () => {
+    if (!gitCommitMessage.trim()) {
+      showToast('Please enter a commit message')
+      return
+    }
+    if (gitStagedFiles.length === 0) {
+      showToast('No files staged for commit')
+      return
+    }
+    const newCommit = {
+      id: Date.now().toString(),
+      message: gitCommitMessage,
+      date: new Date().toISOString(),
+      branch: gitCurrentBranch,
+      files: [...gitStagedFiles]
+    }
+    setGitCommits([newCommit, ...gitCommits])
+    setGitStagedFiles([])
+    setGitCommitMessage('')
+    showToast('Changes committed')
+  }
+
+  const deleteGitBranch = (branchName) => {
+    if (branchName === 'main') {
+      showToast('Cannot delete main branch')
+      return
+    }
+    if (branchName === gitCurrentBranch) {
+      showToast('Cannot delete current branch')
+      return
+    }
+    setGitBranches(gitBranches.filter(b => b !== branchName))
+    showToast(`Deleted branch: ${branchName}`)
+  }
+
+  const pushToGitHub = async () => {
+    if (!githubConnected) {
+      showToast('Connect GitHub first')
+      setSidebarTab('code')
+      setCodeEditorMode('github')
+      return
+    }
+    showToast('Push to GitHub - Coming soon')
+  }
+
+  // =============== END GIT FUNCTIONS ===============
+
+  // Auto-connect GitHub on mount if token exists
+  useEffect(() => {
+    if (githubToken && !githubConnected) {
+      githubApi('/user')
+        .then(user => {
+          setGithubUser(user)
+          setGithubConnected(true)
+          loadGitHubRepos()
+        })
+        .catch(() => {
+          // Token invalid, clear it
+          localStorage.removeItem('githubToken')
+          setGithubToken('')
+        })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Parse MCP JSON config and extract server info
+  const parseMcpJsonConfig = (jsonStr) => {
+    const config = JSON.parse(jsonStr)
+    const servers = []
+    
+    const mcpServersObj = config?.mcpServers || config
+    if (typeof mcpServersObj !== 'object') {
+      throw new Error('Invalid MCP config format')
+    }
+    
+    for (const [name, serverConfig] of Object.entries(mcpServersObj)) {
+      if (!serverConfig || typeof serverConfig !== 'object') continue
+      
+      // Extract URL and auth from args array
+      const args = serverConfig.args || []
+      let url = ''
+      let authHeader = ''
+      
+      for (let i = 0; i < args.length; i++) {
+        const arg = args[i]
+        if (arg === '--streamableHttp' && args[i + 1]) {
+          url = args[i + 1]
+        } else if (arg === '--header' && args[i + 1]) {
+          authHeader = args[i + 1]
+        } else if (typeof arg === 'string' && arg.startsWith('http')) {
+          // Fallback: bare URL in args
+          if (!url) url = arg
+        }
+      }
+      
+      // Also check for direct url property
+      if (!url && serverConfig.url) {
+        url = serverConfig.url
+      }
+      
+      if (!url) continue
+      
+      // Parse auth header (format: "authorization:Bearer TOKEN" or "Authorization: Bearer TOKEN")
+      let token = ''
+      if (authHeader) {
+        const match = authHeader.match(/^[Aa]uthorization:\s*Bearer\s+(.+)$/i)
+        if (match) {
+          token = match[1]
+        } else if (authHeader.includes(':')) {
+          token = authHeader.split(':').slice(1).join(':').trim()
+        }
+      }
+      
+      servers.push({
+        id: `mcp-${crypto.randomUUID()}`,
+        name,
+        url,
+        token,
+        connectState: 'disconnected', // disconnected | connecting | connected | error
+        connectError: '',
+        flows: [],
+      })
+    }
+    
+    return servers
+  }
+  
+  const importMcpServers = () => {
+    if (!mcpImportJson.trim()) {
+      setMcpImportError('Paste your MCP JSON config')
+      return
+    }
+    
+    try {
+      const newServers = parseMcpJsonConfig(mcpImportJson)
+      if (newServers.length === 0) {
+        setMcpImportError('No valid MCP servers found in config')
+        return
+      }
+      
+      setMcpServers(prev => {
+        // Merge: don't duplicate by URL
+        const existingUrls = new Set(prev.map(s => s.url))
+        const toAdd = newServers.filter(s => !existingUrls.has(s.url))
+        return [...prev, ...toAdd]
+      })
+      
+      setMcpImportJson('')
+      setMcpImportError('')
+      showToast(`Imported ${newServers.length} MCP server(s)`)
+    } catch (e) {
+      console.error(e)
+      setMcpImportError(e.message || 'Invalid JSON')
+    }
+  }
+  
+  const connectMcpServer = async (serverId) => {
+    const server = mcpServers.find(s => s.id === serverId)
+    if (!server) return
+    
+    setMcpServers(prev => prev.map(s => 
+      s.id === serverId ? { ...s, connectState: 'connecting', connectError: '' } : s
+    ))
+
+    try {
+      // Some MCP servers expect initialize first. We'll try it but tolerate failure.
+      try {
+        await mcpRequest({
+          url: server.url,
+          token: server.token,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            clientInfo: { name: 'chatgpt-clone', version: '1.0.0' },
+          },
+        })
+      } catch {
+        // ignore, continue to tools/list
+      }
+
+      const toolsResult = await mcpRequest({
+        url: server.url,
+        token: server.token,
+        method: 'tools/list',
+        params: {},
+      })
+
+      const tools = Array.isArray(toolsResult?.tools)
+        ? toolsResult.tools
+        : Array.isArray(toolsResult?.data)
+          ? toolsResult.data
+          : Array.isArray(toolsResult)
+            ? toolsResult
+            : []
+
+      const flows = tools
+        .map((t) => ({
+          name: t?.name || t?.id || '',
+          description: t?.description || '',
+          inputSchema: t?.inputSchema || t?.input_schema || null,
+        }))
+        .filter((t) => t.name)
+
+      setMcpServers(prev => prev.map(s => 
+        s.id === serverId ? { ...s, connectState: 'connected', flows } : s
+      ))
+      showToast(`${server.name}: Loaded ${flows.length} flows`)
+    } catch (e) {
+      console.error(e)
+      setMcpServers(prev => prev.map(s => 
+        s.id === serverId ? { ...s, connectState: 'error', connectError: e.message || 'Failed to connect' } : s
+      ))
+      showToast(`${server.name}: Connection failed`)
+    }
+  }
+
+  const disconnectMcpServer = (serverId) => {
+    setMcpServers(prev => prev.map(s => 
+      s.id === serverId ? { ...s, connectState: 'disconnected', connectError: '' } : s
+    ))
+  }
+  
+  const removeMcpServer = (serverId) => {
+    setMcpServers(prev => prev.filter(s => s.id !== serverId))
+    showToast('Server removed')
+  }
+  
+  // Create an MCP Agent from a workflow
+  const createMcpAgentFromWorkflow = (serverId, workflow) => {
+    const server = mcpServers.find(s => s.id === serverId)
+    if (!server) return
+    
+    const workflowId = workflow.id || workflow.workflow_id
+    const workflowName = workflow.name || workflow.workflow_name || 'MCP Workflow'
+    
+    const agent = {
+      id: `mcp-agent-${crypto.randomUUID()}`,
+      provider: 'mcp',
+      name: workflowName,
+      description: workflow.description || `Execute ${workflowName} workflow`,
+      mcpServerId: serverId,
+      mcpServerUrl: server.url,
+      mcpServerToken: server.token,
+      workflowId: workflowId,
+      workflowName: workflowName,
+    }
+    
+    // Add to agents list (stored in localStorage via existing effect)
+    setAgents(prev => {
+      // Don't duplicate
+      if (prev.some(a => a.workflowId === workflowId && a.mcpServerId === serverId)) {
+        showToast('Agent already exists for this workflow')
+        return prev
+      }
+      return [agent, ...prev]
+    })
+    
+    showToast(`Created agent: ${workflowName}`)
+  }
+  
+  // Send message to MCP workflow agent
+  const sendMessageToMcpWorkflow = async (message, extraContext = '', signal) => {
+    if (!selectedAgent?.mcpServerUrl || !selectedAgent?.workflowId) {
+      throw new Error('MCP agent not properly configured (missing server URL or workflow ID)')
+    }
+    
+    setTypingStatus('generating')
+    
+    try {
+      // First, get workflow details to understand inputs (optional, for smarter execution)
+      let workflowInputs = {}
+      
+      // Try to get workflow details first
+      try {
+        const detailsResult = await mcpRequest({
+          url: selectedAgent.mcpServerUrl,
+          token: selectedAgent.mcpServerToken,
+          method: 'tools/call',
+          params: {
+            name: 'get_workflow_details',
+            arguments: { workflowId: selectedAgent.workflowId }
+          }
+        })
+        console.log('Workflow details:', detailsResult)
+      } catch (e) {
+        console.log('Could not get workflow details (non-fatal):', e.message)
+      }
+      
+      // Execute the workflow with the user's message as input
+      // n8n MCP execute_workflow expects: workflowId + input fields directly or as inputData
+      const inputPayload = {
+        message,
+        query: message,
+        input: message,
+        text: message,
+        extraContext: extraContext || '',
+        userProfile: buildUserProfileBlock() || '',
+        conversationId: activeConversation,
+        timestamp: new Date().toISOString(),
+      }
+
+      // n8n-style items: many n8n executions expect `data: [{ json: ... }]`.
+      // We'll provide multiple shapes to maximize compatibility.
+      const webhookJson = {
+        headers: {},
+        query: {},
+        body: inputPayload,
+        // Common fallbacks some n8n AI templates use:
+        prompt: message,
+        guardrailsInput: message,
+      }
+      const httpItemLegacy = { headers: {}, query: {}, body: inputPayload }
+      const httpItemJson = { json: webhookJson }
+
+      const result = await mcpRequest({
+        url: selectedAgent.mcpServerUrl,
+        token: selectedAgent.mcpServerToken,
+        method: 'tools/call',
+        params: {
+          name: 'execute_workflow',
+          arguments: {
+            workflowId: selectedAgent.workflowId,
+            workflow_id: selectedAgent.workflowId, // some servers still use snake_case
+            // Pass input both ways for compatibility
+            message,
+            query: message,
+            input: message,
+            text: message,
+            context: extraContext || '',
+            data: inputPayload,
+            inputData: inputPayload,
+            input_data: inputPayload,
+            payload: inputPayload,
+            body: inputPayload,
+            // n8n workflows frequently consume the first item in an items/data array
+            item: httpItemLegacy,
+            items: [httpItemLegacy, httpItemJson],
+            // The most common n8n execution input shape:
+            data: [httpItemJson],
+            // Extra fallbacks
+            json: webhookJson,
+            request: httpItemLegacy,
+          }
+        }
+      })
+      
+      console.log('MCP workflow execution result:', result)
+      
+      // Parse the result
+      let responseText = ''
+      
+      if (typeof result === 'string') {
+        responseText = result
+      } else if (result?.content) {
+        // MCP format: { content: [{ type: 'text', text: '...' }] }
+        for (const item of result.content) {
+          if (item.type === 'text' && item.text) {
+            responseText += item.text + '\n'
+          }
+        }
+      } else if (result?.output || result?.result || result?.response || result?.data) {
+        const data = result.output || result.result || result.response || result.data
+        responseText = typeof data === 'string' ? data : JSON.stringify(data, null, 2)
+      } else if (result) {
+        responseText = JSON.stringify(result, null, 2)
+      }
+      
+      if (!responseText.trim()) {
+        responseText = 'Workflow executed successfully (no output returned)'
+      }
+      
+      return responseText.trim()
+    } catch (e) {
+      console.error('MCP workflow error:', e)
+      throw new Error(`Workflow execution failed: ${e.message}`)
+    }
+  }
+  
+  // Discover workflows from an MCP server (calls search_workflows tool)
+  const discoverMcpWorkflows = async (serverId) => {
+    const server = mcpServers.find(s => s.id === serverId)
+    if (!server || server.connectState !== 'connected') {
+      showToast('Server must be connected first')
+      return
+    }
+    
+    // Check if server has search_workflows tool
+    const hasSearchTool = server.flows?.some(f => f.name === 'search_workflows')
+    if (!hasSearchTool) {
+      showToast('Server does not have search_workflows tool')
+      return
+    }
+    
+    setMcpServers(prev => prev.map(s => 
+      s.id === serverId ? { ...s, discoveringWorkflows: true } : s
+    ))
+    
+    try {
+      const result = await mcpRequest({
+        url: server.url,
+        token: server.token,
+        method: 'tools/call',
+        params: {
+          name: 'search_workflows',
+          arguments: {}
+        }
+      })
+      
+      console.log('MCP search_workflows raw result:', result)
+      
+      // Parse workflows from result - try multiple formats
+      let workflows = []
+      
+      // Helper to extract workflows from various structures
+      const extractWorkflows = (data) => {
+        if (!data) return []
+        if (Array.isArray(data)) return data
+        if (data.workflows) return data.workflows
+        if (data.data) return extractWorkflows(data.data)
+        if (data.result) return extractWorkflows(data.result)
+        return []
+      }
+      
+      // Result might be in different formats
+      if (Array.isArray(result)) {
+        workflows = result
+      } else if (result?.content) {
+        // MCP tool result format: { content: [{ type: 'text', text: '...' }] }
+        for (const item of result.content) {
+          if (item.type === 'text' && item.text) {
+            try {
+              const parsed = JSON.parse(item.text)
+              console.log('Parsed content text:', parsed)
+              workflows = extractWorkflows(parsed)
+              if (workflows.length > 0) break
+            } catch {
+              // Not JSON, might be formatted text - show it as a single item
+              console.log('Content is not JSON:', item.text)
+            }
+          }
+        }
+        // If still no workflows, show raw content
+        if (workflows.length === 0 && result.content.length > 0) {
+          const textContent = result.content.find(c => c.type === 'text')
+          if (textContent?.text) {
+            workflows = [{ name: 'Raw Response', description: textContent.text.slice(0, 500) }]
+          }
+        }
+      } else if (result?.workflows) {
+        workflows = result.workflows
+      } else if (typeof result === 'object') {
+        workflows = extractWorkflows(result)
+      }
+      
+      console.log('Extracted workflows:', workflows)
+      
+      setMcpServers(prev => prev.map(s => 
+        s.id === serverId ? { ...s, discoveringWorkflows: false, workflows } : s
+      ))
+      showToast(`Found ${workflows.length} workflow(s)`)
+    } catch (e) {
+      console.error('discoverMcpWorkflows error:', e)
+      setMcpServers(prev => prev.map(s => 
+        s.id === serverId ? { ...s, discoveringWorkflows: false } : s
+      ))
+      showToast(`Failed to discover workflows: ${e.message}`)
+    }
+  }
+  
+  // All flows from all connected servers
+  const allMcpFlows = useMemo(() => {
+    return mcpServers
+      .filter(s => s.connectState === 'connected')
+      .flatMap(s => s.flows.map(f => ({ ...f, serverName: s.name })))
+  }, [mcpServers])
+
+  const filteredMcpFlows = useMemo(() => {
+    const q = (mcpFlowFilter || '').trim().toLowerCase()
+    if (!q) return allMcpFlows
+    return allMcpFlows.filter((f) => {
+      const name = (f?.name || '').toLowerCase()
+      const desc = (f?.description || '').toLowerCase()
+      const server = (f?.serverName || '').toLowerCase()
+      return name.includes(q) || desc.includes(q) || server.includes(q)
+    })
+  }, [allMcpFlows, mcpFlowFilter])
+
+  const handleTestAgent = async (agentId) => {
+    const agent = agents.find(a => a.id === agentId)
+    if (!agent) return
+
+    try {
+      const response = await fetch(n8nWebhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'test_agent',
+          agent_id: agentId,
+          timestamp: new Date().toISOString()
+        })
+      })
+
+      if (response.ok) {
+        showToast(`${agent.name} is responding`)
+      } else {
+        throw new Error('Agent test failed')
+      }
+    } catch (err) {
+      showToast(err.message || 'Failed to test agent')
+    }
+  }
+
+  const sendMessageToAgent = async (message, files = [], extraContext = '', signal) => {
+    if (selectedAgent?.provider === 'openrouter') {
+      return await sendMessageToOpenRouter(message, extraContext, signal)
+    }
+
+    if (selectedAgent?.provider === 'lmstudio') {
+      return await sendMessageToLmStudio(message, extraContext, signal)
+    }
+    
+    // MCP Agent - execute workflow via MCP
+    if (selectedAgent?.provider === 'mcp') {
+      return await sendMessageToMcpWorkflow(message, extraContext, signal)
+    }
+
+    // Use agent's own webhook URL if available, otherwise fall back to global webhook
+    const webhookUrl = selectedAgent?.webhookUrl || n8nWebhookUrl
+    
+    if (!selectedAgent || !webhookUrl) {
+      throw new Error('No agent selected or webhook URL not configured')
+    }
+
+    try {
+      console.log('Sending message to agent:', selectedAgent.name)
+      console.log('Using webhook URL:', webhookUrl)
+      console.log('Files attached:', files.length)
+      
+      const payload = {
+        action: 'chat',
+        agent_id: selectedAgent.id,
+        message: message,
+        extra_context: extraContext || null,
+        user_profile: buildUserProfileBlock() || null,
+        files: files.map(f => ({
+          name: f.name,
+          size: f.size,
+          type: f.type,
+          url: f.url
+        })),
+        conversation_id: activeConversation,
+        timestamp: new Date().toISOString(),
+        // Search tool configuration
+        search_enabled: !!searchUrl,
+        search_url: searchUrl || null,
+        search_api: searchUrl ? `${searchUrl.endsWith('/') ? searchUrl : searchUrl + '/'}search?q=` : null
+      }
+      
+      console.log('Request payload:', payload)
+      
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal,
+        body: JSON.stringify(payload)
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error('Agent response error:', errorText)
+        throw new Error(`Agent error: ${response.status} - ${errorText || 'Unknown error'}`)
+      }
+
+      const text = await response.text()
+      console.log('Agent raw response:', text)
+      
+      let responseText = 'No response from agent'
+      
+      // Try to parse as JSON first
+      try {
+        const data = JSON.parse(text)
+        console.log('Agent parsed JSON data:', data)
+        
+        if (Array.isArray(data)) {
+          if (data.length > 0) {
+            const firstItem = data[0]
+            responseText = firstItem.output || firstItem.response || firstItem.message || firstItem.text || JSON.stringify(firstItem)
+          }
+        } else if (typeof data === 'object' && data !== null) {
+          responseText = data.output || data.response || data.message || data.text || JSON.stringify(data)
+        } else if (typeof data === 'string') {
+          responseText = data
+        }
+      } catch (parseErr) {
+        // Not valid JSON - treat as plain text response
+        console.log('Response is plain text (not JSON)')
+        if (text && text.trim()) {
+          responseText = text.trim()
+        }
+      }
+      
+      console.log('Agent final response:', responseText)
+      
+      return responseText
+    } catch (err) {
+      console.error('Send message error:', err)
+      throw err
+    }
+  }
+
+  const fetchRelevantMemories = async (query) => {
+    if (!dbEnabled) return []
+    const { data, error } = await supabase
+      .from('user_memories')
+      .select('content,memory_type,confidence')
+      .eq('owner_user_id', authUser.id)
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(20)
+    if (error) throw error
+    return data || []
+  }
+
+  const isTextLikeFile = (file) => {
+    const name = (file?.name || '').toLowerCase()
+    const type = (file?.type || '').toLowerCase()
+    if (type.startsWith('text/')) return true
+    return [
+      '.md', '.txt', '.json', '.csv',
+      '.js', '.jsx', '.ts', '.tsx',
+      '.py', '.sql', '.html', '.css',
+      '.yml', '.yaml',
+    ].some((ext) => name.endsWith(ext))
+  }
+
+  const chunkText = (text, { chunkSize = 1400, overlap = 200 } = {}) => {
+    const t = (text || '').replace(/\r\n/g, '\n')
+    if (!t.trim()) return []
+    const chunks = []
+    let i = 0
+    while (i < t.length) {
+      const end = Math.min(i + chunkSize, t.length)
+      const slice = t.slice(i, end).trim()
+      if (slice) chunks.push(slice)
+      if (end >= t.length) break
+      i = Math.max(0, end - overlap)
+    }
+    return chunks
+  }
+
+  const extractPdfText = async (file) => {
+    const buf = await file.arrayBuffer()
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buf) })
+    const pdf = await loadingTask.promise
+    const out = []
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const tc = await page.getTextContent()
+      const text = (tc?.items || []).map((it) => it?.str || '').join(' ').trim()
+      if (text) out.push(text)
+    }
+    return out.join('\n\n').trim()
+  }
+
+  const extractDocxText = async (file) => {
+    const buf = await file.arrayBuffer()
+    const res = await mammoth.extractRawText({ arrayBuffer: buf })
+    return (res?.value || '').trim()
+  }
+
+  const openAiAnalyzeText = async ({ text, filename }) => {
+    const key = openAiApiKey.trim()
+    if (!key) throw new Error('OpenAI API key not set (Settings → OCR)')
+    const t = String(text || '').trim()
+    if (!t) return ''
+    const snippet = t.slice(0, 12000)
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: ocrModel || 'gpt-4o',
+        temperature: 0.2,
+        messages: [
+          { role: 'system', content: 'You analyze documents. Respond with clean bullet points (•) only. Be concise.' },
+          {
+            role: 'user',
+            content:
+              `Analyze this ${filename || 'document'}:\n\n` +
+              `${snippet}\n\n` +
+              `Format your response as:\n` +
+              `• Type: [document type]\n` +
+              `• Summary: [one sentence]\n` +
+              `• Key points: [2-3 important details]`,
+          },
+        ],
+      }),
+    })
+    if (!resp.ok) {
+      const body = await resp.text()
+      throw new Error(`OpenAI analysis error: ${resp.status} ${body}`)
+    }
+    const data = await resp.json()
+    return String(data?.choices?.[0]?.message?.content || '').trim()
+  }
+
+  const extractTextForRag = async ({ file, filename, mime }) => {
+    const name = (filename || file?.name || '').toLowerCase()
+    const type = (mime || file?.type || '').toLowerCase()
+
+    if (type.startsWith('image/')) {
+      const raw = await openAiOcrImage(file)
+      const parsed = parseOcrResponse(raw)
+      const extractedText = (parsed.extractedText || '').trim()
+      const imageDescription = (parsed.imageDescription || '').trim()
+      
+      // Combine description and text for embedding
+      if (imageDescription && extractedText) {
+        return `[Image Description]\n${imageDescription}\n\n[Extracted Text]\n${extractedText}`
+      } else if (imageDescription) {
+        return `[Image Description]\n${imageDescription}`
+      }
+      return extractedText
+    }
+
+    if (type.includes('pdf') || name.endsWith('.pdf')) {
+      return await extractPdfText(file)
+    }
+
+    if (
+      name.endsWith('.docx') ||
+      type.includes('officedocument.wordprocessingml.document')
+    ) {
+      return await extractDocxText(file)
+    }
+
+    if (isTextLikeFile(file)) {
+      return String(await file.text()).trim()
+    }
+
+    return ''
+  }
+
+  const openAiEmbed = async (inputs) => {
+    const key = openAiEmbeddingsApiKey
+    if (!key) throw new Error('OpenAI API key not set (set VITE_OPENAI_API_KEY in .env or Settings → Embeddings)')
+    const arr = Array.isArray(inputs) ? inputs : [String(inputs || '')]
+    const resp = await fetch('/api/openai/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: OPENAI_EMBEDDINGS_MODEL,
+        input: arr,
+      }),
+    })
+    if (!resp.ok) {
+      const t = await resp.text()
+      throw new Error(`OpenAI embeddings error: ${resp.status} ${t}`)
+    }
+    const data = await resp.json()
+    const rows = Array.isArray(data?.data) ? data.data : []
+    const embeddings = rows.map((r) => r?.embedding).filter(Boolean)
+    if (embeddings.length !== arr.length) {
+      throw new Error('OpenAI embeddings returned unexpected shape')
+    }
+    return embeddings
+  }
+
+  const fileToDataUrl = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onerror = () => reject(new Error('Failed to read file'))
+      reader.onload = () => resolve(reader.result)
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const openAiOcrImage = async (file) => {
+    const key = openAiApiKey.trim()
+    if (!key) throw new Error('OpenAI API key not set (Settings → OCR)')
+    if (!file?.type?.startsWith('image/')) throw new Error('OCR only supports image files right now')
+
+    const dataUrl = await fileToDataUrl(file)
+    const prompt =
+      'You are an OCR + image analysis system. Return EXACTLY this format:\n\n' +
+      'EXTRACTED_TEXT:\n' +
+      '[All readable text from the image, preserve formatting. If no text is visible, write "No text detected"]\n\n' +
+      'IMAGE_DESCRIPTION:\n' +
+      '[Detailed description of what the image shows - describe the scene, objects, people, colors, composition, and any notable visual elements. This should be comprehensive enough to understand the image without seeing it. 2-4 sentences.]\n\n' +
+      'ANALYSIS:\n' +
+      '• Type: [One word - Screenshot/Photo/Document/Diagram/Chart/Artwork/Logo/etc]\n' +
+      '• Content: [One sentence summary]\n' +
+      '• Key details: [2-3 important specifics if any]\n\n' +
+      'Always provide a detailed IMAGE_DESCRIPTION even if there is no text. Keep analysis brief and factual.'
+
+    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: ocrModel || 'gpt-4o',
+        temperature: 0,
+        messages: [
+          { role: 'system', content: 'You extract text faithfully, describe images in detail, and summarize documents.' },
+          {
+            role: 'user',
+            content: [
+              { type: 'text', text: prompt },
+              { type: 'image_url', image_url: { url: dataUrl } },
+            ],
+          },
+        ],
+      }),
+    })
+    if (!resp.ok) {
+      const t = await resp.text()
+      throw new Error(`OpenAI OCR error: ${resp.status} ${t}`)
+    }
+    const data = await resp.json()
+    const text = data?.choices?.[0]?.message?.content
+    if (!text) throw new Error('OpenAI OCR returned no content')
+    return text
+  }
+
+  const openAiGenerateImage = async (prompt, signal) => {
+    const key = openAiApiKey.trim()
+    if (!key) throw new Error('OpenAI API key not set (Settings → Image Generation)')
+    const p = String(prompt || '').trim()
+    if (!p) throw new Error('Missing image prompt')
+
+    const model = imageGenModel || 'dall-e-3'
+    // DALL-E models support response_format, GPT Image models don't
+    const isDallE = model.toLowerCase().startsWith('dall-e')
+    
+    const requestBody = {
+      model,
+      prompt: p,
+      size: '1024x1024',
+      n: 1,
+    }
+    
+    // Only add response_format for DALL-E models
+    if (isDallE) {
+      requestBody.response_format = 'b64_json'
+    }
+
+    const resp = await fetch('https://api.openai.com/v1/images/generations', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      signal,
+      body: JSON.stringify(requestBody),
+    })
+    if (!resp.ok) {
+      const t = await resp.text()
+      throw new Error(`OpenAI image generation error: ${resp.status} ${t}`)
+    }
+    const data = await resp.json()
+    
+    // Handle response based on model type
+    if (isDallE) {
+    const b64 = data?.data?.[0]?.b64_json
+    if (!b64) throw new Error('OpenAI returned no image data')
+      return `data:image/png;base64,${b64}`
+    } else {
+      // GPT Image models return base64 in b64_json field directly (no response_format needed)
+      const b64 = data?.data?.[0]?.b64_json
+      if (b64) {
+    return `data:image/png;base64,${b64}`
+      }
+      // Fallback to URL if provided
+      const url = data?.data?.[0]?.url
+      if (!url) throw new Error('OpenAI returned no image data')
+      return url
+    }
+  }
+
+  const isImageGenRequest = (text) => {
+    const t = String(text || '').trim()
+    if (!t) return { isRequest: false, prompt: '' }
+    if (t.toLowerCase().startsWith('/image ')) {
+      return { isRequest: true, prompt: t.slice('/image '.length).trim(), explicit: true }
+    }
+    if (t.toLowerCase() === '/image') return { isRequest: true, prompt: '', explicit: true }
+
+    // Lightweight heuristic for natural language
+    const lc = t.toLowerCase()
+    const wants =
+      /\b(generate|create|make|render|draw)\b/.test(lc) &&
+      /\b(image|iomage|imgae|imgage|imege|picture|photo|logo|illustration|art)\b/.test(lc)
+    return { isRequest: !!wants, prompt: t, explicit: false }
+  }
+
+  const parseOcrResponse = (text) => {
+    const t = String(text || '')
+    const extractedMarker = 'EXTRACTED_TEXT:'
+    const descriptionMarker = 'IMAGE_DESCRIPTION:'
+    const analysisMarker = 'ANALYSIS:'
+    
+    const ei = t.indexOf(extractedMarker)
+    const di = t.indexOf(descriptionMarker)
+    const ai = t.indexOf(analysisMarker)
+    
+    if (ei === -1 && di === -1 && ai === -1) {
+      return { extractedText: t.trim(), imageDescription: '', analysis: '' }
+    }
+    
+    // Find the end position for each section
+    const getEndPos = (startIdx, ...otherIndices) => {
+      const nextPositions = otherIndices.filter(i => i > startIdx)
+      return nextPositions.length > 0 ? Math.min(...nextPositions) : t.length
+    }
+    
+    const extractedText = ei !== -1
+      ? t.slice(ei + extractedMarker.length, getEndPos(ei, di, ai)).trim()
+      : ''
+    
+    const imageDescription = di !== -1
+      ? t.slice(di + descriptionMarker.length, getEndPos(di, ai)).trim()
+      : ''
+    
+    const analysis = ai !== -1
+      ? t.slice(ai + analysisMarker.length).trim()
+      : ''
+    
+    // Clean up "No text detected" from extracted text
+    const cleanExtractedText = extractedText.toLowerCase().includes('no text detected') 
+      ? '' 
+      : extractedText
+    
+    return { extractedText: cleanExtractedText, imageDescription, analysis }
+  }
+
+  const testOpenAiKey = async () => {
+    if (!openAiEmbeddingsApiKey) {
+      showToast('Set VITE_OPENAI_API_KEY in .env (or add your key in Settings → Embeddings)')
+      return
+    }
+    setOpenAiConnectError('')
+    setOpenAiConnectState('connecting')
+    try {
+      await openAiEmbed(['ping'])
+      setOpenAiConnectState('connected')
+      showToast('OpenAI key works (embeddings OK)')
+    } catch (e) {
+      console.error(e)
+      setOpenAiConnectState('error')
+      setOpenAiConnectError(e.message || 'Failed to connect')
+      showToast('OpenAI key test failed')
+    }
+  }
+
+  // Auto-test OpenAI key on mount / when key changes (silently set state to connected if working)
+  useEffect(() => {
+    if (!openAiEmbeddingsApiKey) {
+      setOpenAiConnectState('disconnected')
+      openAiKeyTestedRef.current = ''
+      return
+    }
+    // Avoid duplicate tests for same key (e.g. strict-mode double-mount)
+    if (openAiKeyTestedRef.current === openAiEmbeddingsApiKey) return
+    openAiKeyTestedRef.current = openAiEmbeddingsApiKey
+
+    const silentTest = async () => {
+      setOpenAiConnectState('connecting')
+      try {
+        await openAiEmbed(['ping'])
+        setOpenAiConnectState('connected')
+      } catch {
+        setOpenAiConnectState('error')
+      }
+    }
+    silentTest()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openAiEmbeddingsApiKey])
+
+  const processChatUploadsForOcrAndRag = async (files) => {
+    const items = Array.isArray(files) ? files : []
+    if (!ocrAutoProcessChatUploads || items.length === 0) {
+      return { ocrContext: '', postedMessage: '' }
+    }
+    if (!openAiApiKey.trim()) {
+      return { ocrContext: '', postedMessage: '' }
+    }
+
+    const results = []
+    setAttachmentsUploading(true)
+    try {
+      for (let idx = 0; idx < items.length; idx++) {
+        const f = items[idx]
+        setAttachmentProgress((prev) => ({ ...prev, [f.id]: 5 }))
+
+        let extractedText = ''
+        let imageDescription = ''
+        let analysis = ''
+
+        if (f?.file?.type?.startsWith('image/')) {
+          setAttachmentProgress((prev) => ({ ...prev, [f.id]: 25 }))
+          const ocrRaw = await openAiOcrImage(f.file)
+          const parsed = parseOcrResponse(ocrRaw)
+          extractedText = parsed.extractedText || ''
+          imageDescription = parsed.imageDescription || ''
+          analysis = parsed.analysis || ''
+          // Include image description in analysis for context display
+          if (imageDescription) {
+            analysis = `Image Description: ${imageDescription}\n\n${analysis}`
+          }
+          setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
+        } else if (String(f?.name || '').toLowerCase().endsWith('.pdf') || String(f?.type || '').toLowerCase().includes('pdf')) {
+          const pdfText = await extractPdfText(f.file)
+          extractedText = pdfText || ''
+          setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
+          if (ocrAutoPostSummaryToChat && extractedText.trim()) {
+            analysis = await openAiAnalyzeText({ text: extractedText, filename: f.name })
+          } else {
+            analysis = extractedText.trim()
+              ? 'PDF text extracted.'
+              : 'PDF has no extractable text layer (likely scanned).'
+          }
+        } else if (String(f?.name || '').toLowerCase().endsWith('.docx') || String(f?.type || '').toLowerCase().includes('officedocument.wordprocessingml.document')) {
+          const docxText = await extractDocxText(f.file)
+          extractedText = docxText || ''
+          setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
+          if (ocrAutoPostSummaryToChat && extractedText.trim()) {
+            analysis = await openAiAnalyzeText({ text: extractedText, filename: f.name })
+          } else {
+            analysis = extractedText.trim()
+              ? 'DOCX text extracted.'
+              : 'DOCX contained no extractable text.'
+          }
+        } else if (isTextLikeFile(f?.file)) {
+          const text = await f.file.text()
+          extractedText = text || ''
+          if (ocrAutoPostSummaryToChat && extractedText.trim()) {
+            analysis = await openAiAnalyzeText({ text: extractedText, filename: f.name })
+          } else {
+            analysis = 'Text file ingested (no OCR needed).'
+          }
+          setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
+        } else {
+          analysis = `Skipped (unsupported type: ${f?.type || 'unknown'})`
+        }
+
+        const cleanText = String(extractedText || '').trim()
+        const cleanDescription = String(imageDescription || '').trim()
+        
+        // Combine text and description for embedding (images get both text + description)
+        // For images without text, the description alone will be embedded
+        let contentToEmbed = cleanText
+        if (cleanDescription) {
+          contentToEmbed = cleanText 
+            ? `[Image Description]\n${cleanDescription}\n\n[Extracted Text]\n${cleanText}`
+            : `[Image Description]\n${cleanDescription}`
+        }
+
+        // Insert into RAG (Supabase) if enabled - now also works for images without text
+        if (dbEnabled && ocrAutoIngestToRag && contentToEmbed) {
+          setAttachmentProgress((prev) => ({ ...prev, [f.id]: 70 }))
+          const { data: docRow, error: docErr } = await supabase
+            .from('documents')
+            .insert({
+              owner_user_id: authUser.id,
+              title: f.name,
+              source_type: 'upload',
+              metadata: {
+                filename: f.name,
+                mime: f.type,
+                size: f.size,
+                source: 'chat_upload',
+                ocr_model: ocrModel || 'gpt-4o',
+                has_image_description: !!cleanDescription,
+                has_extracted_text: !!cleanText,
+              },
+            })
+            .select('document_id')
+            .single()
+          if (docErr) throw docErr
+
+          const chunks = chunkText(contentToEmbed)
+          const BATCH = 32
+          for (let i = 0; i < chunks.length; i += BATCH) {
+            const batch = chunks.slice(i, i + BATCH)
+            const embeddings = await openAiEmbed(batch)
+            const rows = batch.map((content, j) => ({
+              document_id: docRow.document_id,
+              chunk_index: i + j,
+              content,
+              metadata: { 
+                filename: f.name, 
+                source: 'chat_upload',
+                content_type: cleanDescription ? 'image_description' : 'text'
+              },
+              embedding: embeddings[j],
+            }))
+            const { error: chunkErr } = await supabase.from('document_chunks').insert(rows)
+            if (chunkErr) throw chunkErr
+          }
+        }
+
+        setAttachmentProgress((prev) => ({ ...prev, [f.id]: 100 }))
+
+        results.push({
+          name: f.name,
+          type: f.type,
+          extractedText: cleanText,
+          imageDescription: cleanDescription,
+          analysis,
+        })
+      }
+    } finally {
+      setAttachmentsUploading(false)
+      // leave progress visible for the bubble UI; we'll clear after send
+    }
+
+    // Build clean formatted analysis for chat display
+    const ocrContextLines = results.map((r) => {
+      const head = `File: ${r.name} (${r.type || 'unknown'})`
+      const analysisLine = r.analysis ? `Analysis: ${r.analysis}` : ''
+      const textLine = r.extractedText ? `Extracted text:\n${r.extractedText.slice(0, 2500)}` : 'Extracted text: (none)'
+      return [head, analysisLine, textLine].filter(Boolean).join('\n')
+    })
+    const ocrContext =
+      ocrContextLines.length > 0
+        ? `[Document Analysis]\n\n${ocrContextLines.join('\n\n')}`
+        : ''
+
+    // Build a cleaner, markdown-formatted message for chat display
+    const formatPostedMessage = () => {
+      if (!ocrAutoPostSummaryToChat || results.length === 0) return ''
+      
+      const fileCount = results.length
+      const header = fileCount === 1 
+        ? `📎 **Document Analyzed**` 
+        : `📎 **${fileCount} Documents Analyzed**`
+      
+      const sections = results.map((r) => {
+        const lines = []
+        
+        // File name with type indicator
+        const typeEmoji = r.type?.startsWith('image/') ? '🖼️' : 
+                         r.type === 'application/pdf' ? '📕' : '📄'
+        lines.push(`${typeEmoji} **${r.name}**`)
+        
+        // Analysis as clean bullet points
+        if (r.analysis) {
+          const cleanAnalysis = r.analysis
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0)
+            .map(line => {
+              // Ensure each line is a bullet point
+              if (!line.startsWith('-') && !line.startsWith('•') && !line.startsWith('*')) {
+                return `• ${line}`
+              }
+              return line.replace(/^[-*]\s*/, '• ')
+            })
+            .join('\n')
+          lines.push(cleanAnalysis)
+        }
+        
+        // Extracted text preview (if any)
+        if (r.extractedText && r.extractedText.length > 0) {
+          const preview = r.extractedText
+            .slice(0, 200)
+            .replace(/\n+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+          const suffix = r.extractedText.length > 200 ? '…' : ''
+          if (preview) {
+            lines.push(`\n> _"${preview}${suffix}"_`)
+          }
+        }
+        
+        return lines.join('\n')
+      })
+      
+      return `${header}\n\n${sections.join('\n\n---\n\n')}`
+    }
+
+    const postedMessage = formatPostedMessage()
+
+    return { ocrContext, postedMessage }
+  }
+
+  const handleRagFilePick = (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length === 0) return
+    const newFiles = files.map((file) => ({
+      id: crypto.randomUUID(),
+      file,
+      name: file.name,
+      size: file.size,
+      type: file.type || 'application/octet-stream',
+    }))
+    setRagUploadFiles((prev) => [...prev, ...newFiles])
+    showToast(`${files.length} file${files.length > 1 ? 's' : ''} added for RAG`)
+    if (e.target) e.target.value = ''
+  }
+
+  const removeRagFile = (id) => {
+    setRagUploadFiles((prev) => prev.filter((f) => f.id !== id))
+  }
+
+  const ingestRagFiles = async () => {
+    if (!dbEnabled) {
+      showToast('Sign in (Supabase) to upload to RAG')
+      return
+    }
+    if (!openAiEmbeddingsApiKey) {
+      showToast('Set VITE_OPENAI_API_KEY in .env (or add your key in Settings → Embeddings)')
+      return
+    }
+    if (ragUploadFiles.length === 0) return
+
+    setRagIngestError('')
+    setRagIngestState('ingesting')
+    setRagIngestProgress({ fileIndex: 0, fileCount: ragUploadFiles.length, message: 'Starting…' })
+
+    try {
+      for (let fileIdx = 0; fileIdx < ragUploadFiles.length; fileIdx++) {
+        const f = ragUploadFiles[fileIdx]
+        setRagIngestProgress({
+          fileIndex: fileIdx + 1,
+          fileCount: ragUploadFiles.length,
+          message: `Reading ${f.name}…`,
+        })
+
+        const text = await extractTextForRag({ file: f.file, filename: f.name, mime: f.type })
+        const chunks = chunkText(text)
+        if (chunks.length === 0) continue
+
+        setRagIngestProgress({
+          fileIndex: fileIdx + 1,
+          fileCount: ragUploadFiles.length,
+          message: `Creating document for ${f.name}…`,
+        })
+
+        const { data: docRow, error: docErr } = await supabase
+          .from('documents')
+          .insert({
+            owner_user_id: authUser.id,
+            title: f.name,
+            source_type: 'upload',
+            metadata: { filename: f.name, mime: f.type, size: f.size, source: 'bulk_upload' },
+          })
+          .select('document_id')
+          .single()
+        if (docErr) throw docErr
+
+        // Embed + insert chunks in batches
+        const BATCH = 32
+        for (let i = 0; i < chunks.length; i += BATCH) {
+          const batch = chunks.slice(i, i + BATCH)
+          setRagIngestProgress({
+            fileIndex: fileIdx + 1,
+            fileCount: ragUploadFiles.length,
+            message: `Embedding ${f.name} (${Math.min(i + BATCH, chunks.length)}/${chunks.length})…`,
+          })
+          const embeddings = await openAiEmbed(batch)
+          const rows = batch.map((content, j) => ({
+            document_id: docRow.document_id,
+            chunk_index: i + j,
+            content,
+            metadata: { filename: f.name },
+            embedding: embeddings[j],
+          }))
+          const { error: chunkErr } = await supabase.from('document_chunks').insert(rows)
+          if (chunkErr) throw chunkErr
+        }
+      }
+
+      setRagIngestState('done')
+      setRagIngestProgress((p) => ({ ...p, message: 'Done' }))
+      setRagUploadFiles([])
+      showToast('Uploaded documents to RAG')
+    } catch (e) {
+      console.error(e)
+      setRagIngestState('error')
+      setRagIngestError(e.message || 'Failed to ingest documents')
+      setRagIngestProgress((p) => ({ ...p, message: 'Error' }))
+      showToast('RAG upload failed')
+    }
+  }
+
+  const fetchRelevantDocChunks = async (query) => {
+    if (!dbEnabled) return []
+    const q = (query || '').trim()
+    if (!q) return []
+
+    // Prefer embeddings search when configured (falls back to keyword if RPC isn't installed)
+    if (openAiEmbeddingsApiKey) {
+      try {
+        const [queryEmbedding] = await openAiEmbed([q])
+        const { data, error } = await supabase.rpc('match_document_chunks', {
+          query_embedding: queryEmbedding,
+          match_count: 6,
+        })
+        if (error) throw error
+        return data || []
+      } catch (e) {
+        // silently fall back
+        console.warn('Embeddings RAG unavailable, falling back to keyword match:', e?.message || e)
+      }
+    }
+
+    // Basic (non-embedding) retrieval: keyword match
+    const term = q.split(/\s+/).slice(0, 6).join(' ')
+    const { data, error } = await supabase
+      .from('document_chunks')
+      .select('content,document_id,chunk_index')
+      .ilike('content', `%${term}%`)
+      .limit(6)
+    if (error) throw error
+    return data || []
+  }
+
+  // Execute web search via SearXNG (uses Vite proxy to avoid CORS)
+  const executeWebSearch = async (query) => {
+    if (!searchUrl || !query.trim()) {
+      return { error: 'Search not configured' }
+    }
+    setTypingStatus('searching')
+    try {
+      // Use proxy to avoid CORS issues
+      const apiUrl = `/api/search?q=${encodeURIComponent(query)}&format=json`
+      const resp = await fetch(apiUrl)
+      if (!resp.ok) throw new Error(`Search failed: ${resp.status}`)
+      const data = await resp.json()
+      const results = (data.results || []).slice(0, 5).map(r => ({
+        title: r.title,
+        url: r.url,
+        snippet: r.content || ''
+      }))
+      setTypingStatus('generating') // Back to generating after search
+      return { results }
+    } catch (e) {
+      console.error('Web search error:', e)
+      setTypingStatus('generating')
+      return { error: e.message }
+    }
+  }
+
+  const sendMessageToOpenRouter = async (message, extraContext = '', signal) => {
+    if (!openRouterApiKey.trim()) {
+      throw new Error('OpenRouter API key not set (Settings → OpenRouter)')
+    }
+    if (!selectedAgent?.model) {
+      throw new Error('OpenRouter agent missing model')
+    }
+
+    const memories = await fetchRelevantMemories(message).catch(() => [])
+    const docChunks = await fetchRelevantDocChunks(message).catch(() => [])
+
+    const memoryBlock = memories.length
+      ? `Known user info (memory):\n${memories
+          .slice(0, 10)
+          .map(m => `- (${m.memory_type}) ${m.content}`)
+          .join('\n')}`
+      : ''
+
+    const ragBlock = docChunks.length
+      ? `Relevant docs (RAG):\n${docChunks
+          .slice(0, 5)
+          .map((c, i) => `--- Chunk ${i + 1} ---\n${c.content}`)
+          .join('\n\n')}`
+      : ''
+
+    const profileBlock = buildUserProfileBlock()
+    const systemParts = [
+      selectedAgent.systemPrompt || 'You are a helpful assistant.',
+      searchUrl ? 'You have access to a web_search tool to search the internet for current information.' : '',
+      profileBlock,
+      memoryBlock,
+      ragBlock,
+    ].filter(Boolean)
+    const system = systemParts.join('\n\n')
+
+    // Build the user message with any OCR/document context prepended
+    let userMessageContent = message
+    if (extraContext && extraContext.trim()) {
+      userMessageContent = `[Document/Image Analysis Context]\n${extraContext.trim()}\n\n[User's Question]\n${message}`
+    }
+
+    // Include recent chat history for continuity (truncate to avoid token limits)
+    const history = (currentConversation?.messages || [])
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-10) // Reduced from 20 to 10
+      .map(m => {
+        let content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        // Skip or truncate messages with base64 images
+        if (content.includes('data:image/')) {
+          content = content.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[image]')
+        }
+        // Truncate very long messages
+        if (content.length > 4000) {
+          content = content.slice(0, 4000) + '... [truncated]'
+        }
+        return { role: m.role, content }
+      })
+
+    const messages = [{ role: 'system', content: system }, ...history, { role: 'user', content: userMessageContent }]
+
+    const basePayload = {
+      model: selectedAgent.model,
+      temperature: Number(selectedAgent.temperature ?? 0.7),
+    }
+
+    // Search tool definition
+    const searchTool = {
+      type: 'function',
+      function: {
+        name: 'web_search',
+        description: 'Search the web for current information. Use this when you need up-to-date information or facts you are unsure about.',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'The search query'
+            }
+          },
+          required: ['query']
+        }
+      }
+    }
+
+    const makeRequest = async (msgs, includeTools = false) => {
+      const payload = { ...basePayload, messages: msgs }
+      if (includeTools && searchUrl) {
+        payload.tools = [searchTool]
+    }
+
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${openRouterApiKey.trim()}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': window.location.origin,
+        'X-Title': 'chatgpt-clone',
+      },
+        signal,
+      body: JSON.stringify(payload),
+    })
+
+    if (!resp.ok) {
+      const t = await resp.text()
+        // Give a clearer message for the common auth failure case
+        if (resp.status === 401) {
+          throw new Error(
+            `OpenRouter auth failed (401). Your key is invalid/revoked or not an OpenRouter key. Re-paste it in Settings → OpenRouter and click Connect again.\n\n${t}`
+          )
+        }
+      throw new Error(`OpenRouter error: ${resp.status} ${t}`)
+      }
+      return resp.json()
+    }
+
+    // Try with tools first, fallback to without if model doesn't support it
+    let data
+    let useTools = !!searchUrl
+    
+    try {
+      data = await makeRequest(messages, useTools)
+    } catch (e) {
+      // If tools failed (400 error), retry without tools
+      if (useTools && e.message.includes('400')) {
+        console.log('Model may not support tools, retrying without...')
+        useTools = false
+        data = await makeRequest(messages, false)
+      } else {
+        throw e
+      }
+    }
+    
+    let choice = data?.choices?.[0]
+
+    // Handle tool calls (max 3 iterations to prevent infinite loops)
+    let iterations = 0
+    while (useTools && choice?.message?.tool_calls && iterations < 3) {
+      iterations++
+      const toolCalls = choice.message.tool_calls
+      const updatedMessages = [...messages, choice.message]
+
+      for (const tc of toolCalls) {
+        if (tc.function?.name === 'web_search') {
+          try {
+            const args = JSON.parse(tc.function.arguments || '{}')
+            const searchResult = await executeWebSearch(args.query)
+            updatedMessages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify(searchResult)
+            })
+          } catch (e) {
+            updatedMessages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ error: e.message })
+            })
+          }
+        }
+      }
+
+      // Continue conversation with tool results
+      data = await makeRequest(updatedMessages, true)
+      choice = data?.choices?.[0]
+    }
+
+    const text = choice?.message?.content
+    if (!text) throw new Error('OpenRouter returned no content')
+    return text
+  }
+
+  const sendMessageToLmStudio = async (message, extraContext = '', signal) => {
+    const base = normalizeOpenAiCompatibleBaseUrl(selectedAgent?.baseUrl || lmStudioBaseUrl)
+    if (!base) {
+      throw new Error('LM Studio base URL not set (Settings → LM Studio)')
+    }
+    if (!selectedAgent?.model) {
+      throw new Error('LM Studio agent missing model')
+    }
+
+    const memories = await fetchRelevantMemories(message).catch(() => [])
+    const docChunks = await fetchRelevantDocChunks(message).catch(() => [])
+
+    const memoryBlock = memories.length
+      ? `Known user info (memory):\n${memories
+          .slice(0, 10)
+          .map(m => `- (${m.memory_type}) ${m.content}`)
+          .join('\n')}`
+      : ''
+
+    const ragBlock = docChunks.length
+      ? `Relevant docs (RAG):\n${docChunks
+          .slice(0, 5)
+          .map((c, i) => `--- Chunk ${i + 1} ---\n${c.content}`)
+          .join('\n\n')}`
+      : ''
+
+    const profileBlock = buildUserProfileBlock()
+    const systemParts = [
+      selectedAgent.systemPrompt || 'You are a helpful assistant.',
+      profileBlock,
+      memoryBlock,
+      ragBlock,
+    ].filter(Boolean)
+    const system = systemParts.join('\n\n')
+
+    let userMessageContent = message
+    if (extraContext && extraContext.trim()) {
+      userMessageContent = `[Document/Image Analysis Context]\n${extraContext.trim()}\n\n[User's Question]\n${message}`
+    }
+
+    const history = (currentConversation?.messages || [])
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-10)
+      .map(m => {
+        let content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        if (content.includes('data:image/')) {
+          content = content.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[image]')
+        }
+        if (content.length > 4000) {
+          content = content.slice(0, 4000) + '... [truncated]'
+        }
+        return { role: m.role, content }
+      })
+
+    const messages = [{ role: 'system', content: system }, ...history, { role: 'user', content: userMessageContent }]
+
+    const headers = { 'Content-Type': 'application/json' }
+    const key = (selectedAgent?.apiKey || lmStudioApiKey || '').trim()
+    if (key) headers.Authorization = `Bearer ${key}`
+
+    const resp = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers,
+      signal,
+      body: JSON.stringify({
+        model: selectedAgent.model,
+        messages,
+        temperature: Number(selectedAgent.temperature ?? 0.7),
+      }),
+    })
+    const text = await resp.text()
+    if (!resp.ok) {
+      throw new Error(`LM Studio error: ${resp.status} ${text}`)
+    }
+    let data
+    try {
+      data = JSON.parse(text)
+    } catch {
+      throw new Error(`LM Studio returned non-JSON response: ${text.slice(0, 200)}`)
+    }
+    const out = data?.choices?.[0]?.message?.content
+    if (!out) throw new Error('LM Studio returned no content')
+    return out
+  }
+
+  const appBody = (
+    <div className="app">
+      {/* Sidebar */}
+      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showCodePage) ? 'hidden' : ''}`}>
+        <div className="sidebar-header">
+          <div className="sidebar-top-actions">
+            {/* Sidebar toggle (close) */}
+            <button
+              className="sidebar-nav-btn sidebar-toggle-btn"
+              type="button"
+              onClick={() => setSidebarOpen(false)}
+              title="Close sidebar"
+            >
+              <span className="sidebar-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <line x1="9" y1="3" x2="9" y2="21" />
+                </svg>
+              </span>
+            </button>
+
+            <button className="sidebar-nav-btn" type="button" onClick={createNewChat}>
+              <span className="sidebar-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 20h9"/>
+                  <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+                </svg>
+              </span>
+              <span className="sidebar-nav-label">New chat</span>
+            </button>
+
+            <button
+              className="sidebar-nav-btn"
+              type="button"
+              onClick={() => {
+                setSidebarChatSearchOpen((v) => !v)
+                setTimeout(() => sidebarSearchInputRef.current?.focus(), 0)
+              }}
+            >
+              <span className="sidebar-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+              </span>
+              <span className="sidebar-nav-label">Search chats</span>
+            </button>
+
+            {sidebarChatSearchOpen && (
+              <div className="sidebar-search-wrap">
+                <input
+                  ref={sidebarSearchInputRef}
+                  className="sidebar-search-input"
+                  type="text"
+                  value={sidebarChatSearchQuery}
+                  onChange={(e) => setSidebarChatSearchQuery(e.target.value)}
+                  placeholder="Search chats..."
+                />
+              </div>
+            )}
+
+            <button
+              className="sidebar-nav-btn"
+              type="button"
+              onClick={() => setShowGalleryPage(true)}
+            >
+              <span className="sidebar-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <circle cx="8.5" cy="8.5" r="1.5" />
+                  <path d="m21 15-5-5L5 21" />
+                </svg>
+              </span>
+              <span className="sidebar-nav-label">Library</span>
+            </button>
+
+            <button
+              className="sidebar-nav-btn"
+              type="button"
+              onClick={() => setShowKnowledgeBasePage(true)}
+            >
+              <span className="sidebar-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                  <path d="M8 7h8"/>
+                  <path d="M8 11h8"/>
+                  <path d="M8 15h5"/>
+                </svg>
+              </span>
+              <span className="sidebar-nav-label">Knowledge Base</span>
+            </button>
+
+            <button
+              className="sidebar-nav-btn"
+              type="button"
+              onClick={() => setShowCodePage(true)}
+            >
+              <span className="sidebar-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="16 18 22 12 16 6"/>
+                  <polyline points="8 6 2 12 8 18"/>
+                  <line x1="12" y1="2" x2="12" y2="22" strokeDasharray="2 2"/>
+                </svg>
+              </span>
+              <span className="sidebar-nav-label">Code</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Projects Section */}
+        <div className="projects-section">
+          <div className="projects-section-header">
+            <span 
+              className={`chats-section-chevron ${projectsExpanded ? 'expanded' : ''}`}
+              onClick={() => setProjectsExpanded(v => !v)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+            </span>
+            <button
+              className="projects-folder-btn"
+              onClick={() => setShowCreateProjectModal(true)}
+              title="Create new project"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+              </svg>
+            </button>
+            <span 
+              className="chats-section-title projects-title-clickable"
+              onClick={() => setProjectsExpanded(v => !v)}
+            >
+              Projects
+            </span>
+            <span 
+              className="chats-section-count"
+              onClick={() => setProjectsExpanded(v => !v)}
+            >
+              {projects.length}
+            </span>
+          </div>
+
+          {projectsExpanded && projects.length > 0 && (
+            <div className="projects-list">
+              {projects.map(project => (
+                <div
+                  key={project.id}
+                  className={`project-item ${selectedProjectId === project.id ? 'active' : ''}`}
+                  onClick={() => setSelectedProjectId(selectedProjectId === project.id ? null : project.id)}
+                >
+                  <div 
+                    className="project-color-dot" 
+                    style={{ backgroundColor: project.color }}
+                  />
+                  <span className="project-name">{project.name}</span>
+                  <span className="project-chat-count">
+                    {project.chatIds?.length || 0}
+                  </span>
+                  <button
+                    className="project-delete-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      if (confirm(`Delete project "${project.name}"?`)) {
+                        deleteProject(project.id)
+                      }
+                    }}
+                    title="Delete project"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 6h18"/>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Chats Section Header */}
+        <div
+          className="chats-section-header"
+          onClick={() => setChatsExpanded((v) => !v)}
+        >
+          <span className={`chats-section-chevron ${chatsExpanded ? 'expanded' : ''}`}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </span>
+          <span className="chats-section-title">Chats</span>
+          <span className="chats-section-count">{filteredConversations.length}</span>
+        </div>
+
+        <div className={`conversation-list ${chatsExpanded ? '' : 'collapsed'}`}>
+          {filteredConversations.map(conv => (
+            <div
+              key={conv.id}
+              className={`conversation-item ${conv.id === activeConversation ? 'active' : ''}`}
+              onClick={() => setActiveConversation(conv.id)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+              <span className="conversation-title">{conv.title}</span>
+              <button 
+                className="delete-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  deleteConversation(conv.id)
+                }}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M3 6h18"></path>
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* Sidebar Footer */}
+        <div className="sidebar-footer">
+          <div className="sidebar-footer-row">
+          <div
+            className="user-profile clickable"
+            onClick={() => setShowProfilePage(true)}
+            title="Edit profile"
+          >
+            <div className="user-avatar">{user.avatar}</div>
+            <div className="user-info">
+              <span className="user-name">{user.name}</span>
+              <span className="user-email">{user.email}</span>
+            </div>
+            </div>
+            <button
+              className="sidebar-settings-btn"
+              onClick={() => setShowSettingsPage(true)}
+              title="Settings"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main Chat Area */}
+      <main className="chat-main">
+        {/* Chat View */}
+        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showCodePage) ? 'slide-out' : 'slide-in'}`}>
+          {!sidebarOpen && (
+          <button className="open-sidebar" onClick={() => setSidebarOpen(true)}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+              <line x1="9" y1="3" x2="9" y2="21"></line>
+            </svg>
+          </button>
+        )}
+
+        <div className="chat-container">
+          {!currentConversation || currentConversation?.messages.length === 0 ? (
+            <div className="welcome-screen">
+              <div className="logo">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.8956zm16.0993 3.8558L12.6 8.3829l2.02-1.1638a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997z"/>
+                </svg>
+              </div>
+              <h1>How can I help you today?</h1>
+              {selectedAgent && (
+                <div className="active-agent-indicator">
+                  <div className="active-agent-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+                      <path d="M12 6v6l4 2"/>
+                    </svg>
+                  </div>
+                  <div className="active-agent-info">
+                    <span className="active-agent-name">{selectedAgent.name}</span>
+                    <span className="active-agent-label">Connected via n8n</span>
+                  </div>
+                </div>
+              )}
+              <div className="suggestions">
+                <button onClick={() => { chatInputRef.current?.setValue("Explain quantum computing in simple terms"); chatInputRef.current?.focus() }}>
+                  Explain quantum computing in simple terms
+                </button>
+                <button onClick={() => { chatInputRef.current?.setValue("Write a creative story about a robot"); chatInputRef.current?.focus() }}>
+                  Write a creative story about a robot
+                </button>
+                <button onClick={() => { chatInputRef.current?.setValue("Help me debug my code"); chatInputRef.current?.focus() }}>
+                  Help me debug my code
+                </button>
+                <button onClick={() => { chatInputRef.current?.setValue("What are some healthy recipes?"); chatInputRef.current?.focus() }}>
+                  What are some healthy recipes?
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="messages">
+              {currentConversation?.messages.map(message => (
+                <div
+                  key={message.id}
+                  className={`message ${message.role}${message.id === newlyGeneratedMessageId ? ' new-message' : ''}`}
+                  data-conversation-id={activeConversation}
+                >
+                  {message.role === 'assistant' && (
+                    <div className="message-avatar">
+                      {selectedAgent ? (
+                        <div className="agent-avatar">
+                          {selectedAgent.name?.charAt(0)?.toUpperCase() || 'A'}
+                        </div>
+                      ) : (
+                      <svg viewBox="0 0 24 24" fill="currentColor" className="assistant-avatar">
+                        <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729z"/>
+                      </svg>
+                      )}
+                    </div>
+                  )}
+                  <div className="message-content">
+                    {message.role === 'user' && (
+                      <div className="user-message-wrapper">
+                        {/* Show attached files */}
+                        {message.attachments && message.attachments.length > 0 && (
+                          <div className="message-attachments">
+                            {message.attachments.map((file, idx) => (
+                              <div key={idx} className="message-attachment-item">
+                                {file.type?.startsWith('image/') && (file.url || file.preview) ? (
+                                  <img 
+                                    src={file.url || file.preview} 
+                                    alt={file.name} 
+                                    className="message-attachment-image"
+                                    onClick={() => {
+                                      const src = file.url || file.preview
+                                      if (src) window.open(src, '_blank')
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="message-attachment-file">
+                                    <div className={`attachment-file-icon ${file.type?.startsWith('image/') ? 'image-icon' : ''}`}>
+                                      {file.type?.startsWith('image/') ? (
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                          <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                          <circle cx="8.5" cy="8.5" r="1.5"/>
+                                          <path d="m21 15-5-5L5 21"/>
+                                        </svg>
+                                      ) : (
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                          <polyline points="14 2 14 8 20 8"/>
+                                        </svg>
+                                      )}
+                                    </div>
+                                    <div className="attachment-file-info">
+                                      <span className="attachment-file-name">{file.name}</span>
+                                      <span className="attachment-file-size">
+                                        {file.size ? (file.size / 1024).toFixed(1) + ' KB' : ''}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      <div className="user-message-bubble">
+                        <span className="user-message-text">{message.content}</span>
+                        </div>
+                      </div>
+                    )}
+                    {message.role === 'assistant' && (
+                      <>
+                        <div className="message-role">{selectedAgent?.name || 'ChatGPT'}</div>
+                        {message.content?.type === 'search' ? (
+                          <div 
+                            className="message-text search-message"
+                            dangerouslySetInnerHTML={{ __html: message.content.html }}
+                          />
+                        ) : (
+                          <div 
+                            className="message-text formatted-response"
+                            dangerouslySetInnerHTML={{ __html: formatMarkdown(message.content) }}
+                          />
+                        )}
+                        <div className="message-actions">
+                          <button 
+                            className={`message-action-btn ${copiedMessageId === message.id ? 'active' : ''}`}
+                            title="Copy"
+                            onClick={() => handleCopy(message.content?.type === 'search' ? message.content.query : message.content, message.id)}
+                          >
+                            {copiedMessageId === message.id ? (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                              </svg>
+                            ) : (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                              </svg>
+                            )}
+                          </button>
+                          <button 
+                            type="button"
+                            className={`message-action-btn ${reactions[message.id] === 'liked' ? 'active liked' : ''}`}
+                            title="Good response"
+                            onPointerDown={(e) => {
+                              e.preventDefault()
+                              handleReaction(message.id, 'liked')
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" fill={reactions[message.id] === 'liked' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+                              <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                            </svg>
+                          </button>
+                          <button 
+                            type="button"
+                            className={`message-action-btn ${reactions[message.id] === 'disliked' ? 'active disliked' : ''}`}
+                            title="Bad response"
+                            onPointerDown={(e) => {
+                              e.preventDefault()
+                              handleReaction(message.id, 'disliked')
+                            }}
+                          >
+                            <svg viewBox="0 0 24 24" fill={reactions[message.id] === 'disliked' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+                              <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path>
+                            </svg>
+                          </button>
+                          <button 
+                            className="message-action-btn" 
+                            title="Share"
+                            onClick={() => handleShare(message.content?.type === 'search' ? `Search results for: ${message.content.query}` : message.content)}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                              <polyline points="17 8 12 3 7 8"></polyline>
+                              <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                          </button>
+                          <button 
+                            className="message-action-btn" 
+                            title="Regenerate"
+                            onClick={() => handleRegenerate(message.id)}
+                            disabled={isTyping}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M23 4v6h-6"></path>
+                              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                            </svg>
+                          </button>
+                          <button className="message-action-btn" title="More options">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <circle cx="12" cy="12" r="1"></circle>
+                              <circle cx="19" cy="12" r="1"></circle>
+                              <circle cx="5" cy="12" r="1"></circle>
+                            </svg>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {/* Only show the global typing indicator if we are not already showing the in-message placeholder */}
+              {isTyping && (
+                <div className="message assistant">
+                  <div className="message-avatar">
+                    {selectedAgent ? (
+                      <div className="agent-avatar">
+                        {selectedAgent.name?.charAt(0)?.toUpperCase() || 'A'}
+                      </div>
+                    ) : (
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="assistant-avatar">
+                      <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729z"/>
+                    </svg>
+                    )}
+                  </div>
+                  <div className="message-content">
+                    <div className="message-role">{selectedAgent?.name || 'ChatGPT'}</div>
+                    <div className="typing-status">
+                      {typingStatus === 'image' && 'Generating image...'}
+                      {typingStatus === 'searching' && 'Searching the web...'}
+                      {typingStatus === 'generating' && 'Generating response...'}
+                      {!typingStatus && 'Thinking...'}
+                    </div>
+                    <div className="typing-indicator">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+          )}
+
+          <div 
+            className={`input-area ${isDraggingOnInput ? 'dragging' : ''}`}
+            onDragOver={handleInputDragOver}
+            onDragLeave={handleInputDragLeave}
+            onDrop={handleInputDrop}
+          >
+            {isDraggingOnInput && (
+              <div className="input-drop-overlay">
+                <div className="drop-indicator">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="17 8 12 3 7 8"/>
+                    <line x1="12" y1="3" x2="12" y2="15"/>
+                  </svg>
+                  <span>Drop files here</span>
+                </div>
+              </div>
+            )}
+            <form onSubmit={handleSubmit} className="input-form">
+              <div className="input-wrapper">
+                {/* Attached Files Preview */}
+                {attachedFiles.length > 0 && (
+                  <div className={`attached-files ${attachmentsUploading ? 'uploading' : ''}`}>
+                    {attachmentsUploading && (
+                      <div className="attached-files-uploading">
+                        <div className="upload-spinner"></div>
+                        <span>Processing files...</span>
+                      </div>
+                    )}
+                    {attachedFiles.map(file => (
+                      <div key={file.id} className="attached-file">
+                        {file.preview ? (
+                          <img src={file.preview} alt={file.name} className="file-preview-image" />
+                        ) : (
+                          <div className={`file-icon ${getFileIcon(file.type)}`}>
+                            {getFileIcon(file.type) === 'pdf' && (
+                              <svg viewBox="0 0 24 24" fill="currentColor">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6z"/>
+                                <path d="M14 2v6h6"/>
+                              </svg>
+                            )}
+                            {getFileIcon(file.type) === 'image' && (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                                <circle cx="8.5" cy="8.5" r="1.5"/>
+                                <path d="m21 15-5-5L5 21"/>
+                              </svg>
+                            )}
+                            {getFileIcon(file.type) === 'file' && (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                              </svg>
+                            )}
+                            {getFileIcon(file.type) === 'code' && (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="16 18 22 12 16 6"/>
+                                <polyline points="8 6 2 12 8 18"/>
+                              </svg>
+                            )}
+                            {(getFileIcon(file.type) === 'doc' || getFileIcon(file.type) === 'sheet' || getFileIcon(file.type) === 'presentation') && (
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="16" y1="13" x2="8" y2="13"/>
+                                <line x1="16" y1="17" x2="8" y2="17"/>
+                              </svg>
+                            )}
+                          </div>
+                        )}
+                        <div className="file-info">
+                          <span className="file-name">{file.name}</span>
+                          <span className="file-size">
+                            {attachmentProgress[file.id] !== undefined && attachmentProgress[file.id] < 100
+                              ? `Uploading ${attachmentProgress[file.id]}%`
+                              : formatFileSize(file.size)
+                            }
+                          </span>
+                        </div>
+                        {attachmentProgress[file.id] !== undefined && attachmentProgress[file.id] < 100 && (
+                          <div className="file-progress-bar">
+                            <div 
+                              className="file-progress-fill" 
+                              style={{ width: `${attachmentProgress[file.id]}%` }}
+                            />
+                          </div>
+                        )}
+                        <button 
+                          type="button" 
+                          className="remove-file-btn"
+                          onClick={() => removeAttachedFile(file.id)}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <ChatTextarea
+                  ref={chatInputRef}
+                  onSubmit={(msg) => handleSubmit(null, msg)}
+                  onHistoryNav={setInputHistoryIndex}
+                  placeholder="Reply..."
+                  disabled={isTyping}
+                  userMessages={userMessagesForHistory}
+                />
+                <div className="input-bottom-bar">
+                  <div className="input-actions-left">
+                    <button 
+                      type="button" 
+                      className="action-btn"
+                      onClick={() => setShowUploadModal(true)}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                    </button>
+                    <button type="button" className="action-btn">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M23 4v6h-6"></path>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="input-actions-right">
+                    <div className="model-selector-container">
+                      <div 
+                        className="model-selector"
+                        onClick={() => setShowAgentSelector(!showAgentSelector)}
+                      >
+                        <span className="model-name">
+                          {selectedAgent ? selectedAgent.name : 'Select Agent'}
+                        </span>
+                        {selectedAgent && (
+                          <span className={`model-badge agent ${selectedAgent.provider}`}>
+                            {selectedAgent.provider === 'openrouter'
+                              ? 'openrouter'
+                              : selectedAgent.provider === 'lmstudio'
+                                ? 'lmstudio'
+                                : selectedAgent.provider === 'mcp'
+                                  ? 'mcp'
+                                  : 'n8n'}
+                          </span>
+                        )}
+                        <svg className="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                      </div>
+                      {showAgentSelector && (
+                        <div className="model-dropdown">
+                          {allAgents.map(agent => (
+                            <button 
+                              key={agent.id}
+                              className={`model-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+                              onClick={() => {
+                                setSelectedAgent(agent)
+                                setShowAgentSelector(false)
+                              }}
+                            >
+                              <span className="model-option-name">{agent.name}</span>
+                              <span className="model-option-badge">
+                                {agent.provider === 'openrouter'
+                                  ? 'openrouter'
+                                  : agent.provider === 'lmstudio'
+                                    ? 'lmstudio'
+                                    : agent.provider === 'mcp'
+                                      ? 'mcp'
+                                      : 'n8n'}
+                              </span>
+                            </button>
+                          ))}
+                          {allAgents.length === 0 && (
+                            <div className="model-option-empty">
+                              No agents added yet. Go to Settings to add agents.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <button 
+                      type={isTyping ? 'button' : 'submit'}
+                      onClick={isTyping ? stopGenerating : undefined}
+                      disabled={attachmentsUploading}
+                      className={`send-btn ${attachmentsUploading ? 'uploading' : ''} ${isTyping ? 'stop' : ''}`}
+                      title={
+                        attachmentsUploading
+                          ? 'Uploading files...'
+                          : isTyping
+                            ? 'Stop generating'
+                            : 'Send message'
+                      }
+                    >
+                      {attachmentsUploading ? (
+                        <div className="upload-spinner"></div>
+                      ) : isTyping ? (
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <rect x="7" y="7" width="10" height="10" rx="2"></rect>
+                        </svg>
+                      ) : (
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                      </svg>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
+            <p className="disclaimer">AI can make mistakes. Please double-check responses.</p>
+          </div>
+        </div>
+        </div>
+
+        {/* Settings Page */}
+        <div className={`settings-page ${showSettingsPage ? 'slide-in' : 'slide-out'}`}>
+          <div className="settings-page-header">
+            <button 
+              className="settings-back-btn"
+              onClick={() => setShowSettingsPage(false)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M19 12H5"/>
+                <path d="M12 19l-7-7 7-7"/>
+              </svg>
+              Back to Chat
+            </button>
+            <h1>Settings</h1>
+          </div>
+
+          <div className="settings-page-content">
+            <div className="settings-tabs">
+              <button
+                className={`settings-tab ${settingsTab === 'n8n' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('n8n')}
+              >
+                n8n Agents
+              </button>
+              <button
+                className={`settings-tab ${settingsTab === 'openrouter' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('openrouter')}
+              >
+                OpenRouter
+              </button>
+              <button
+                className={`settings-tab ${settingsTab === 'lmstudio' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('lmstudio')}
+              >
+                LM Studio
+              </button>
+              <button
+                className={`settings-tab ${settingsTab === 'embeddings' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('embeddings')}
+              >
+                Embeddings
+              </button>
+              <button
+                className={`settings-tab ${settingsTab === 'ocr' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('ocr')}
+              >
+                OCR
+              </button>
+              <button
+                className={`settings-tab ${settingsTab === 'images' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('images')}
+              >
+                Images
+              </button>
+              <button
+                className={`settings-tab ${settingsTab === 'mcp' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('mcp')}
+              >
+                MCP Servers
+              </button>
+            </div>
+
+            {settingsTab === 'n8n' && (
+              <div className="settings-tab-panel">
+             {/* Manual Agent Add */}
+             <section className="settings-page-section">
+               <div className="settings-page-section-header">
+                 <h2>Manually Add Agent</h2>
+                 <button 
+                   className="settings-toggle-form-btn"
+                   onClick={() => setShowAddAgentForm(!showAddAgentForm)}
+                 >
+                   {showAddAgentForm ? 'Hide' : 'Show Form'}
+                   <svg 
+                     className={`settings-chevron ${showAddAgentForm ? 'open' : ''}`}
+                     viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                   >
+                     <polyline points="6 9 12 15 18 9"></polyline>
+                   </svg>
+                 </button>
+               </div>
+               {showAddAgentForm && (
+                 <div className="settings-add-agent-form">
+                   <div className="settings-form-row">
+                     <label htmlFor="agent-name">Agent Name *</label>
+                     <input
+                       id="agent-name"
+                       type="text"
+                       value={newAgent.name}
+                       onChange={(e) => setNewAgent({ ...newAgent, name: e.target.value })}
+                       placeholder="e.g., Customer Support Bot"
+                     />
+                   </div>
+                   <div className="settings-form-row">
+                     <label htmlFor="agent-description">Description</label>
+                     <textarea
+                       id="agent-description"
+                       value={newAgent.description}
+                       onChange={(e) => setNewAgent({ ...newAgent, description: e.target.value })}
+                       placeholder="What does this agent do?"
+                       rows={3}
+                     />
+                   </div>
+                  <div className="settings-form-row">
+                    <label htmlFor="agent-tags">Tags (comma separated)</label>
+                    <input
+                      id="agent-tags"
+                      type="text"
+                      value={newAgent.tags}
+                      onChange={(e) => setNewAgent({ ...newAgent, tags: e.target.value })}
+                      placeholder="e.g., support, sales, help"
+                    />
+                  </div>
+                  <div className="settings-form-row">
+                    <label htmlFor="agent-webhook">n8n Workflow Webhook URL *</label>
+                    <input
+                      id="agent-webhook"
+                      type="url"
+                      value={newAgent.webhookUrl}
+                      onChange={(e) => setNewAgent({ ...newAgent, webhookUrl: e.target.value })}
+                      placeholder="https://your-n8n-instance.com/webhook/agent-trigger"
+                    />
+                    <span className="settings-form-hint">The webhook URL to trigger this agent's n8n workflow</span>
+                  </div>
+                  <button 
+                    className="settings-add-agent-btn"
+                    onClick={handleAddAgent}
+                    disabled={!newAgent.name.trim() || !newAgent.webhookUrl.trim()}
+                  >
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                       <line x1="12" y1="5" x2="12" y2="19"/>
+                       <line x1="5" y1="12" x2="19" y2="12"/>
+                     </svg>
+                     Add Agent
+                   </button>
+                 </div>
+               )}
+             </section>
+
+             {/* Search Configuration */}
+             <section className="settings-page-section">
+               <h2>Search Configuration</h2>
+               <p className="settings-page-description">
+                 Configure your default search engine for web searches (SearXNG)
+               </p>
+               <div className="settings-input-group">
+                 <label htmlFor="search-url">Search Engine URL</label>
+                 <input
+                   id="search-url"
+                   type="url"
+                   value={searchUrl}
+                   onChange={(e) => setSearchUrl(e.target.value)}
+                   placeholder="https://search.brainstormnodes.org/"
+                 />
+                 <div className="settings-button-row">
+                   <button 
+                     className="settings-test-btn"
+                     onClick={() => handleSearch('test query')}
+                   >
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                       <circle cx="11" cy="11" r="8"/>
+                       <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                     </svg>
+                     Test Search
+                   </button>
+                   <button 
+                     className="settings-clear-btn"
+                     onClick={() => {
+                       setSearchUrl('https://search.brainstormnodes.org/')
+                       showToast('Search URL reset to default')
+                     }}
+                   >
+                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                       <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                       <path d="M3 3v5h5"/>
+                     </svg>
+                     Reset
+                   </button>
+                 </div>
+                 <div className="settings-help-text">
+                   <strong>SearXNG Search:</strong><br/>
+                   Your private, self-hosted metasearch engine. Click the search button in chat
+                   to search the web using your SearXNG instance.
+                 </div>
+               </div>
+             </section>
+
+              {/* Webhook Status */}
+              {n8nWebhookUrl && (
+                <section className="settings-page-section">
+                  <div className="settings-page-section-header">
+                    <h2>Webhook Configuration</h2>
+                  </div>
+                  <div className="webhook-status">
+                    <div className="webhook-status-info">
+                      <div className="webhook-status-icon connected">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                          <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                      </div>
+                      <div className="webhook-status-details">
+                        <span className="webhook-status-title">Webhook Configured</span>
+                        <span className="webhook-status-url">{n8nWebhookUrl}</span>
+                      </div>
+                    </div>
+                    <button 
+                      className="webhook-clear-btn"
+                      onClick={() => {
+                        setN8nWebhookUrl('')
+                        setAgents([])
+                        setSelectedAgent(null)
+                        setWebhookError('')
+                        showToast('Webhook URL cleared')
+                      }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                      </svg>
+                      Clear
+                    </button>
+                  </div>
+                </section>
+              )}
+
+             {/* Imported Agents List */}
+            {agents.length > 0 && (
+              <section className="settings-page-section">
+                <div className="settings-page-section-header">
+                  <h2>Imported Agents</h2>
+                  <span className="agents-count">{agents.length} agent{agents.length > 1 ? 's' : ''}</span>
+                </div>
+                <div className="agents-list">
+                  {agents.map(agent => (
+                    <div key={agent.id} className="agent-card">
+                      <div className="agent-info">
+                        <div className="agent-icon">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+                            <path d="M12 6v6l4 2"/>
+                          </svg>
+                        </div>
+                        <div className="agent-details">
+                          <h3 className="agent-name">{agent.name || 'Untitled Agent'}</h3>
+                          <p className="agent-description">{agent.description || 'No description'}</p>
+                          {agent.tags && agent.tags.length > 0 && (
+                            <div className="agent-tags">
+                              {agent.tags.map((tag, idx) => (
+                                <span key={idx} className="agent-tag">{tag}</span>
+                              ))}
+                            </div>
+                          )}
+                          {agent.webhookUrl && (
+                            <div className="agent-webhook-url">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+                              </svg>
+                              <span className="webhook-url-text">{agent.webhookUrl}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div className="agent-actions">
+                        <button 
+                          className="agent-action-btn"
+                          onClick={() => {
+                            setSelectedAgent(agent)
+                            showToast(`Now chatting with ${agent.name}`)
+                            setShowSettingsPage(false)
+                          }}
+                          title="Use Agent"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                          </svg>
+                        </button>
+                        <button 
+                          className="agent-action-btn"
+                          onClick={() => handleTestAgent(agent.id)}
+                          title="Test Agent"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                          </svg>
+                        </button>
+                        <button 
+                          className="agent-action-btn agent-delete-btn"
+                          onClick={() => handleDeleteAgent(agent.id)}
+                          title="Delete Agent"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="3 6 5 6 21 6"></polyline>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+              </div>
+            )}
+
+            {settingsTab === 'openrouter' && (
+              <div className="settings-tab-panel">
+                <section className="settings-page-section">
+                  <h2>OpenRouter Agents</h2>
+                  <p className="settings-page-description">
+                    Create agents powered by OpenRouter models. These agents can use your Supabase chat history, memories, and document chunks.
+                  </p>
+                  <div className="settings-input-group">
+                    <label htmlFor="openrouter-key">OpenRouter API Key</label>
+                    <input
+                      id="openrouter-key"
+                      type="password"
+                      value={openRouterApiKey}
+                      onChange={(e) => setOpenRouterApiKey(e.target.value)}
+                      placeholder="sk-or-..."
+                    />
+                    <div className="openrouter-connect-row">
+                      <div className={`openrouter-status ${openRouterConnectState}`}>
+                        <span className="openrouter-status-dot" />
+                        <span className="openrouter-status-text">
+                          {openRouterConnectState === 'connected'
+                            ? `Connected • ${openRouterModels.length} models`
+                            : openRouterConnectState === 'connecting'
+                              ? 'Connecting...'
+                              : openRouterConnectState === 'error'
+                                ? 'Error'
+                                : 'Disconnected'}
+                        </span>
+                      </div>
+                      <div className="openrouter-connect-actions">
+                        <button
+                          className="settings-test-btn"
+                          type="button"
+                          onClick={connectOpenRouter}
+                          disabled={openRouterConnectState === 'connecting' || !openRouterApiKey.trim()}
+                          title="Validate key + load models"
+                        >
+                          {openRouterConnectState === 'connecting' ? 'Connecting...' : 'Connect'}
+                        </button>
+                        {openRouterConnectState === 'connected' && (
+                          <button className="settings-clear-error-btn" type="button" onClick={disconnectOpenRouter}>
+                            Disconnect
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {openRouterConnectError && (
+                      <div className="settings-error-message" style={{ marginTop: 12 }}>
+                        {openRouterConnectError}
+                      </div>
+                    )}
+                    <div className="settings-help-text">
+                      <strong>Security:</strong><br/>
+                      This key is stored locally in your browser only (localStorage). It is not saved to Supabase.
+                    </div>
+                  </div>
+                </section>
+
+                <section className="settings-page-section">
+                  <h2>Create OpenRouter Agent</h2>
+                  <div className="settings-add-agent-form">
+                    <div className="settings-form-row">
+                      <label>Agent Name *</label>
+                      <input
+                        type="text"
+                        value={newOpenRouterAgent.name}
+                        onChange={(e) => setNewOpenRouterAgent({ ...newOpenRouterAgent, name: e.target.value })}
+                        placeholder="e.g., Research Assistant"
+                      />
+                    </div>
+                    <div className="settings-form-row">
+                      <label>Model *</label>
+                      {openRouterModels.length > 0 ? (
+                        <>
+                          <input
+                            type="text"
+                            value={openRouterModelFilter}
+                            onChange={(e) => setOpenRouterModelFilter(e.target.value)}
+                            placeholder="Search models (case-sensitive)..."
+                          />
+                          <select
+                            value={newOpenRouterAgent.model}
+                            onChange={(e) => setNewOpenRouterAgent({ ...newOpenRouterAgent, model: e.target.value })}
+                          >
+                            {filteredOpenRouterModels.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.id}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="settings-form-hint">
+                            Loaded from OpenRouter. Pick a model id (example: <code>openai/gpt-4o-mini</code>).
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <input
+                            type="text"
+                            value={newOpenRouterAgent.model}
+                            onChange={(e) => setNewOpenRouterAgent({ ...newOpenRouterAgent, model: e.target.value })}
+                            placeholder="e.g., openai/gpt-4o-mini"
+                          />
+                          <span className="settings-form-hint">Click “Connect” above to load all available models.</span>
+                        </>
+                      )}
+                    </div>
+                    <div className="settings-form-row">
+                      <label>System Prompt</label>
+                      <textarea
+                        value={newOpenRouterAgent.systemPrompt}
+                        onChange={(e) => setNewOpenRouterAgent({ ...newOpenRouterAgent, systemPrompt: e.target.value })}
+                        rows={3}
+                      />
+                    </div>
+                    <div className="settings-form-row">
+                      <label>Temperature</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="2"
+                        step="0.1"
+                        value={newOpenRouterAgent.temperature}
+                        onChange={(e) => setNewOpenRouterAgent({ ...newOpenRouterAgent, temperature: e.target.value })}
+                      />
+                    </div>
+                    <button
+                      className="settings-add-agent-btn"
+                      onClick={handleAddOpenRouterAgent}
+                      disabled={!newOpenRouterAgent.name.trim() || !newOpenRouterAgent.model.trim()}
+                    >
+                      Add OpenRouter Agent
+                    </button>
+                  </div>
+                </section>
+
+                {openRouterAgents.length > 0 && (
+                  <section className="settings-page-section">
+                    <div className="settings-page-section-header">
+                      <h2>OpenRouter Agents</h2>
+                      <span className="agents-count">{openRouterAgents.length} agent{openRouterAgents.length > 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="agents-list">
+                      {openRouterAgents.map(agent => (
+                        <div key={agent.id} className="agent-card">
+                          <div className="agent-info">
+                            <div className="agent-icon">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z"/>
+                                <path d="M8 12h8"/>
+                              </svg>
+                            </div>
+                            <div className="agent-details">
+                              <h3 className="agent-name">{agent.name}</h3>
+                              <p className="agent-description">{agent.model}</p>
+                            </div>
+                          </div>
+                          <div className="agent-actions">
+                            <button
+                              className="agent-action-btn"
+                              onClick={() => {
+                                setSelectedAgent(agent)
+                                showToast(`Now chatting with ${agent.name}`)
+                                setShowSettingsPage(false)
+                              }}
+                              title="Use Agent"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                              </svg>
+                            </button>
+                            <button
+                              className="agent-action-btn agent-delete-btn"
+                              onClick={() => handleDeleteOpenRouterAgent(agent.id)}
+                              title="Delete Agent"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+              </section>
+                )}
+              </div>
+            )}
+
+            {settingsTab === 'lmstudio' && (
+              <div className="settings-tab-panel">
+                <section className="settings-page-section">
+                  <h2>LM Studio (OpenAI-compatible)</h2>
+                  <p className="settings-page-description">
+                    Connect to your local LM Studio server and import your local models as chat agents.
+                    In LM Studio, start the <strong>OpenAI Compatible Server</strong> first.
+                  </p>
+                  <div className="settings-input-group">
+                    <label htmlFor="lmstudio-url">Base URL</label>
+                    <input
+                      id="lmstudio-url"
+                      type="text"
+                      value={lmStudioBaseUrl}
+                      onChange={(e) => setLmStudioBaseUrl(e.target.value)}
+                      placeholder="http://localhost:1234/v1"
+                    />
+                    <span className="settings-form-hint">
+                      Example: <code>http://localhost:1234/v1</code> (this app will call <code>/models</code> and <code>/chat/completions</code>).
+                    </span>
+
+                    <label htmlFor="lmstudio-key" style={{ marginTop: 12 }}>API Key (optional)</label>
+                    <input
+                      id="lmstudio-key"
+                      type="password"
+                      value={lmStudioApiKey}
+                      onChange={(e) => setLmStudioApiKey(e.target.value)}
+                      placeholder="(leave blank if not required)"
+                    />
+
+                    <div className="openrouter-connect-row" style={{ marginTop: 12 }}>
+                      <div className={`openrouter-status ${lmStudioConnectState}`}>
+                        <span className="openrouter-status-dot" />
+                        <span className="openrouter-status-text">
+                          {lmStudioConnectState === 'connected'
+                            ? `Connected • ${lmStudioModels.length} models`
+                            : lmStudioConnectState === 'connecting'
+                              ? 'Connecting...'
+                              : lmStudioConnectState === 'error'
+                                ? 'Error'
+                                : 'Disconnected'}
+                        </span>
+                      </div>
+                      <div className="openrouter-connect-actions">
+                        <button
+                          className="settings-test-btn"
+                          type="button"
+                          onClick={connectLmStudio}
+                          disabled={lmStudioConnectState === 'connecting' || !lmStudioBaseUrl.trim()}
+                          title="Load /models + run a tiny chat test"
+                        >
+                          {lmStudioConnectState === 'connecting' ? 'Connecting...' : 'Connect'}
+                        </button>
+                        {lmStudioConnectState === 'connected' && (
+                          <button className="settings-clear-error-btn" type="button" onClick={disconnectLmStudio}>
+                            Disconnect
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {lmStudioConnectError && (
+                      <div className="settings-error-message" style={{ marginTop: 12 }}>
+                        {lmStudioConnectError}
+                      </div>
+                    )}
+                    <div className="settings-help-text">
+                      <strong>Security:</strong><br/>
+                      This endpoint + optional key are stored locally in your browser only (localStorage).
+                    </div>
+                  </div>
+                </section>
+
+                <section className="settings-page-section">
+                  <h2>Import Local Models</h2>
+                  <p className="settings-page-description">
+                    Pick a model from <code>/models</code> and add it as an agent.
+                  </p>
+                  <div className="settings-add-agent-form">
+                    <div className="settings-form-row">
+                      <label>Agent Name (optional)</label>
+                      <input
+                        type="text"
+                        value={newLmStudioAgent.name}
+                        onChange={(e) => setNewLmStudioAgent({ ...newLmStudioAgent, name: e.target.value })}
+                        placeholder="e.g., Local Code Assistant"
+                      />
+                    </div>
+                    <div className="settings-form-row">
+                      <label>Model *</label>
+                      {lmStudioModels.length > 0 ? (
+                        <>
+                          <input
+                            type="text"
+                            value={lmStudioModelFilter}
+                            onChange={(e) => setLmStudioModelFilter(e.target.value)}
+                            placeholder="Search models..."
+                          />
+                          <select
+                            value={newLmStudioAgent.model}
+                            onChange={(e) => setNewLmStudioAgent({ ...newLmStudioAgent, model: e.target.value })}
+                          >
+                            <option value="">Select a model…</option>
+                            {filteredLmStudioModels.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.id}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="settings-form-hint">
+                            Click “Connect” above if the list is empty.
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <input
+                            type="text"
+                            value={newLmStudioAgent.model}
+                            onChange={(e) => setNewLmStudioAgent({ ...newLmStudioAgent, model: e.target.value })}
+                            placeholder="Model id from /models"
+                          />
+                          <span className="settings-form-hint">Click “Connect” above to load models automatically.</span>
+                        </>
+                      )}
+                    </div>
+                    <div className="settings-form-row">
+                      <label>System Prompt</label>
+                      <textarea
+                        value={newLmStudioAgent.systemPrompt}
+                        onChange={(e) => setNewLmStudioAgent({ ...newLmStudioAgent, systemPrompt: e.target.value })}
+                        rows={3}
+                      />
+                    </div>
+                    <div className="settings-form-row">
+                      <label>Temperature</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="2"
+                        step="0.1"
+                        value={newLmStudioAgent.temperature}
+                        onChange={(e) => setNewLmStudioAgent({ ...newLmStudioAgent, temperature: e.target.value })}
+                      />
+                    </div>
+                    <button
+                      className="settings-add-agent-btn"
+                      type="button"
+                      onClick={() => addLmStudioModelAsAgent((newLmStudioAgent.model || '').trim())}
+                      disabled={!String(newLmStudioAgent.model || '').trim()}
+                    >
+                      Add LM Studio Agent
+                    </button>
+                  </div>
+                </section>
+
+                {lmStudioAgents.length > 0 && (
+                  <section className="settings-page-section">
+                    <div className="settings-page-section-header">
+                      <h2>LM Studio Agents</h2>
+                      <span className="agents-count">{lmStudioAgents.length} agent{lmStudioAgents.length > 1 ? 's' : ''}</span>
+                    </div>
+                    <div className="agents-list">
+                      {lmStudioAgents.map(agent => (
+                        <div key={agent.id} className="agent-card">
+                          <div className="agent-info">
+                            <div className="agent-icon">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M4 4h16v16H4z"/>
+                                <path d="M8 8h8M8 12h6M8 16h4"/>
+                              </svg>
+                            </div>
+                            <div className="agent-details">
+                              <h3 className="agent-name">{agent.name}</h3>
+                              <p className="agent-description">{agent.model}</p>
+                            </div>
+                          </div>
+                          <div className="agent-actions">
+                            <button
+                              className="agent-action-btn"
+                              onClick={() => {
+                                setSelectedAgent(agent)
+                                showToast(`Now chatting with ${agent.name}`)
+                                setShowSettingsPage(false)
+                              }}
+                              title="Use Agent"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                              </svg>
+                            </button>
+                            <button
+                              className="agent-action-btn agent-delete-btn"
+                              onClick={() => handleDeleteLmStudioAgent(agent.id)}
+                              title="Delete Agent"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+              </section>
+                )}
+              </div>
+            )}
+
+            {settingsTab === 'embeddings' && (
+              <div className="settings-tab-panel">
+                <section className="settings-page-section">
+                  <h2>Embeddings</h2>
+                  <p className="settings-page-description">
+                    Configure OpenAI embeddings (<code>{OPENAI_EMBEDDINGS_MODEL}</code>) and bulk-upload text documents into your Supabase RAG tables.
+                  </p>
+                  <div className="settings-input-group">
+                    <label htmlFor="openai-key">OpenAI API Key</label>
+                    <input
+                      id="openai-key"
+                      type="password"
+                      value={openAiApiKey}
+                      onChange={(e) => setOpenAiApiKey(e.target.value)}
+                      placeholder="sk-..."
+                    />
+                    <div className="openrouter-connect-row">
+                      <div className={`openrouter-status ${openAiConnectState}`}>
+                        <span className="openrouter-status-dot" />
+                        <span className="openrouter-status-text">
+                          {openAiConnectState === 'connected'
+                            ? 'Connected'
+                            : openAiConnectState === 'connecting'
+                              ? 'Connecting...'
+                              : openAiConnectState === 'error'
+                                ? 'Error'
+                                : 'Disconnected'}
+                        </span>
+                      </div>
+                      <div className="openrouter-connect-actions">
+                        <button
+                          className="settings-test-btn"
+                          type="button"
+                          onClick={testOpenAiKey}
+                          disabled={openAiConnectState === 'connecting' || !openAiEmbeddingsApiKey}
+                          title="Validate key with an embeddings request"
+                        >
+                          {openAiConnectState === 'connecting' ? 'Testing...' : 'Test Key'}
+                        </button>
+                      </div>
+                    </div>
+                    {openAiConnectError && (
+                      <div className="settings-error-message" style={{ marginTop: 12 }}>
+                        {openAiConnectError}
+                      </div>
+                    )}
+                    <div className="settings-help-text">
+                      <strong>Security:</strong><br />
+                      This key is stored locally in your browser only (localStorage). It is not saved to Supabase.
+                    </div>
+                  </div>
+                </section>
+
+                <section className="settings-page-section">
+                  <h2>Bulk Upload to RAG</h2>
+                  <p className="settings-page-description">
+                    Select multiple text files. We’ll chunk them, embed each chunk, and store them in <code>documents</code> + <code>document_chunks</code>.
+                  </p>
+
+                  <div className="settings-input-group">
+                    <label htmlFor="rag-files">Files</label>
+                    <input
+                      id="rag-files"
+                      type="file"
+                      multiple
+                      onChange={handleRagFilePick}
+                      accept="image/*,.pdf,.docx,text/*,.md,.txt,.json,.csv,.js,.jsx,.ts,.tsx,.py,.sql,.html,.css,.yml,.yaml"
+                    />
+                    <span className="settings-form-hint">
+                      Supports: PDF, DOCX, images (OCR), and text/code files. Note: scanned PDFs without a text layer may embed poorly until PDF OCR is added.
+                    </span>
+
+                    {ragUploadFiles.length > 0 && (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                          <strong>{ragUploadFiles.length} file{ragUploadFiles.length > 1 ? 's' : ''} selected</strong>
+                          <button
+                            className="settings-clear-btn"
+                            type="button"
+                            onClick={() => setRagUploadFiles([])}
+                            disabled={ragIngestState === 'ingesting'}
+                          >
+                            Clear
+                          </button>
+                        </div>
+                        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          {ragUploadFiles.slice(0, 8).map((f) => (
+                            <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center' }}>
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+                              <button
+                                className="settings-clear-error-btn"
+                                type="button"
+                                onClick={() => removeRagFile(f.id)}
+                                disabled={ragIngestState === 'ingesting'}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          ))}
+                          {ragUploadFiles.length > 8 && (
+                            <div className="settings-form-hint">…and {ragUploadFiles.length - 8} more</div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="settings-button-row" style={{ marginTop: 14 }}>
+                      <button
+                        className="settings-test-btn"
+                        type="button"
+                        onClick={ingestRagFiles}
+                        disabled={
+                          ragIngestState === 'ingesting' ||
+                          ragUploadFiles.length === 0 ||
+                          !dbEnabled ||
+                          !openAiEmbeddingsApiKey
+                        }
+                        title={!dbEnabled ? 'Requires Supabase sign-in' : 'Ingest selected files into Supabase RAG tables'}
+                      >
+                        {ragIngestState === 'ingesting'
+                          ? `Uploading… (${ragIngestProgress.fileIndex}/${ragIngestProgress.fileCount})`
+                          : 'Ingest to RAG'}
+                      </button>
+                    </div>
+
+                    {ragIngestProgress?.message && (
+                      <div className="settings-form-hint" style={{ marginTop: 10 }}>
+                        {ragIngestProgress.message}
+                      </div>
+                    )}
+                    {ragIngestError && (
+                      <div className="settings-error-message" style={{ marginTop: 12 }}>
+                        {ragIngestError}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {settingsTab === 'ocr' && (
+              <div className="settings-tab-panel">
+                <section className="settings-page-section">
+                  <h2>OCR Document Processing</h2>
+                  <p className="settings-page-description">
+                    When you upload images in chat, we’ll run OCR + a quick document analysis using OpenAI and (optionally) store extracted text into your RAG.
+                  </p>
+
+                  <div className="settings-input-group">
+                    <label htmlFor="ocr-model">Default OCR/Vision Model</label>
+                    <input
+                      id="ocr-model"
+                      type="text"
+                      value={ocrModel}
+                      onChange={(e) => setOcrModel(e.target.value)}
+                      placeholder="gpt-4o"
+                    />
+
+                    <div className="settings-help-text">
+                      <strong>Key:</strong><br />
+                      OCR uses the same OpenAI key as Embeddings (<code>VITE_OPENAI_API_KEY</code> / localStorage).
+                    </div>
+
+                    <div className="settings-form-row" style={{ marginTop: 10 }}>
+                      <label style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={ocrAutoProcessChatUploads}
+                          onChange={(e) => setOcrAutoProcessChatUploads(e.target.checked)}
+                        />
+                        Auto-process chat uploads (OCR/analyze)
+                      </label>
+                    </div>
+
+                    <div className="settings-form-row">
+                      <label style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={ocrAutoPostSummaryToChat}
+                          onChange={(e) => setOcrAutoPostSummaryToChat(e.target.checked)}
+                        />
+                        Post OCR summary into chat
+                      </label>
+                    </div>
+
+                    <div className="settings-form-row">
+                      <label style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={ocrAutoIngestToRag}
+                          onChange={(e) => setOcrAutoIngestToRag(e.target.checked)}
+                          disabled={!dbEnabled}
+                        />
+                        Insert extracted text into RAG (requires Supabase sign-in)
+                      </label>
+                    </div>
+
+                    <span className="settings-form-hint">
+                      Current support: images (OCR via vision) + text-like files (ingest directly). PDFs/DOCs aren’t parsed yet.
+                    </span>
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {settingsTab === 'images' && (
+              <div className="settings-tab-panel">
+                <section className="settings-page-section">
+                  <h2>Image Generation</h2>
+                  <p className="settings-page-description">
+                    Configure the default OpenAI image model used when you ask for an image in chat (try <code>/image a cyberpunk cat</code>).
+                  </p>
+                  <div className="settings-input-group">
+                    <label htmlFor="img-model">Default Image Model</label>
+                    <input
+                      id="img-model"
+                      type="text"
+                      value={imageGenModel}
+                      onChange={(e) => setImageGenModel(e.target.value)}
+                      placeholder="dall-e-3"
+                    />
+
+                    <div className="settings-form-row" style={{ marginTop: 10 }}>
+                      <label style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={autoImageGenFromChat}
+                          onChange={(e) => setAutoImageGenFromChat(e.target.checked)}
+                        />
+                        Auto-detect image requests in chat
+                      </label>
+                    </div>
+
+                    <div className="settings-help-text">
+                      <strong>Key:</strong><br />
+                      Image generation uses the same OpenAI key as Embeddings/OCR (<code>VITE_OPENAI_API_KEY</code> / localStorage).
+                    </div>
+                  </div>
+                </section>
+              </div>
+            )}
+
+            {settingsTab === 'mcp' && (
+              <div className="settings-tab-panel">
+                <section className="settings-page-section">
+                  <h2>Import MCP Servers</h2>
+                  <p className="settings-page-description">
+                    Paste your MCP JSON config to import servers. The config will be parsed to extract server URLs and authentication.
+                  </p>
+
+                  <div className="settings-input-group">
+                    <label htmlFor="mcp-json">MCP JSON Config</label>
+                    <textarea
+                      id="mcp-json"
+                      value={mcpImportJson}
+                      onChange={(e) => setMcpImportJson(e.target.value)}
+                      placeholder={`{
+  "mcpServers": {
+    "my-server": {
+      "command": "npx",
+      "args": [
+        "-y", "supergateway",
+        "--streamableHttp", "https://your-server.com/mcp-server/http",
+        "--header", "authorization:Bearer YOUR_TOKEN"
+      ]
+    }
+  }
+}`}
+                      rows={10}
+                      style={{ fontFamily: 'monospace', fontSize: '12px' }}
+                    />
+                    
+                    <div className="settings-button-row" style={{ marginTop: 12 }}>
+                      <button 
+                        className="openrouter-connect-btn"
+                        onClick={importMcpServers}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="7 10 12 15 17 10"/>
+                          <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                        Import Servers
+                      </button>
+          </div>
+
+                    {mcpImportError && (
+                      <div className="settings-error-message" style={{ marginTop: 12 }}>
+                        {mcpImportError}
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <section className="settings-page-section">
+                  <h2>Configured Servers</h2>
+                  
+                  {mcpServers.length === 0 ? (
+                    <div className="settings-empty-state">
+                      <p>No MCP servers configured. Import a JSON config above.</p>
+                    </div>
+                  ) : (
+                    <div className="mcp-server-list">
+                      {mcpServers.map((server) => (
+                        <div key={server.id} className="mcp-server-item">
+                          <div className="mcp-server-header">
+                            <div className="mcp-server-info">
+                              <div className="mcp-server-name">{server.name}</div>
+                              <div className="mcp-server-url">{server.url}</div>
+                            </div>
+                            <div className="mcp-server-actions">
+                              <div className={`openrouter-status ${server.connectState}`}>
+                                <span className="openrouter-status-dot" />
+                                <span className="openrouter-status-text">
+                                  {server.connectState === 'connected'
+                                    ? `${server.flows.length} flows`
+                                    : server.connectState === 'connecting'
+                                      ? 'Connecting...'
+                                      : server.connectState === 'error'
+                                        ? 'Error'
+                                        : 'Disconnected'}
+                                </span>
+                              </div>
+                              {server.connectState === 'connected' ? (
+                                <button 
+                                  className="openrouter-connect-btn secondary small"
+                                  onClick={() => disconnectMcpServer(server.id)}
+                                >
+                                  Disconnect
+                                </button>
+                              ) : (
+                                <button 
+                                  className="openrouter-connect-btn small"
+                                  onClick={() => connectMcpServer(server.id)}
+                                  disabled={server.connectState === 'connecting'}
+                                >
+                                  Connect
+                                </button>
+                              )}
+                              <button 
+                                className="settings-delete-btn small"
+                                onClick={() => removeMcpServer(server.id)}
+                                title="Remove server"
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <polyline points="3 6 5 6 21 6"/>
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          {server.connectError && (
+                            <div className="settings-error-message" style={{ marginTop: 8, fontSize: 12 }}>
+                              {server.connectError}
+                            </div>
+                          )}
+                          
+                          {/* Discover Workflows section */}
+                          {server.connectState === 'connected' && server.flows?.some(f => f.name === 'search_workflows') && (
+                            <div className="mcp-workflows-section">
+                              <div className="mcp-workflows-header">
+                                <span className="mcp-workflows-title">n8n Workflows</span>
+                                <button
+                                  className="openrouter-connect-btn small"
+                                  onClick={() => discoverMcpWorkflows(server.id)}
+                                  disabled={server.discoveringWorkflows}
+                                >
+                                  {server.discoveringWorkflows ? 'Discovering...' : 'Discover Workflows'}
+                                </button>
+                              </div>
+                              
+                              {server.workflows && server.workflows.length > 0 && (
+                                <div className="mcp-workflows-list">
+                                  {server.workflows.map((wf, idx) => (
+                                    <div key={wf.id || idx} className="mcp-workflow-item">
+                                      <div className="mcp-workflow-info">
+                                        <div className="mcp-workflow-name">{wf.name || wf.workflow_name || 'Unnamed'}</div>
+                                        {(wf.description || wf.project) && (
+                                          <div className="mcp-workflow-meta">
+                                            {wf.project && <span className="mcp-workflow-project">{wf.project}</span>}
+                                            {wf.description && <span className="mcp-workflow-desc">{wf.description}</span>}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div className="mcp-workflow-actions">
+                                        {wf.id && (
+                                          <div className="mcp-workflow-id">ID: {wf.id}</div>
+                                        )}
+                                        <button
+                                          className="openrouter-connect-btn small"
+                                          onClick={() => createMcpAgentFromWorkflow(server.id, wf)}
+                                          title="Add this workflow as a chat agent"
+                                        >
+                                          + Add as Agent
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              
+                              {server.workflows && server.workflows.length === 0 && (
+                                <div className="mcp-workflows-empty">
+                                  No workflows found. Click "Discover Workflows" to search.
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+
+                <section className="settings-page-section">
+                  <div className="settings-page-section-header">
+                    <h2>Available Tools/Flows</h2>
+                    <div className="settings-inline-search">
+                      <input
+                        type="text"
+                        value={mcpFlowFilter}
+                        onChange={(e) => setMcpFlowFilter(e.target.value)}
+                        placeholder="Filter flows…"
+                      />
+                    </div>
+                  </div>
+
+                  {filteredMcpFlows.length === 0 ? (
+                    <div className="settings-empty-state">
+                      <p>
+                        {mcpServers.some(s => s.connectState === 'connected')
+                          ? 'No flows found from connected servers.'
+                          : 'Connect an MCP server to load available flows.'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mcp-flow-list">
+                      {filteredMcpFlows.map((f, idx) => (
+                        <div key={`${f.serverName}-${f.name}-${idx}`} className="mcp-flow-item">
+                          <div className="mcp-flow-main">
+                            <div className="mcp-flow-name">{f.name}</div>
+                            {f.description && <div className="mcp-flow-desc">{f.description}</div>}
+                          </div>
+                          <div className="mcp-flow-meta">
+                            <span className="mcp-flow-server">{f.serverName}</span>
+                            {f.inputSchema && <span className="mcp-flow-inputs">Has inputs</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Gallery / Library Page */}
+        <div className={`settings-page ${showGalleryPage ? 'slide-in' : 'slide-out'}`}>
+          <div className="settings-page-header">
+            <button
+              className="settings-back-btn"
+              onClick={() => setShowGalleryPage(false)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M19 12H5"/>
+                <path d="M12 19l-7-7 7-7"/>
+              </svg>
+              Back to Chat
+            </button>
+            <h1>Gallery</h1>
+          </div>
+
+          <div className="settings-page-content">
+            <section className="settings-page-section">
+              <div className="settings-page-section-header">
+                <h2>Generated Images</h2>
+                <button
+                  className="settings-test-btn"
+                  type="button"
+                  onClick={loadGeneratedImages}
+                  disabled={!dbEnabled || galleryLoading}
+                  title={!dbEnabled ? 'Requires Supabase sign-in' : 'Refresh'}
+                >
+                  Refresh
+                </button>
+              </div>
+
+              {!dbEnabled && (
+                <div className="settings-help-text">
+                  <strong>Supabase required:</strong><br />
+                  Sign in to store images permanently and view them here.
+                </div>
+              )}
+
+              {galleryError && (
+                <div className="settings-error-message" style={{ marginTop: 12 }}>
+                  {galleryError}
+                </div>
+              )}
+
+              {galleryLoading && (
+                <div className="settings-form-hint" style={{ marginTop: 12 }}>
+                  Loading…
+                </div>
+              )}
+
+              {dbEnabled && !galleryLoading && generatedImages.length === 0 && (
+                <div className="settings-form-hint" style={{ marginTop: 12 }}>
+                  No images yet. Use <code>/image ...</code> in chat to generate one.
+                </div>
+              )}
+
+              {generatedImages.length > 0 && (
+                <div className="gallery-grid" style={{ marginTop: 14 }}>
+                  {generatedImages.map((img) => (
+                    <div key={img.image_id} className="gallery-item">
+                      <div className="gallery-thumb-wrapper">
+                      {img.url ? (
+                        <img src={img.url} alt={img.prompt || 'Generated image'} className="gallery-thumb" loading="lazy" />
+                      ) : (
+                        <div className="gallery-thumb gallery-thumb-missing">No preview</div>
+                      )}
+                        <div className="gallery-actions">
+                          {img.url && (
+                            <button
+                              className="gallery-action-btn gallery-download-btn"
+                              onClick={() => downloadImage(img.url, img.prompt)}
+                              title="Download image"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                              </svg>
+                            </button>
+                          )}
+                          <button
+                            className="gallery-action-btn gallery-delete-btn"
+                            onClick={() => deleteGeneratedImage(img.image_id, img.storage_bucket, img.storage_path)}
+                            title="Delete image"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M3 6h18"></path>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="gallery-meta">
+                        <div className="gallery-prompt">{img.prompt || 'Untitled prompt'}</div>
+                        <div className="gallery-sub">{img.model || ''}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        </div>
+
+        {/* Knowledge Base Page */}
+        <div className={`kb-page ${showKnowledgeBasePage ? 'slide-in' : 'slide-out'}`}>
+          {/* Header */}
+          <div className="kb-header">
+            <button
+              className="kb-back-btn"
+              onClick={() => setShowKnowledgeBasePage(false)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="15 18 9 12 15 6"></polyline>
+              </svg>
+            </button>
+            <div className="kb-header-content">
+              <h1 className="kb-title">Knowledge Base</h1>
+              <p className="kb-subtitle">Manage your AI's memory, documents, and knowledge graph</p>
+            </div>
+          </div>
+
+          {/* Tab Navigation */}
+          <div className="kb-tabs-container">
+            <nav className="kb-tabs">
+              <button
+                className={`kb-tab ${knowledgeBaseTab === 'memory' ? 'active' : ''}`}
+                onClick={() => setKnowledgeBaseTab('memory')}
+              >
+                Chat Memory
+                {memoriesTotalCount > 0 && (
+                  <span className="kb-tab-count">{memoriesTotalCount}</span>
+                )}
+              </button>
+              <button
+                className={`kb-tab ${knowledgeBaseTab === 'rag' ? 'active' : ''}`}
+                onClick={() => setKnowledgeBaseTab('rag')}
+              >
+                Documents
+                {documentsTotalCount > 0 && (
+                  <span className="kb-tab-count">{documentsTotalCount}</span>
+                )}
+              </button>
+              <button
+                className={`kb-tab ${knowledgeBaseTab === 'graph' ? 'active' : ''}`}
+                onClick={() => setKnowledgeBaseTab('graph')}
+              >
+                Knowledge Graph
+              </button>
+            </nav>
+          </div>
+
+          {/* Tab Content */}
+          <div className="kb-content">
+            {/* Chat Memory Tab */}
+            {knowledgeBaseTab === 'memory' && (
+              <div className="kb-panel">
+                <div className="kb-panel-header">
+                  <div className="kb-panel-info">
+                    <h2>Chat Memory</h2>
+                    <p>Memories extracted from your conversations that help personalize AI responses.</p>
+                  </div>
+                  <button
+                    className="kb-refresh-btn"
+                    onClick={loadUserMemories}
+                    disabled={!dbEnabled || kbLoading}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M23 4v6h-6"/>
+                      <path d="M1 20v-6h6"/>
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    </svg>
+                    Refresh
+                  </button>
+                </div>
+
+                {!dbEnabled && (
+                  <div className="kb-empty-state">
+                    <div className="kb-empty-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                      </svg>
+                    </div>
+                    <h3>Sign in required</h3>
+                    <p>Connect to Supabase to view and manage your chat memories.</p>
+                  </div>
+                )}
+
+                {dbEnabled && kbLoading && (
+                  <div className="kb-loading">
+                    <div className="kb-loading-spinner"></div>
+                    <span>Loading memories...</span>
+                  </div>
+                )}
+
+                {dbEnabled && !kbLoading && userMemories.length === 0 && (
+                  <div className="kb-empty-state">
+                    <div className="kb-empty-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v6l4 2"/>
+                      </svg>
+                    </div>
+                    <h3>No memories yet</h3>
+                    <p>Start chatting with an agent to build your personalized memory.</p>
+                  </div>
+                )}
+
+                {userMemories.length > 0 && (
+                  <div className="kb-memory-list">
+                    {/* Group memories by type */}
+                    {['preference', 'personal_detail', 'project_context', 'fact'].map(type => {
+                      const memoriesOfType = userMemories.filter(m => m.memory_type === type)
+                      if (memoriesOfType.length === 0) return null
+                      
+                      const typeLabels = {
+                        preference: { label: 'Preferences', icon: '⚙️' },
+                        personal_detail: { label: 'Personal Details', icon: '👤' },
+                        project_context: { label: 'Project Context', icon: '📁' },
+                        fact: { label: 'Facts', icon: '💡' }
+                      }
+                      const { label, icon } = typeLabels[type] || { label: type, icon: '📝' }
+                      
+                      return (
+                        <div key={type} className="kb-memory-group">
+                          <div className="kb-memory-group-header">
+                            <span className="kb-memory-group-icon">{icon}</span>
+                            <span className="kb-memory-group-title">{label}</span>
+                            <span className="kb-memory-group-count">{memoriesOfType.length}</span>
+                          </div>
+                          <div className="kb-memory-group-items">
+                            {memoriesOfType.map((mem) => (
+                              <div key={mem.memory_id} className="kb-memory-item">
+                                <div className="kb-memory-item-content">
+                                  <p className="kb-memory-text">{mem.content}</p>
+                                  <div className="kb-memory-meta">
+                                    <span className="kb-memory-confidence">
+                                      {Math.round((mem.confidence || 0) * 100)}%
+                                    </span>
+                                    <span className="kb-memory-date">
+                                      {new Date(mem.created_at).toLocaleDateString('en-US', { 
+                                        month: 'short', 
+                                        day: 'numeric'
+                                      })}
+                                    </span>
+                                  </div>
+                                </div>
+                                <button
+                                  className="kb-memory-delete"
+                                  onClick={() => deleteMemory(mem.memory_id)}
+                                  title="Delete memory"
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M3 6h18"/>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                  </svg>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                    
+                    {/* Pagination Controls */}
+                    {memoriesTotalCount > KB_PAGE_SIZE && (
+                      <div className="kb-pagination">
+                        <button
+                          className="kb-pagination-btn"
+                          onClick={() => loadUserMemories(memoriesPage - 1)}
+                          disabled={memoriesPage <= 1 || kbLoading}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="15 18 9 12 15 6"/>
+                          </svg>
+                          Previous
+                        </button>
+                        <span className="kb-pagination-info">
+                          Page {memoriesPage} of {Math.ceil(memoriesTotalCount / KB_PAGE_SIZE)}
+                          <span className="kb-pagination-total">({memoriesTotalCount} total)</span>
+                        </span>
+                        <button
+                          className="kb-pagination-btn"
+                          onClick={() => loadUserMemories(memoriesPage + 1)}
+                          disabled={memoriesPage >= Math.ceil(memoriesTotalCount / KB_PAGE_SIZE) || kbLoading}
+                        >
+                          Next
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="9 18 15 12 9 6"/>
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                    
+                    {/* Show any memories with unknown types */}
+                    {userMemories.filter(m => !['preference', 'personal_detail', 'project_context', 'fact'].includes(m.memory_type)).length > 0 && (
+                      <div className="kb-memory-group">
+                        <div className="kb-memory-group-header">
+                          <span className="kb-memory-group-icon">📝</span>
+                          <span className="kb-memory-group-title">Other</span>
+                          <span className="kb-memory-group-count">
+                            {userMemories.filter(m => !['preference', 'personal_detail', 'project_context', 'fact'].includes(m.memory_type)).length}
+                          </span>
+                        </div>
+                        <div className="kb-memory-group-items">
+                          {userMemories.filter(m => !['preference', 'personal_detail', 'project_context', 'fact'].includes(m.memory_type)).map((mem) => (
+                            <div key={mem.memory_id} className="kb-memory-item">
+                              <div className="kb-memory-item-content">
+                                <p className="kb-memory-text">{mem.content}</p>
+                                <div className="kb-memory-meta">
+                                  <span className="kb-memory-confidence">
+                                    {Math.round((mem.confidence || 0) * 100)}%
+                                  </span>
+                                  <span className="kb-memory-date">
+                                    {new Date(mem.created_at).toLocaleDateString('en-US', { 
+                                      month: 'short', 
+                                      day: 'numeric'
+                                    })}
+                                  </span>
+                                </div>
+                              </div>
+                              <button
+                                className="kb-memory-delete"
+                                onClick={() => deleteMemory(mem.memory_id)}
+                                title="Delete memory"
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M3 6h18"/>
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                </svg>
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* RAG Documents Tab */}
+            {knowledgeBaseTab === 'rag' && (
+              <div className="kb-panel">
+                <div className="kb-panel-header">
+                  <div className="kb-panel-info">
+                    <h2>RAG Documents</h2>
+                    <p>Documents uploaded and processed for retrieval-augmented generation.</p>
+                  </div>
+                  <button
+                    className="kb-refresh-btn"
+                    onClick={loadRagDocuments}
+                    disabled={!dbEnabled || kbLoading}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M23 4v6h-6"/>
+                      <path d="M1 20v-6h6"/>
+                      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                    </svg>
+                    Refresh
+                  </button>
+                </div>
+
+                {!dbEnabled && (
+                  <div className="kb-empty-state">
+                    <div className="kb-empty-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                      </svg>
+                    </div>
+                    <h3>Sign in required</h3>
+                    <p>Connect to Supabase to view and manage your documents.</p>
+                  </div>
+                )}
+
+                {dbEnabled && kbLoading && (
+                  <div className="kb-loading">
+                    <div className="kb-loading-spinner"></div>
+                    <span>Loading documents...</span>
+                  </div>
+                )}
+
+                {dbEnabled && !kbLoading && ragDocuments.length === 0 && (
+                  <div className="kb-empty-state">
+                    <div className="kb-empty-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="12" y1="18" x2="12" y2="12"/>
+                        <line x1="9" y1="15" x2="15" y2="15"/>
+                      </svg>
+                    </div>
+                    <h3>No documents yet</h3>
+                    <p>Upload files in chat to add them to your knowledge base.</p>
+                  </div>
+                )}
+
+                {ragDocuments.length > 0 && (
+                  <div className="kb-doc-list">
+                    {ragDocuments.map((doc) => (
+                      <div key={doc.document_id} className="kb-doc-item">
+                        <div className="kb-doc-icon">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                          </svg>
+                        </div>
+                        <div className="kb-doc-info">
+                          <div className="kb-doc-title-row">
+                            <h4 className="kb-doc-title">{doc.title || 'Untitled document'}</h4>
+                            {doc.is_embedded && (
+                              <span className="kb-doc-embedded-badge" title={`${doc.embedded_count} chunk${doc.embedded_count !== 1 ? 's' : ''} embedded`}>
+                                <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                                  <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                </svg>
+                                Embedded
+                              </span>
+                            )}
+                            {!doc.is_embedded && doc.chunk_count > 0 && (
+                              <span className="kb-doc-pending-badge" title="Processing or awaiting embedding">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                                  <circle cx="12" cy="12" r="10"/>
+                                  <polyline points="12 6 12 12 16 14"/>
+                                </svg>
+                                Pending
+                              </span>
+                            )}
+                          </div>
+                          <div className="kb-doc-meta">
+                            <span className="kb-doc-type">{doc.source_type}</span>
+                            {doc.chunk_count > 0 && (
+                              <span className="kb-doc-chunks">{doc.chunk_count} chunk{doc.chunk_count !== 1 ? 's' : ''}</span>
+                            )}
+                            <span className="kb-doc-date">
+                              {new Date(doc.created_at).toLocaleDateString('en-US', { 
+                                month: 'short', 
+                                day: 'numeric', 
+                                year: 'numeric' 
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          className="kb-doc-delete"
+                          onClick={() => deleteDocument(doc.document_id)}
+                          title="Delete document"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M3 6h18"/>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                    
+                    {/* Pagination Controls */}
+                    {documentsTotalCount > KB_PAGE_SIZE && (
+                      <div className="kb-pagination">
+                        <button
+                          className="kb-pagination-btn"
+                          onClick={() => loadRagDocuments(documentsPage - 1)}
+                          disabled={documentsPage <= 1 || kbLoading}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="15 18 9 12 15 6"/>
+                          </svg>
+                          Previous
+                        </button>
+                        <span className="kb-pagination-info">
+                          Page {documentsPage} of {Math.ceil(documentsTotalCount / KB_PAGE_SIZE)}
+                          <span className="kb-pagination-total">({documentsTotalCount} total)</span>
+                        </span>
+                        <button
+                          className="kb-pagination-btn"
+                          onClick={() => loadRagDocuments(documentsPage + 1)}
+                          disabled={documentsPage >= Math.ceil(documentsTotalCount / KB_PAGE_SIZE) || kbLoading}
+                        >
+                          Next
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="9 18 15 12 9 6"/>
+                          </svg>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Knowledge Graph Tab */}
+            {knowledgeBaseTab === 'graph' && (
+              <KnowledgeGraph 
+                memories={graphMemories.length ? graphMemories : userMemories} 
+                documents={graphDocuments.length ? graphDocuments : ragDocuments}
+                isLoading={kbLoading || graphLoading}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Code Page (Enhanced IDE) */}
+        <div className={`code-page ${showCodePage ? 'slide-in' : 'slide-out'}`}>
+          <div className={`code-page-layout ${showCodeChat ? '' : 'chat-collapsed'}`}>
+            {/* Left Sidebar - Projects & Files */}
+            <div className="code-sidebar">
+              <div className="code-sidebar-header">
+                <button className="code-back-btn" onClick={() => setShowCodePage(false)}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="15 18 9 12 15 6"/>
+                  </svg>
+                </button>
+                <h2>Code</h2>
+              </div>
+
+              {/* Sidebar Tabs */}
+              <div className="code-sidebar-tabs">
+                <button
+                  className={`code-sidebar-tab ${sidebarTab === 'code' ? 'active' : ''}`}
+                  onClick={() => setSidebarTab('code')}
+                  title="Files & Projects"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="16 18 22 12 16 6"/>
+                    <polyline points="8 6 2 12 8 18"/>
+                  </svg>
+                </button>
+                <button
+                  className={`code-sidebar-tab ${sidebarTab === 'supabase' ? 'active' : ''}`}
+                  onClick={() => setSidebarTab('supabase')}
+                  title="Supabase"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M21.362 9.354H12V.396a.396.396 0 0 0-.716-.233L2.203 12.424l-.401.562a1.04 1.04 0 0 0 .836 1.659H12v8.959a.396.396 0 0 0 .716.233l9.081-12.261.401-.562a1.04 1.04 0 0 0-.836-1.66z"/>
+                  </svg>
+                </button>
+                <button
+                  className={`code-sidebar-tab ${sidebarTab === 'git' ? 'active' : ''}`}
+                  onClick={() => setSidebarTab('git')}
+                  title="Git"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M23.546 10.93L13.067.452a1.55 1.55 0 0 0-2.188 0L8.708 2.627l2.76 2.76a1.838 1.838 0 0 1 2.327 2.341l2.658 2.66a1.838 1.838 0 1 1-1.103 1.033l-2.48-2.48v6.53a1.838 1.838 0 1 1-1.512-.065V8.805a1.838 1.838 0 0 1-.998-2.41L7.636 3.67.452 10.852a1.55 1.55 0 0 0 0 2.188l10.48 10.477a1.55 1.55 0 0 0 2.186 0l10.428-10.4a1.55 1.55 0 0 0 0-2.187z"/>
+                  </svg>
+                </button>
+                <button
+                  className={`code-sidebar-tab ${sidebarTab === 'vercel' ? 'active' : ''}`}
+                  onClick={() => setSidebarTab('vercel')}
+                  title="Vercel"
+                >
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2L2 19.5h20L12 2z"/>
+                  </svg>
+                </button>
+              </div>
+
+              {/* Mode Toggle for Code Tab */}
+              {sidebarTab === 'code' && (
+                <div className="code-mode-toggle">
+                  <button
+                    className={`code-mode-btn ${codeEditorMode === 'local' ? 'active' : ''}`}
+                    onClick={() => setCodeEditorMode('local')}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    Local
+                  </button>
+                  <button
+                    className={`code-mode-btn ${codeEditorMode === 'github' ? 'active' : ''}`}
+                    onClick={() => setCodeEditorMode('github')}
+                  >
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                    </svg>
+                    GitHub
+                  </button>
+                </div>
+              )}
+
+              {/* CODE TAB CONTENT */}
+              {sidebarTab === 'code' && (
+                <>
+                  {/* LOCAL MODE */}
+                  {codeEditorMode === 'local' && (
+                <>
+                  {/* Local Projects List */}
+                  <div className="code-projects-section">
+                    <div className="code-projects-header">
+                      <span>Projects</span>
+                      <button
+                        className="code-projects-add-btn"
+                        onClick={() => setShowNewProjectModal(true)}
+                        title="New Project"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="12" y1="5" x2="12" y2="19"/>
+                          <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="code-projects-list">
+                      {localProjects.length === 0 ? (
+                        <div className="code-empty-state">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                            <line x1="12" y1="11" x2="12" y2="17"/>
+                            <line x1="9" y1="14" x2="15" y2="14"/>
+                          </svg>
+                          <p>No projects yet</p>
+                          <button
+                            className="code-empty-btn"
+                            onClick={() => setShowNewProjectModal(true)}
+                          >
+                            Create Project
+                          </button>
+                        </div>
+                      ) : (
+                        localProjects.map(project => (
+                          <div
+                            key={project.id}
+                            className={`code-project-item ${activeLocalProject?.id === project.id ? 'active' : ''}`}
+                            onClick={() => selectLocalProject(project)}
+                          >
+                            <div className="code-project-icon">
+                              {project.type === 'html' && <span className="project-type-badge html">HTML</span>}
+                              {project.type === 'react' && <span className="project-type-badge react">React</span>}
+                              {project.type === 'node' && <span className="project-type-badge node">Node</span>}
+                              {project.type === 'python' && <span className="project-type-badge python">PY</span>}
+                              {project.type === 'blank' && <span className="project-type-badge blank">...</span>}
+                            </div>
+                            <div className="code-project-info">
+                              <span className="code-project-name">{project.name}</span>
+                              <span className="code-project-date">
+                                {new Date(project.updatedAt).toLocaleDateString()}
+                              </span>
+                            </div>
+                            <button
+                              className="code-project-delete"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                deleteLocalProject(project)
+                              }}
+                              title="Delete project"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M3 6h18"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                              </svg>
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Local File Tree */}
+                  {activeLocalProject && (
+                    <div className="code-files-section">
+                      <div className="code-files-header">
+                        <div className="code-files-title">
+                          <span>{activeLocalProject.name}</span>
+                        </div>
+                        <div className="code-files-actions">
+                          <button
+                            className="code-files-action-btn"
+                            onClick={() => {
+                              setNewItemParent('')
+                              setNewItemName('')
+                              setShowNewFileModal(true)
+                            }}
+                            title="New File"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                              <polyline points="14 2 14 8 20 8"/>
+                              <line x1="12" y1="18" x2="12" y2="12"/>
+                              <line x1="9" y1="15" x2="15" y2="15"/>
+                            </svg>
+                          </button>
+                          <button
+                            className="code-files-action-btn"
+                            onClick={() => {
+                              setNewItemParent('')
+                              setNewItemName('')
+                              setShowNewFolderModal(true)
+                            }}
+                            title="New Folder"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                              <line x1="12" y1="11" x2="12" y2="17"/>
+                              <line x1="9" y1="14" x2="15" y2="14"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="code-file-tree">
+                        {(() => {
+                          const projectData = localProjectFiles[activeLocalProject.id]
+                          const files = projectData?.files || []
+                          const expandedFolders = projectData?.expandedFolders || {}
+
+                          const renderLocalFileTree = (items, depth = 0) => {
+                            return items.map(file => (
+                              <div key={file.path} className="file-tree-item-wrapper">
+                                <div
+                                  className={`file-tree-item ${openTabs.find(t => t.path === file.path && t.projectId === activeLocalProject.id) ? 'active' : ''} ${unsavedChanges[`${activeLocalProject.id}-${file.path}`] ? 'has-changes' : ''}`}
+                                  style={{ paddingLeft: `${12 + depth * 16}px` }}
+                                  onClick={() => {
+                                    if (file.type === 'dir') {
+                                      toggleLocalFolder(file.path)
+                                    } else {
+                                      openFileInTab(file, activeLocalProject.id)
+                                    }
+                                  }}
+                                  onContextMenu={(e) => {
+                                    e.preventDefault()
+                                    setContextMenuFile(file)
+                                    setContextMenuPos({ x: e.clientX, y: e.clientY })
+                                  }}
+                                >
+                                  <span className="file-tree-icon">
+                                    {file.type === 'dir' ? (
+                                      expandedFolders[file.path] ? (
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                          <line x1="9" y1="14" x2="15" y2="14"/>
+                                        </svg>
+                                      ) : (
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                        </svg>
+                                      )
+                                    ) : (
+                                      (() => {
+                                        const ext = file.name.split('.').pop()?.toLowerCase()
+                                        if (['js', 'jsx', 'ts', 'tsx'].includes(ext)) return <span className="file-icon-text js">JS</span>
+                                        if (['py'].includes(ext)) return <span className="file-icon-text py">PY</span>
+                                        if (['html', 'htm'].includes(ext)) return <span className="file-icon-text html">{'<>'}</span>
+                                        if (['css', 'scss'].includes(ext)) return <span className="file-icon-text css">#</span>
+                                        if (['json'].includes(ext)) return <span className="file-icon-text json">{'{}'}</span>
+                                        if (['md'].includes(ext)) return <span className="file-icon-text md">MD</span>
+                                        return (
+                                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                            <polyline points="14 2 14 8 20 8"/>
+                                          </svg>
+                                        )
+                                      })()
+                                    )}
+                                  </span>
+                                  <span className="file-tree-name">{file.name}</span>
+                                  {unsavedChanges[`${activeLocalProject.id}-${file.path}`] && (
+                                    <span className="file-tree-modified">M</span>
+                                  )}
+                                </div>
+                                {file.type === 'dir' && expandedFolders[file.path] && (
+                                  <div className="file-tree-children">
+                                    {renderLocalFileTree(
+                                      files.filter(f => {
+                                        const parent = f.path.substring(0, f.path.lastIndexOf('/'))
+                                        return parent === file.path
+                                      }),
+                                      depth + 1
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            ))
+                          }
+
+                          // Get root level files
+                          const rootFiles = files.filter(f => !f.path.includes('/'))
+                          return renderLocalFileTree(buildFileTree(rootFiles))
+                        })()}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* GITHUB MODE */}
+              {codeEditorMode === 'github' && (
+                <>
+                  {!githubConnected ? (
+                    <div className="code-github-connect">
+                      <div className="code-github-icon">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                        </svg>
+                      </div>
+                      <h3>Connect GitHub</h3>
+                      <p>Connect your GitHub account to access, edit, and manage your repositories.</p>
+                      <input
+                        type="password"
+                        className="code-github-token-input"
+                        placeholder="Enter GitHub Personal Access Token"
+                        value={githubToken}
+                        onChange={(e) => setGithubToken(e.target.value)}
+                      />
+                      <button className="code-github-connect-btn" onClick={connectGitHub}>
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                        </svg>
+                        Connect to GitHub
+                      </button>
+                      <div className="code-github-help">
+                        <a href="https://github.com/settings/tokens/new?scopes=repo" target="_blank" rel="noopener noreferrer">
+                          Create a token with 'repo' scope →
+                        </a>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {/* User Info */}
+                      <div className="code-github-user">
+                        <img src={githubUser?.avatar_url} alt={githubUser?.login} className="code-github-avatar" />
+                        <div className="code-github-user-info">
+                          <span className="code-github-username">{githubUser?.login}</span>
+                          <span className="code-github-status">Connected</span>
+                        </div>
+                        <button className="code-github-disconnect" onClick={disconnectGitHub} title="Disconnect">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                            <polyline points="16 17 21 12 16 7"/>
+                            <line x1="21" y1="12" x2="9" y2="12"/>
+                          </svg>
+                        </button>
+                      </div>
+
+                      {/* Repository List */}
+                      <div className="code-repos-section">
+                        <div className="code-repos-header">
+                          <span>Repositories</span>
+                          <div className="code-repos-actions">
+                            <button
+                              className="code-repos-action-btn"
+                              type="button"
+                              onClick={() => {
+                                setCreateRepoError('')
+                                setShowCreateRepoModal(true)
+                              }}
+                              title="Create repository"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="12" y1="5" x2="12" y2="19"></line>
+                                <line x1="5" y1="12" x2="19" y2="12"></line>
+                              </svg>
+                            </button>
+                            <button className="code-repos-refresh" onClick={loadGitHubRepos} disabled={githubReposLoading} title="Refresh repositories">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={githubReposLoading ? 'spinning' : ''}>
+                                <path d="M23 4v6h-6"/>
+                                <path d="M1 20v-6h6"/>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="code-repos-list">
+                          {githubReposLoading ? (
+                            <div className="code-loading">
+                              <div className="code-loading-spinner"></div>
+                              <span>Loading repositories...</span>
+                            </div>
+                          ) : githubRepos.length === 0 ? (
+                            <div className="code-empty">No repositories found</div>
+                          ) : (
+                            githubRepos.map(repo => (
+                              <div
+                                key={repo.id}
+                                className={`code-repo-item ${selectedRepo?.id === repo.id ? 'active' : ''}`}
+                                onClick={() => selectRepo(repo)}
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                                </svg>
+                                <div className="code-repo-info">
+                                  <span className="code-repo-name">{repo.name}</span>
+                                  <span className="code-repo-desc">{repo.description || 'No description'}</span>
+                                </div>
+                                {repo.private && (
+                                  <span className="code-repo-private">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                      <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                    </svg>
+                                  </span>
+                                )}
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+
+                      {/* File Tree */}
+                      {selectedRepo && (
+                        <div className="code-files-section">
+                          <div className="code-files-header">
+                            <div className="code-files-title">
+                              <button className="code-repo-back" type="button" onClick={exitRepo} title="Back to all repositories">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M19 12H5"/>
+                                  <path d="M12 19l-7-7 7-7"/>
+                                </svg>
+                              </button>
+                              <span>{selectedRepo.name}</span>
+                            </div>
+                            <div className="code-files-actions">
+                              <select
+                                className="code-branch-select"
+                                value={repoBranch}
+                                onChange={(e) => {
+                                  setRepoBranch(e.target.value)
+                                  loadRepoFiles(selectedRepo.owner.login, selectedRepo.name, '', e.target.value)
+                                }}
+                              >
+                                {repoBranches.map(b => (
+                                  <option key={b} value={b}>{b}</option>
+                                ))}
+                          </select>
+                          <button
+                            className="code-files-action-btn"
+                            type="button"
+                            onClick={() => {
+                              setGithubNewFileName('')
+                              setGithubNewFileContent('')
+                              setShowGithubNewFileModal(true)
+                            }}
+                            title="New file"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                              <polyline points="14 2 14 8 20 8"/>
+                              <line x1="12" y1="18" x2="12" y2="12"/>
+                              <line x1="9" y1="15" x2="15" y2="15"/>
+                            </svg>
+                          </button>
+                          <button
+                            className="code-repo-delete"
+                            type="button"
+                            onClick={() => {
+                              setDeleteRepoError('')
+                              setDeleteRepoConfirm('')
+                              setShowDeleteRepoModal(true)
+                            }}
+                            title="Delete repository"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="3 6 5 6 21 6"></polyline>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="code-file-tree">
+                        {repoFilesLoading && !repoFiles.length ? (
+                          <div className="code-loading">
+                            <div className="code-loading-spinner"></div>
+                          </div>
+                        ) : (
+                          <FileTree 
+                            files={repoFiles}
+                            expandedFolders={expandedFolders}
+                            selectedFile={selectedFile}
+                            onToggleFolder={toggleFolder}
+                            onSelectFile={(file) => {
+                              if (file.type === 'file') {
+                                loadFileContent(selectedRepo.owner.login, selectedRepo.name, file.path)
+                              }
+                            }}
+                            pendingChanges={pendingFileChanges}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+                </>
+              )}
+                </>
+              )}
+
+              {/* SUPABASE TAB CONTENT */}
+              {sidebarTab === 'supabase' && (
+                <div className="code-supabase-section">
+                  <div className="code-section-header">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M21.362 9.354H12V.396a.396.396 0 0 0-.716-.233L2.203 12.424l-.401.562a1.04 1.04 0 0 0 .836 1.659H12v8.959a.396.396 0 0 0 .716.233l9.081-12.261.401-.562a1.04 1.04 0 0 0-.836-1.66z"/>
+                    </svg>
+                    <span>Supabase</span>
+                  </div>
+                  {supabaseConnected ? (
+                    <div className="code-integration-connected">
+                      <div className="code-integration-status">
+                        <span className="status-dot connected" />
+                        <span>Connected</span>
+                      </div>
+
+                      <div className="code-supabase-tables">
+                        <div className="code-section-subheader">
+                          <span>Tables</span>
+                          <button onClick={loadSupabaseTables} className="refresh-btn" title="Refresh">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="23 4 23 10 17 10"/>
+                              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                            </svg>
+                          </button>
+                        </div>
+                        {supabaseLoading ? (
+                          <div className="code-loading-small">Loading...</div>
+                        ) : supabaseTables.length === 0 ? (
+                          <div className="code-empty-small">No tables found</div>
+                        ) : (
+                          <div className="code-table-list">
+                            {supabaseTables.map(table => (
+                              <div
+                                key={table}
+                                className={`code-table-item ${supabaseSelectedTable === table ? 'active' : ''}`}
+                                onClick={() => loadSupabaseTableData(table)}
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                                  <line x1="3" y1="9" x2="21" y2="9"/>
+                                  <line x1="9" y1="21" x2="9" y2="9"/>
+                                </svg>
+                                <span>{table}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="code-supabase-actions">
+                        <button
+                          className="code-action-btn"
+                          onClick={() => {
+                            if (supabaseSelectedTable) {
+                              const code = generateSupabaseCode(supabaseSelectedTable, 'select')
+                              navigator.clipboard.writeText(code)
+                              showToast('Code copied to clipboard')
+                            }
+                          }}
+                          disabled={!supabaseSelectedTable}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                          </svg>
+                          Copy Query Code
+                        </button>
+                      </div>
+
+                      <button className="code-disconnect-btn" onClick={disconnectSupabase}>
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="code-integration-connect">
+                      <p>Connect your Supabase project to access your database.</p>
+                      <div className="code-input-group">
+                        <label>Project URL</label>
+                        <input
+                          type="text"
+                          placeholder="https://xxx.supabase.co"
+                          value={supabaseUrl}
+                          onChange={(e) => setSupabaseUrl(e.target.value)}
+                        />
+                      </div>
+                      <div className="code-input-group">
+                        <label>Anon Key</label>
+                        <input
+                          type="password"
+                          placeholder="Enter anon key"
+                          value={supabaseAnonKey}
+                          onChange={(e) => setSupabaseAnonKey(e.target.value)}
+                        />
+                      </div>
+                      <div className="code-input-group">
+                        <label>Service Key (optional)</label>
+                        <input
+                          type="password"
+                          placeholder="Enter service key for admin access"
+                          value={supabaseServiceKey}
+                          onChange={(e) => setSupabaseServiceKey(e.target.value)}
+                        />
+                      </div>
+                      <button
+                        className="code-connect-btn"
+                        onClick={connectSupabase}
+                        disabled={supabaseLoading || !supabaseUrl.trim() || !supabaseAnonKey.trim()}
+                      >
+                        {supabaseLoading ? 'Connecting...' : 'Connect to Supabase'}
+                      </button>
+                      <a
+                        href="https://supabase.com/dashboard/project/_/settings/api"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="code-help-link"
+                      >
+                        Get keys from Supabase Dashboard →
+                      </a>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* GIT TAB CONTENT */}
+              {sidebarTab === 'git' && (
+                <div className="code-git-section">
+                  <div className="code-section-header">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M23.546 10.93L13.067.452a1.55 1.55 0 0 0-2.188 0L8.708 2.627l2.76 2.76a1.838 1.838 0 0 1 2.327 2.341l2.658 2.66a1.838 1.838 0 1 1-1.103 1.033l-2.48-2.48v6.53a1.838 1.838 0 1 1-1.512-.065V8.805a1.838 1.838 0 0 1-.998-2.41L7.636 3.67.452 10.852a1.55 1.55 0 0 0 0 2.188l10.48 10.477a1.55 1.55 0 0 0 2.186 0l10.428-10.4a1.55 1.55 0 0 0 0-2.187z"/>
+                    </svg>
+                    <span>Git</span>
+                  </div>
+
+                  {!activeLocalProject ? (
+                    <div className="code-empty-state">
+                      <p>Select a project first</p>
+                    </div>
+                  ) : !gitInitialized ? (
+                    <div className="code-git-init">
+                      <p>Initialize a Git repository for this project</p>
+                      <button className="code-connect-btn" onClick={initGitRepo}>
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M23.546 10.93L13.067.452a1.55 1.55 0 0 0-2.188 0L8.708 2.627l2.76 2.76a1.838 1.838 0 0 1 2.327 2.341l2.658 2.66a1.838 1.838 0 1 1-1.103 1.033l-2.48-2.48v6.53a1.838 1.838 0 1 1-1.512-.065V8.805a1.838 1.838 0 0 1-.998-2.41L7.636 3.67.452 10.852a1.55 1.55 0 0 0 0 2.188l10.48 10.477a1.55 1.55 0 0 0 2.186 0l10.428-10.4a1.55 1.55 0 0 0 0-2.187z"/>
+                        </svg>
+                        Initialize Repository
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="code-git-content">
+                      {/* Branch Selector */}
+                      <div className="code-git-branches">
+                        <div className="code-section-subheader">
+                          <span>Branch: {gitCurrentBranch}</span>
+                        </div>
+                        <div className="code-branch-list">
+                          {gitBranches.map(branch => (
+                            <div
+                              key={branch}
+                              className={`code-branch-item ${gitCurrentBranch === branch ? 'active' : ''}`}
+                              onClick={() => switchGitBranch(branch)}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="6" y1="3" x2="6" y2="15"/>
+                                <circle cx="18" cy="6" r="3"/>
+                                <circle cx="6" cy="18" r="3"/>
+                                <path d="M18 9a9 9 0 0 1-9 9"/>
+                              </svg>
+                              <span>{branch}</span>
+                              {branch !== 'main' && (
+                                <button
+                                  className="branch-delete-btn"
+                                  onClick={(e) => { e.stopPropagation(); deleteGitBranch(branch); }}
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <line x1="18" y1="6" x2="6" y2="18"/>
+                                    <line x1="6" y1="6" x2="18" y2="18"/>
+                                  </svg>
+                                </button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                        <div className="code-new-branch">
+                          <input
+                            type="text"
+                            placeholder="New branch name"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                createGitBranch(e.target.value)
+                                e.target.value = ''
+                              }
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Staged Files */}
+                      <div className="code-git-staging">
+                        <div className="code-section-subheader">
+                          <span>Changes</span>
+                          <button onClick={stageAllFiles} className="stage-all-btn">Stage All</button>
+                        </div>
+                        <div className="code-staged-files">
+                          {Object.keys(localProjectFiles[activeLocalProject?.id]?.fileContents || {}).map(file => (
+                            <div
+                              key={file}
+                              className={`code-file-item ${gitStagedFiles.includes(file) ? 'staged' : ''}`}
+                              onClick={() => stageFile(file)}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={gitStagedFiles.includes(file)}
+                                onChange={() => stageFile(file)}
+                              />
+                              <span>{file}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Commit */}
+                      <div className="code-git-commit">
+                        <textarea
+                          placeholder="Commit message..."
+                          value={gitCommitMessage}
+                          onChange={(e) => setGitCommitMessage(e.target.value)}
+                          rows={2}
+                        />
+                        <button
+                          className="code-commit-btn"
+                          onClick={commitChanges}
+                          disabled={gitStagedFiles.length === 0 || !gitCommitMessage.trim()}
+                        >
+                          Commit ({gitStagedFiles.length} files)
+                        </button>
+                      </div>
+
+                      {/* Recent Commits */}
+                      <div className="code-git-history">
+                        <div className="code-section-subheader">
+                          <span>Recent Commits</span>
+                        </div>
+                        <div className="code-commit-list">
+                          {gitCommits.slice(0, 5).map(commit => (
+                            <div key={commit.id} className="code-commit-item">
+                              <div className="commit-message">{commit.message}</div>
+                              <div className="commit-meta">
+                                {new Date(commit.date).toLocaleDateString()} • {commit.files?.length || 0} files
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Push to GitHub */}
+                      <div className="code-git-push">
+                        <button className="code-action-btn" onClick={pushToGitHub}>
+                          <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                          </svg>
+                          Push to GitHub
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* VERCEL TAB CONTENT */}
+              {sidebarTab === 'vercel' && (
+                <div className="code-vercel-section">
+                <div className="code-vercel-header">
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16">
+                    <path d="M12 2L2 19.5h20L12 2z"/>
+                  </svg>
+                  <span>Vercel</span>
+                </div>
+                {vercelConnected ? (
+                  <div className="code-vercel-connected">
+                    <div className="code-vercel-user">
+                      <span className="code-vercel-username">{vercelUser?.username || vercelUser?.email}</span>
+                      <span className="code-vercel-status">Connected</span>
+                    </div>
+                    <div className="code-vercel-actions">
+                      <button
+                        className="code-vercel-action-btn"
+                        onClick={() => setShowVercelDeployModal(true)}
+                        disabled={!activeLocalProject}
+                        title={activeLocalProject ? 'Deploy to Vercel' : 'Select a project to deploy'}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="17 8 12 3 7 8"/>
+                          <line x1="12" y1="3" x2="12" y2="15"/>
+                        </svg>
+                        Deploy
+                      </button>
+                      <button
+                        className="code-vercel-action-btn"
+                        onClick={() => { setShowVercelDeployments(true); loadVercelDeployments(); }}
+                        title="View Deployments"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="8" y1="6" x2="21" y2="6"/>
+                          <line x1="8" y1="12" x2="21" y2="12"/>
+                          <line x1="8" y1="18" x2="21" y2="18"/>
+                          <line x1="3" y1="6" x2="3.01" y2="6"/>
+                          <line x1="3" y1="12" x2="3.01" y2="12"/>
+                          <line x1="3" y1="18" x2="3.01" y2="18"/>
+                        </svg>
+                        Deployments
+                      </button>
+                    </div>
+                    <button
+                      className="code-vercel-disconnect"
+                      onClick={disconnectVercel}
+                      title="Disconnect from Vercel"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                        <polyline points="16 17 21 12 16 7"/>
+                        <line x1="21" y1="12" x2="9" y2="12"/>
+                      </svg>
+                      Disconnect
+                    </button>
+                  </div>
+                ) : (
+                  <div className="code-vercel-connect">
+                    <p>Deploy your projects to Vercel</p>
+                    <input
+                      type="password"
+                      className="code-vercel-token-input"
+                      placeholder="Enter Vercel Token"
+                      value={vercelToken}
+                      onChange={(e) => setVercelToken(e.target.value)}
+                    />
+                    <button
+                      className="code-vercel-connect-btn"
+                      onClick={connectVercel}
+                      disabled={vercelLoading || !vercelToken.trim()}
+                    >
+                      {vercelLoading ? (
+                        <>
+                          <span className="btn-spinner small" />
+                          Connecting...
+                        </>
+                      ) : (
+                        <>
+                          <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
+                            <path d="M12 2L2 19.5h20L12 2z"/>
+                          </svg>
+                          Connect Vercel
+                        </>
+                      )}
+                    </button>
+                    <a
+                      href="https://vercel.com/account/tokens"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="code-vercel-help"
+                    >
+                      Get token from Vercel →
+                    </a>
+                  </div>
+                )}
+              </div>
+              )}
+            </div>
+
+            {/* Main Content Area */}
+            <div className={`code-main ${showPreviewPanel ? 'with-preview' : ''}`}>
+              {/* Toolbar */}
+              <div className="code-toolbar">
+                <div className="code-toolbar-left">
+                  {codeEditorMode === 'local' && activeLocalProject && (
+                    <>
+                      <button
+                        className="code-toolbar-btn"
+                        onClick={saveCurrentFile}
+                        disabled={!activeTabId || !unsavedChanges[activeTabId]}
+                        title="Save (Cmd+S)"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                          <polyline points="17 21 17 13 7 13 7 21"/>
+                          <polyline points="7 3 7 8 15 8"/>
+                        </svg>
+                        Save
+                      </button>
+                      <button
+                        className="code-toolbar-btn primary"
+                        onClick={runLocalPreview}
+                        title="Run Preview"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polygon points="5 3 19 12 5 21 5 3"/>
+                        </svg>
+                        Run
+                      </button>
+                    </>
+                  )}
+                </div>
+                <div className="code-toolbar-right">
+                  <button
+                    className={`code-toolbar-btn ${showCodeChat ? 'active' : ''}`}
+                    onClick={() => setShowCodeChat(!showCodeChat)}
+                    title="Toggle AI Chat"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    Chat
+                    {codeMessages.length > 0 && (
+                      <span className="code-chat-badge">{codeMessages.length}</span>
+                    )}
+                  </button>
+                  {codeEditorMode === 'local' && activeLocalProject && (
+                    <>
+                      <button
+                        className={`code-toolbar-btn ${showConsole ? 'active' : ''}`}
+                        onClick={() => setShowConsole(!showConsole)}
+                        title="Toggle Console"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="4 17 10 11 4 5"/>
+                          <line x1="12" y1="19" x2="20" y2="19"/>
+                        </svg>
+                        Console
+                      </button>
+                      <div className="code-deploy-container">
+                        <button
+                          className="code-toolbar-btn"
+                          onClick={() => setShowDeployMenu(!showDeployMenu)}
+                          title="Deploy Options"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                            <polyline points="17 8 12 3 7 8"/>
+                            <line x1="12" y1="3" x2="12" y2="15"/>
+                          </svg>
+                          Deploy
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="dropdown-chevron">
+                            <polyline points="6 9 12 15 18 9"/>
+                          </svg>
+                        </button>
+                        {showDeployMenu && (
+                          <div className="code-deploy-dropdown">
+                            <div className="deploy-dropdown-section">
+                              <span className="deploy-dropdown-label">Vercel</span>
+                              {vercelConnected ? (
+                                <>
+                                  <button onClick={() => { setShowVercelDeployModal(true); setShowDeployMenu(false); }}>
+                                    <svg viewBox="0 0 24 24" fill="currentColor">
+                                      <path d="M12 2L2 19.5h20L12 2z"/>
+                                    </svg>
+                                    Deploy to Vercel
+                                  </button>
+                                  <button onClick={() => { setShowVercelDeployments(true); loadVercelDeployments(); setShowDeployMenu(false); }}>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <line x1="8" y1="6" x2="21" y2="6"/>
+                                      <line x1="8" y1="12" x2="21" y2="12"/>
+                                      <line x1="8" y1="18" x2="21" y2="18"/>
+                                      <line x1="3" y1="6" x2="3.01" y2="6"/>
+                                      <line x1="3" y1="12" x2="3.01" y2="12"/>
+                                      <line x1="3" y1="18" x2="3.01" y2="18"/>
+                                    </svg>
+                                    View Deployments
+                                  </button>
+                                  <button onClick={() => { setShowVercelModal(true); setShowDeployMenu(false); }}>
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <circle cx="12" cy="12" r="3"/>
+                                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                                    </svg>
+                                    Vercel Settings
+                                  </button>
+                                </>
+                              ) : (
+                                <button onClick={() => { setShowVercelModal(true); setShowDeployMenu(false); }}>
+                                  <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M12 2L2 19.5h20L12 2z"/>
+                                  </svg>
+                                  Connect Vercel
+                                </button>
+                              )}
+                            </div>
+                            <div className="deploy-dropdown-divider" />
+                            <div className="deploy-dropdown-section">
+                              <span className="deploy-dropdown-label">Export</span>
+                              <button onClick={exportProjectAsZip}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                  <polyline points="7 10 12 15 17 10"/>
+                                  <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                                Export Files
+                              </button>
+                              <button onClick={() => { showToast('Copy to clipboard coming soon'); setShowDeployMenu(false); }}>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                </svg>
+                                Copy to Clipboard
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Tab Bar */}
+              {codeEditorMode === 'local' && openTabs.length > 0 && (
+                <div className="code-tabs-bar">
+                  {openTabs.map(tab => (
+                    <div
+                      key={tab.id}
+                      className={`code-tab ${activeTabId === tab.id ? 'active' : ''} ${unsavedChanges[tab.id] ? 'unsaved' : ''}`}
+                      onClick={() => switchToTab(tab)}
+                    >
+                      <span className="code-tab-name">
+                        {unsavedChanges[tab.id] && <span className="code-tab-dot" />}
+                        {tab.name}
+                      </span>
+                      <button
+                        className="code-tab-close"
+                        onClick={(e) => closeTab(tab.id, e)}
+                        title="Close"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="18" y1="6" x2="6" y2="18"/>
+                          <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Editor + Preview Container */}
+              <div className="code-editor-preview-container">
+                {/* File Editor */}
+                <div className="code-editor-section">
+                  {codeEditorMode === 'local' ? (
+                    // LOCAL MODE EDITOR
+                    activeTabId ? (
+                      <div className="code-editor-wrapper">
+                        <div className="code-editor-line-numbers">
+                          {editorContent.split('\n').map((_, i) => (
+                            <div key={i} className="line-number">{i + 1}</div>
+                          ))}
+                        </div>
+                        <textarea
+                          ref={editorRef}
+                          className="code-editor-textarea"
+                          value={editorContent}
+                          onChange={handleEditorChange}
+                          spellCheck="false"
+                          autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="off"
+                        />
+                      </div>
+                    ) : (
+                      <div className="code-editor-empty">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <polyline points="16 18 22 12 16 6"/>
+                          <polyline points="8 6 2 12 8 18"/>
+                        </svg>
+                        <h3>{activeLocalProject ? 'Select a file to edit' : 'Create or select a project'}</h3>
+                        <p>{activeLocalProject ? 'Choose a file from the file tree to start editing' : 'Click "New Project" in the sidebar to get started'}</p>
+                      </div>
+                    )
+                  ) : (
+                    // GITHUB MODE EDITOR
+                    selectedFile ? (
+                      <>
+                        <div className="code-editor-header github-editor-header">
+                          <div className="code-editor-path">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                              <polyline points="14 2 14 8 20 8"/>
+                            </svg>
+                            <span>{selectedFile.path}</span>
+                          </div>
+                          <div className="github-editor-actions">
+                            {githubFileEditing ? (
+                              <>
+                                <button
+                                  className="code-toolbar-btn"
+                                  onClick={cancelGithubEdit}
+                                  disabled={githubFileSaving}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  className="code-toolbar-btn primary"
+                                  onClick={saveGithubFile}
+                                  disabled={githubFileSaving}
+                                >
+                                  {githubFileSaving ? 'Saving...' : 'Commit'}
+                                </button>
+                              </>
+                            ) : (
+                              <>
+                                <button
+                                  className="code-toolbar-btn"
+                                  onClick={startGithubEdit}
+                                  title="Edit file"
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                  </svg>
+                                  Edit
+                                </button>
+                                <button
+                                  className="code-toolbar-btn danger"
+                                  onClick={deleteGithubFile}
+                                  title="Delete file"
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <path d="M3 6h18"/>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                  </svg>
+                                </button>
+                              </>
+                            )}
+                            {pendingFileChanges[selectedFile.path] && (
+                              <button
+                                className="code-apply-change-btn"
+                                onClick={() => applyPendingChange(selectedFile.path)}
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <polyline points="20 6 9 17 4 12"/>
+                                </svg>
+                                Apply AI Changes
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="code-editor-content">
+                          {fileContentLoading ? (
+                            <div className="code-loading">
+                              <div className="code-loading-spinner"></div>
+                              <span>Loading file...</span>
+                            </div>
+                          ) : githubFileEditing ? (
+                            <div className="code-editor-wrapper">
+                              <div className="code-editor-line-numbers">
+                                {githubEditContent.split('\n').map((_, i) => (
+                                  <div key={i} className="line-number">{i + 1}</div>
+                                ))}
+                              </div>
+                              <textarea
+                                className="code-editor-textarea"
+                                value={githubEditContent}
+                                onChange={(e) => setGithubEditContent(e.target.value)}
+                                spellCheck="false"
+                                autoComplete="off"
+                                autoCorrect="off"
+                                autoCapitalize="off"
+                              />
+                            </div>
+                          ) : (
+                            <pre className="code-file-content">
+                              <code dangerouslySetInnerHTML={{
+                                __html: highlightCode(
+                                  pendingFileChanges[selectedFile.path]?.content || fileContent,
+                                  selectedFile.name.split('.').pop()
+                                )
+                              }} />
+                            </pre>
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="code-editor-empty">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <polyline points="16 18 22 12 16 6"/>
+                          <polyline points="8 6 2 12 8 18"/>
+                        </svg>
+                        <h3>Select a file to view</h3>
+                        <p>Choose a file from the repository to view and edit its contents</p>
+                      </div>
+                    )
+                  )}
+                </div>
+
+                {/* Preview Panel */}
+                {showPreviewPanel && (
+                  <div className="code-preview-panel">
+                    <div className="code-preview-header">
+                      <span>Preview</span>
+                      <button
+                        className="code-preview-close"
+                        onClick={() => setShowPreviewPanel(false)}
+                        title="Close Preview"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="18" y1="6" x2="6" y2="18"/>
+                          <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                      </button>
+                    </div>
+                    <iframe
+                      ref={previewIframeRef}
+                      className="code-preview-iframe"
+                      srcDoc={previewContent}
+                      sandbox="allow-scripts allow-modals"
+                      title="Preview"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Console Panel */}
+              {showConsole && (
+                <div className="code-console-panel">
+                  <div className="code-console-header">
+                    <span>Console</span>
+                    <div className="code-console-actions">
+                      <button onClick={() => setConsoleOutput([])} title="Clear Console">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M3 6h18"/>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                      </button>
+                      <button onClick={() => setShowConsole(false)} title="Close Console">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="18" y1="6" x2="6" y2="18"/>
+                          <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="code-console-output">
+                    {consoleOutput.length === 0 ? (
+                      <div className="code-console-empty">No output yet. Run your code to see results.</div>
+                    ) : (
+                      consoleOutput.map((entry, i) => (
+                        <div key={i} className={`code-console-entry ${entry.level}`}>
+                          <span className="console-prefix">
+                            {entry.level === 'error' ? '✕' : entry.level === 'warn' ? '⚠' : '›'}
+                          </span>
+                          {entry.message}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Right Chat Sidebar - Cursor Style */}
+            <div className="code-chat-sidebar">
+              <div className="code-chat-sidebar-header">
+                <h3>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  AI Assistant
+                </h3>
+                <div className="code-chat-sidebar-actions">
+                  <button
+                    onClick={() => setCodeMessages([])}
+                    title="Clear Chat"
+                    disabled={codeMessages.length === 0}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 6h18"/>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                  </button>
+                  <button onClick={() => setShowCodeChat(false)} title="Hide Chat Panel">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="9 18 15 12 9 6"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="code-chat-sidebar-messages">
+                {codeMessages.length === 0 ? (
+                  <div className="code-chat-sidebar-empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    <h4>Ask about your code</h4>
+                    <p>Get help with debugging, writing new features, or understanding existing code.</p>
+                  </div>
+                ) : (
+                  codeMessages.map((msg, i) => (
+                    <div key={i} className={`code-chat-sidebar-message ${msg.role}`}>
+                      <div className="code-chat-sidebar-message-header">
+                        {msg.role === 'user' ? 'You' : 'AI Assistant'}
+                      </div>
+                      <div
+                        className="code-chat-sidebar-message-content"
+                        dangerouslySetInnerHTML={{ __html: formatMarkdown(msg.content) }}
+                      />
+                    </div>
+                  ))
+                )}
+                {codeGenerating && (
+                  <div className="code-chat-sidebar-message assistant">
+                    <div className="code-chat-sidebar-message-header">AI Assistant</div>
+                    <div className="code-chat-sidebar-typing">
+                      <span></span>
+                      <span></span>
+                      <span></span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="code-chat-sidebar-input">
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault()
+                    handleCodeChat()
+                  }}
+                >
+                  <textarea
+                    placeholder={codeEditorMode === 'local'
+                      ? (activeLocalProject ? "Ask anything about your code..." : "Create a project to get started...")
+                      : (selectedRepo ? "Ask anything about this repo..." : "Connect a repo to get started...")}
+                    value={codeInput}
+                    onChange={handleCodeInputChange}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleCodeChat()
+                      }
+                    }}
+                    disabled={codeGenerating}
+                    rows={3}
+                  />
+                  <div className="code-chat-sidebar-input-actions">
+                    <div className="code-chat-sidebar-input-left">
+                      <button
+                        type="button"
+                        className="model-selector-mini"
+                        onClick={() => setShowAgentSelector(!showAgentSelector)}
+                      >
+                        <span>{selectedAgent ? selectedAgent.name : 'Select Agent'}</span>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                      </button>
+                      {showAgentSelector && (
+                        <div className="model-dropdown" style={{ bottom: '100%', top: 'auto', marginBottom: '4px' }}>
+                          {allAgents.map(agent => (
+                            <button
+                              key={agent.id}
+                              type="button"
+                              className={`model-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+                              onClick={() => {
+                                setSelectedAgent(agent)
+                                setShowAgentSelector(false)
+                              }}
+                            >
+                              <span className="model-option-name">{agent.name}</span>
+                              <span className="model-option-badge">
+                                {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'mcp' ? 'mcp' : 'n8n'}
+                              </span>
+                            </button>
+                          ))}
+                          {allAgents.length === 0 && (
+                            <div className="model-dropdown-empty">No agents available</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="code-chat-sidebar-input-right">
+                      <button
+                        type={codeGenerating ? 'button' : 'submit'}
+                        onClick={codeGenerating ? () => setCodeGenerating(false) : undefined}
+                        disabled={!codeInput.trim() && !codeGenerating}
+                        className={`send-btn-sidebar ${codeGenerating ? 'stop' : ''}`}
+                      >
+                        {codeGenerating ? (
+                          <svg viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="6" width="12" height="12" rx="2"/>
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </form>
+                <p className="disclaimer-mini">AI can make mistakes. Verify important info.</p>
+              </div>
+            </div>
+
+            {/* Toggle button when chat is hidden */}
+            {!showCodeChat && (
+              <button
+                className="code-chat-toggle"
+                onClick={() => setShowCodeChat(true)}
+                title="Open AI Chat"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+              </button>
+            )}
+
+            {/* Context Menu for Files */}
+            {contextMenuFile && (
+              <div
+                className="code-context-menu"
+                style={{ top: contextMenuPos.y, left: contextMenuPos.x }}
+              >
+                <button onClick={() => {
+                  setRenameValue(contextMenuFile.name)
+                  setShowRenameModal(true)
+                }}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                  </svg>
+                  Rename
+                </button>
+                <button onClick={() => deleteLocalFile(contextMenuFile)} className="danger">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 6h18"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                  Delete
+                </button>
+                {contextMenuFile.type === 'dir' && (
+                  <>
+                    <div className="context-menu-divider" />
+                    <button onClick={() => {
+                      setNewItemParent(contextMenuFile.path)
+                      setNewItemName('')
+                      setShowNewFileModal(true)
+                      setContextMenuFile(null)
+                    }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="12" y1="18" x2="12" y2="12"/>
+                        <line x1="9" y1="15" x2="15" y2="15"/>
+                      </svg>
+                      New File Here
+                    </button>
+                    <button onClick={() => {
+                      setNewItemParent(contextMenuFile.path)
+                      setNewItemName('')
+                      setShowNewFolderModal(true)
+                      setContextMenuFile(null)
+                    }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        <line x1="12" y1="11" x2="12" y2="17"/>
+                        <line x1="9" y1="14" x2="15" y2="14"/>
+                      </svg>
+                      New Folder Here
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* New Project Modal */}
+            {showNewProjectModal && (
+              <div className="code-modal-overlay" onClick={() => setShowNewProjectModal(false)}>
+                <div className="code-modal" onClick={e => e.stopPropagation()}>
+                  <div className="code-modal-header">
+                    <h3>New Project</h3>
+                    <button className="code-modal-close" onClick={() => setShowNewProjectModal(false)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="code-modal-body">
+                    <label className="code-modal-label">Project Name</label>
+                    <input
+                      className="code-modal-input"
+                      value={newLocalProjectName}
+                      onChange={(e) => setNewLocalProjectName(e.target.value)}
+                      placeholder="my-awesome-project"
+                      autoFocus
+                    />
+                    <label className="code-modal-label">Project Type</label>
+                    <div className="code-project-type-grid">
+                      {[
+                        { type: 'html', label: 'HTML/CSS/JS', icon: '<>' },
+                        { type: 'react', label: 'React', icon: 'R' },
+                        { type: 'node', label: 'Node.js', icon: 'N' },
+                        { type: 'python', label: 'Python', icon: 'PY' },
+                        { type: 'blank', label: 'Blank', icon: '...' }
+                      ].map(({ type, label, icon }) => (
+                        <button
+                          key={type}
+                          className={`code-project-type-btn ${newLocalProjectType === type ? 'active' : ''}`}
+                          onClick={() => setNewLocalProjectType(type)}
+                        >
+                          <span className={`project-type-icon ${type}`}>{icon}</span>
+                          <span>{label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="code-modal-actions">
+                    <button className="code-modal-btn" onClick={() => setShowNewProjectModal(false)}>Cancel</button>
+                    <button
+                      className="code-modal-btn primary"
+                      onClick={createLocalProject}
+                      disabled={!newLocalProjectName.trim()}
+                    >
+                      Create Project
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* New File Modal */}
+            {showNewFileModal && (
+              <div className="code-modal-overlay" onClick={() => setShowNewFileModal(false)}>
+                <div className="code-modal" onClick={e => e.stopPropagation()}>
+                  <div className="code-modal-header">
+                    <h3>New File</h3>
+                    <button className="code-modal-close" onClick={() => setShowNewFileModal(false)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="code-modal-body">
+                    <label className="code-modal-label">File Name</label>
+                    <input
+                      className="code-modal-input"
+                      value={newItemName}
+                      onChange={(e) => setNewItemName(e.target.value)}
+                      placeholder="example.js"
+                      autoFocus
+                      onKeyDown={(e) => { if (e.key === 'Enter') createNewFile() }}
+                    />
+                    {newItemParent && (
+                      <p className="code-modal-hint">Location: {newItemParent}/</p>
+                    )}
+                  </div>
+                  <div className="code-modal-actions">
+                    <button className="code-modal-btn" onClick={() => setShowNewFileModal(false)}>Cancel</button>
+                    <button
+                      className="code-modal-btn primary"
+                      onClick={createNewFile}
+                      disabled={!newItemName.trim()}
+                    >
+                      Create
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* New Folder Modal */}
+            {showNewFolderModal && (
+              <div className="code-modal-overlay" onClick={() => setShowNewFolderModal(false)}>
+                <div className="code-modal" onClick={e => e.stopPropagation()}>
+                  <div className="code-modal-header">
+                    <h3>New Folder</h3>
+                    <button className="code-modal-close" onClick={() => setShowNewFolderModal(false)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="code-modal-body">
+                    <label className="code-modal-label">Folder Name</label>
+                    <input
+                      className="code-modal-input"
+                      value={newItemName}
+                      onChange={(e) => setNewItemName(e.target.value)}
+                      placeholder="components"
+                      autoFocus
+                      onKeyDown={(e) => { if (e.key === 'Enter') createNewFolder() }}
+                    />
+                    {newItemParent && (
+                      <p className="code-modal-hint">Location: {newItemParent}/</p>
+                    )}
+                  </div>
+                  <div className="code-modal-actions">
+                    <button className="code-modal-btn" onClick={() => setShowNewFolderModal(false)}>Cancel</button>
+                    <button
+                      className="code-modal-btn primary"
+                      onClick={createNewFolder}
+                      disabled={!newItemName.trim()}
+                    >
+                      Create
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Rename Modal */}
+            {showRenameModal && (
+              <div className="code-modal-overlay" onClick={() => setShowRenameModal(false)}>
+                <div className="code-modal" onClick={e => e.stopPropagation()}>
+                  <div className="code-modal-header">
+                    <h3>Rename</h3>
+                    <button className="code-modal-close" onClick={() => setShowRenameModal(false)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="code-modal-body">
+                    <label className="code-modal-label">New Name</label>
+                    <input
+                      className="code-modal-input"
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      autoFocus
+                      onKeyDown={(e) => { if (e.key === 'Enter') renameLocalFile() }}
+                    />
+                  </div>
+                  <div className="code-modal-actions">
+                    <button className="code-modal-btn" onClick={() => setShowRenameModal(false)}>Cancel</button>
+                    <button
+                      className="code-modal-btn primary"
+                      onClick={renameLocalFile}
+                      disabled={!renameValue.trim() || renameValue === contextMenuFile?.name}
+                    >
+                      Rename
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* GitHub New File Modal */}
+            {showGithubNewFileModal && (
+              <div className="code-modal-overlay" onClick={() => setShowGithubNewFileModal(false)}>
+                <div className="code-modal" onClick={e => e.stopPropagation()}>
+                  <div className="code-modal-header">
+                    <h3>New File in {selectedRepo?.name}</h3>
+                    <button className="code-modal-close" onClick={() => setShowGithubNewFileModal(false)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="code-modal-body">
+                    <label className="code-modal-label">File Path</label>
+                    <input
+                      className="code-modal-input"
+                      value={githubNewFileName}
+                      onChange={(e) => setGithubNewFileName(e.target.value)}
+                      placeholder="src/example.js"
+                      autoFocus
+                    />
+                    <label className="code-modal-label">Initial Content (optional)</label>
+                    <textarea
+                      className="code-modal-textarea"
+                      value={githubNewFileContent}
+                      onChange={(e) => setGithubNewFileContent(e.target.value)}
+                      placeholder="// Your code here"
+                      rows={6}
+                    />
+                  </div>
+                  <div className="code-modal-actions">
+                    <button className="code-modal-btn" onClick={() => setShowGithubNewFileModal(false)}>Cancel</button>
+                    <button
+                      className="code-modal-btn primary"
+                      onClick={createGithubFile}
+                      disabled={!githubNewFileName.trim() || creatingGithubFile}
+                    >
+                      {creatingGithubFile ? 'Creating...' : 'Create & Commit'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Pending Changes Panel */}
+            {Object.keys(pendingFileChanges).length > 0 && (
+              <div className="code-pending-panel">
+                <div className="code-pending-header">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="12" y1="18" x2="12" y2="12"/>
+                    <line x1="9" y1="15" x2="15" y2="15"/>
+                  </svg>
+                  <span>Pending Changes ({Object.keys(pendingFileChanges).length})</span>
+                </div>
+                <div className="code-pending-list">
+                  {Object.entries(pendingFileChanges).map(([path, change]) => (
+                    <div key={path} className="code-pending-item">
+                      <span className="code-pending-path">{path}</span>
+                      <div className="code-pending-actions">
+                        <button 
+                          className="code-pending-apply"
+                          onClick={() => applyPendingChange(path)}
+                          title="Apply to GitHub"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="20 6 9 17 4 12"/>
+                          </svg>
+                        </button>
+                        <button 
+                          className="code-pending-discard"
+                          onClick={() => {
+                            setPendingFileChanges(prev => {
+                              const next = { ...prev }
+                              delete next[path]
+                              return next
+                            })
+                          }}
+                          title="Discard"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Create Repo Modal */}
+            {showCreateRepoModal && (
+              <div
+                className="code-modal-overlay"
+                onClick={() => !creatingRepo && setShowCreateRepoModal(false)}
+                role="presentation"
+              >
+                <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                  <div className="code-modal-header">
+                    <h3>Create repository</h3>
+                    <button
+                      className="code-modal-close"
+                      type="button"
+                      onClick={() => setShowCreateRepoModal(false)}
+                      disabled={creatingRepo}
+                      title="Close"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div className="code-modal-body">
+                    <label className="code-modal-label">Name *</label>
+                    <input
+                      className="code-modal-input"
+                      value={createRepoForm.name}
+                      onChange={(e) => setCreateRepoForm((p) => ({ ...p, name: e.target.value }))}
+                      placeholder="my-new-repo"
+                      autoFocus
+                    />
+                    <label className="code-modal-label">Description</label>
+                    <input
+                      className="code-modal-input"
+                      value={createRepoForm.description}
+                      onChange={(e) => setCreateRepoForm((p) => ({ ...p, description: e.target.value }))}
+                      placeholder="Optional"
+                    />
+                    <label className="code-modal-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={!!createRepoForm.private}
+                        onChange={(e) => setCreateRepoForm((p) => ({ ...p, private: e.target.checked }))}
+                      />
+                      Private repository
+                    </label>
+                    {createRepoError && <div className="code-modal-error">{createRepoError}</div>}
+                  </div>
+
+                  <div className="code-modal-actions">
+                    <button
+                      className="code-modal-btn"
+                      type="button"
+                      onClick={() => setShowCreateRepoModal(false)}
+                      disabled={creatingRepo}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="code-modal-btn primary"
+                      type="button"
+                      onClick={createRepo}
+                      disabled={creatingRepo || !String(createRepoForm.name || '').trim()}
+                    >
+                      {creatingRepo ? 'Creating…' : 'Create'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Delete Repo Modal */}
+            {showDeleteRepoModal && selectedRepo && (
+              <div
+                className="code-modal-overlay"
+                onClick={() => !deletingRepo && setShowDeleteRepoModal(false)}
+                role="presentation"
+              >
+                <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+                  <div className="code-modal-header">
+                    <h3>Delete repository</h3>
+                    <button
+                      className="code-modal-close"
+                      type="button"
+                      onClick={() => setShowDeleteRepoModal(false)}
+                      disabled={deletingRepo}
+                      title="Close"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                      </svg>
+                    </button>
+                  </div>
+
+                  <div className="code-modal-body">
+                    <div className="code-modal-warning">
+                      This permanently deletes <strong>{selectedRepo.full_name}</strong>. This cannot be undone.
+                    </div>
+                    <label className="code-modal-label">
+                      Type{' '}
+                      <code 
+                        className="code-modal-copy-text"
+                        onClick={() => {
+                          navigator.clipboard.writeText(selectedRepo.full_name)
+                          setDeleteRepoConfirm(selectedRepo.full_name)
+                          showToast('Copied & filled!')
+                        }}
+                        title="Click to copy & fill"
+                      >
+                        {selectedRepo.full_name}
+                      </code>
+                      {' '}to confirm
+                    </label>
+                    <div className="code-modal-input-row">
+                      <input
+                        className="code-modal-input"
+                        value={deleteRepoConfirm}
+                        onChange={(e) => setDeleteRepoConfirm(e.target.value)}
+                        placeholder={selectedRepo.full_name}
+                        autoFocus
+                      />
+                      <button 
+                        type="button"
+                        className="code-modal-copy-btn"
+                        onClick={() => {
+                          setDeleteRepoConfirm(selectedRepo.full_name)
+                        }}
+                        title="Fill with repo name"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                      </button>
+                    </div>
+                    {deleteRepoError && <div className="code-modal-error">{deleteRepoError}</div>}
+                  </div>
+
+                  <div className="code-modal-actions">
+                    <button
+                      className="code-modal-btn"
+                      type="button"
+                      onClick={() => setShowDeleteRepoModal(false)}
+                      disabled={deletingRepo}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="code-modal-btn danger"
+                      type="button"
+                      onClick={deleteSelectedRepo}
+                      disabled={deletingRepo}
+                    >
+                      {deletingRepo ? 'Deleting…' : 'Delete repo'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Vercel Settings Modal */}
+            {showVercelModal && (
+              <div className="code-modal-overlay" onClick={() => setShowVercelModal(false)}>
+                <div className="code-modal vercel-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="code-modal-header">
+                    <h3>
+                      <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                        <path d="M12 2L2 19.5h20L12 2z"/>
+                      </svg>
+                      Vercel Integration
+                    </h3>
+                    <button className="code-modal-close" onClick={() => setShowVercelModal(false)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="code-modal-body">
+                    {vercelConnected ? (
+                      <div className="vercel-connected-info">
+                        <div className="vercel-user-badge">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                          </svg>
+                          <div>
+                            <strong>{vercelUser?.username || vercelUser?.email}</strong>
+                            <span>Connected</span>
+                          </div>
+                        </div>
+                        <div className="vercel-projects-summary">
+                          <span>{vercelProjects.length} Projects</span>
+                        </div>
+                        <button
+                          className="code-modal-btn danger"
+                          onClick={() => { disconnectVercel(); setShowVercelModal(false); }}
+                        >
+                          Disconnect
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="vercel-connect-form">
+                        <p>Connect your Vercel account to deploy projects directly from the editor.</p>
+                        <a
+                          href="https://vercel.com/account/tokens"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="vercel-token-link"
+                        >
+                          Get your token from Vercel Settings
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+                            <polyline points="15 3 21 3 21 9"/>
+                            <line x1="10" y1="14" x2="21" y2="3"/>
+                          </svg>
+                        </a>
+                        <label>Vercel Token</label>
+                        <input
+                          type="password"
+                          className="code-modal-input"
+                          value={vercelToken}
+                          onChange={(e) => setVercelToken(e.target.value)}
+                          placeholder="Enter your Vercel token"
+                        />
+                        <button
+                          className="code-modal-btn primary"
+                          onClick={connectVercel}
+                          disabled={vercelLoading || !vercelToken.trim()}
+                        >
+                          {vercelLoading ? 'Connecting...' : 'Connect to Vercel'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Vercel Deploy Modal */}
+            {showVercelDeployModal && (
+              <div className="code-modal-overlay" onClick={() => setShowVercelDeployModal(false)}>
+                <div className="code-modal vercel-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="code-modal-header">
+                    <h3>
+                      <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                        <path d="M12 2L2 19.5h20L12 2z"/>
+                      </svg>
+                      Deploy to Vercel
+                    </h3>
+                    <button className="code-modal-close" onClick={() => setShowVercelDeployModal(false)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="code-modal-body">
+                    <div className="vercel-deploy-form">
+                      <div className="vercel-deploy-project-info">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                        </svg>
+                        <span>{activeLocalProject?.name || 'No project selected'}</span>
+                      </div>
+                      <label>Deployment Name (optional)</label>
+                      <input
+                        type="text"
+                        className="code-modal-input"
+                        value={vercelDeployName}
+                        onChange={(e) => setVercelDeployName(e.target.value)}
+                        placeholder={activeLocalProject?.name?.toLowerCase().replace(/[^a-z0-9-]/g, '-') || 'my-project'}
+                      />
+                      <p className="vercel-deploy-hint">
+                        Your project will be deployed to: <code>{(vercelDeployName || activeLocalProject?.name || 'my-project').toLowerCase().replace(/[^a-z0-9-]/g, '-')}.vercel.app</code>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="code-modal-actions">
+                    <button
+                      className="code-modal-btn"
+                      onClick={() => setShowVercelDeployModal(false)}
+                      disabled={vercelDeploying}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="code-modal-btn primary"
+                      onClick={deployToVercel}
+                      disabled={vercelDeploying || !activeLocalProject}
+                    >
+                      {vercelDeploying ? (
+                        <>
+                          <span className="btn-spinner" />
+                          Deploying...
+                        </>
+                      ) : (
+                        'Deploy'
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Vercel Deployments Modal */}
+            {showVercelDeployments && (
+              <div className="code-modal-overlay" onClick={() => setShowVercelDeployments(false)}>
+                <div className="code-modal vercel-modal vercel-deployments-modal" onClick={(e) => e.stopPropagation()}>
+                  <div className="code-modal-header">
+                    <h3>
+                      <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                        <path d="M12 2L2 19.5h20L12 2z"/>
+                      </svg>
+                      Vercel Deployments
+                    </h3>
+                    <button className="code-modal-close" onClick={() => setShowVercelDeployments(false)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="code-modal-body">
+                    {vercelDeploymentsLoading ? (
+                      <div className="vercel-loading">
+                        <span className="btn-spinner" />
+                        Loading deployments...
+                      </div>
+                    ) : vercelDeployments.length === 0 ? (
+                      <div className="vercel-empty">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                          <path d="M12 2L2 19.5h20L12 2z"/>
+                        </svg>
+                        <p>No deployments found</p>
+                      </div>
+                    ) : (
+                      <div className="vercel-deployments-list">
+                        {vercelDeployments.map((deployment) => (
+                          <div key={deployment.uid} className="vercel-deployment-item">
+                            <div className="vercel-deployment-info">
+                              <div className="vercel-deployment-name">
+                                <span className={`vercel-deployment-status ${deployment.state}`} title={deployment.state}>
+                                  {deployment.state === 'READY' && (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <polyline points="20 6 9 17 4 12"/>
+                                    </svg>
+                                  )}
+                                  {deployment.state === 'ERROR' && (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <line x1="18" y1="6" x2="6" y2="18"/>
+                                      <line x1="6" y1="6" x2="18" y2="18"/>
+                                    </svg>
+                                  )}
+                                  {deployment.state === 'BUILDING' && (
+                                    <span className="btn-spinner small" />
+                                  )}
+                                  {deployment.state === 'QUEUED' && (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <circle cx="12" cy="12" r="10"/>
+                                      <polyline points="12 6 12 12 16 14"/>
+                                    </svg>
+                                  )}
+                                  {!['READY', 'ERROR', 'BUILDING', 'QUEUED'].includes(deployment.state) && (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <circle cx="12" cy="12" r="10"/>
+                                    </svg>
+                                  )}
+                                </span>
+                                <a
+                                  href={`https://${deployment.url}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="vercel-deployment-url"
+                                >
+                                  {deployment.url || deployment.name}
+                                </a>
+                              </div>
+                              <div className="vercel-deployment-meta">
+                                <span>{deployment.name}</span>
+                                <span>{new Date(deployment.created).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                            <div className="vercel-deployment-actions">
+                              {deployment.state === 'BUILDING' || deployment.state === 'QUEUED' ? (
+                                <button
+                                  className="vercel-deployment-btn cancel"
+                                  onClick={() => cancelVercelDeployment(deployment.uid)}
+                                  title="Cancel deployment"
+                                >
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <rect x="6" y="6" width="12" height="12"/>
+                                  </svg>
+                                </button>
+                              ) : (
+                                <button
+                                  className="vercel-deployment-btn delete"
+                                  onClick={() => deleteVercelDeployment(deployment.uid)}
+                                  disabled={deletingDeployment === deployment.uid}
+                                  title="Delete deployment"
+                                >
+                                  {deletingDeployment === deployment.uid ? (
+                                    <span className="btn-spinner small" />
+                                  ) : (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                      <polyline points="3 6 5 6 21 6"/>
+                                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                    </svg>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="code-modal-actions">
+                    <button
+                      className="code-modal-btn"
+                      onClick={() => loadVercelDeployments()}
+                      disabled={vercelDeploymentsLoading}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="23 4 23 10 17 10"/>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                      </svg>
+                      Refresh
+                    </button>
+                    <button
+                      className="code-modal-btn primary"
+                      onClick={() => setShowVercelDeployments(false)}
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </main>
+
+      {/* Code Canvas Panel - Only visible when code is added */}
+      <div className={`code-canvas ${canvasOpen ? 'open' : ''}`}>
+        <div className="code-canvas-header">
+          <div className="code-canvas-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="16 18 22 12 16 6"/>
+              <polyline points="8 6 2 12 8 18"/>
+            </svg>
+            <span>Code Canvas</span>
+            <span className="code-canvas-lang">{canvasActiveTab}</span>
+          </div>
+          <div className="code-canvas-actions">
+            <button 
+              className="canvas-action-btn canvas-run-btn"
+              onClick={runCanvasCode}
+              title="Run & Preview"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              Run
+            </button>
+            <button 
+              className="canvas-action-btn canvas-clear-btn"
+              onClick={clearCanvas}
+              title="Clear & Close"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="code-canvas-tabs">
+          {['html', 'css', 'js'].map((t) => (
+            <button
+              key={t}
+              type="button"
+              className={`code-canvas-tab ${canvasActiveTab === t ? 'active' : ''}`}
+              onClick={() => setCanvasActiveTab(t)}
+            >
+              {t.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <div className="code-canvas-editor">
+          <div className="code-canvas-editor-wrap">
+            <pre className="code-canvas-highlight" ref={canvasHighlightRef}>
+              <code dangerouslySetInnerHTML={{ __html: highlightedCanvasHtml || '&nbsp;' }} />
+            </pre>
+            <textarea
+              ref={canvasEditorRef}
+              value={activeCanvasCode}
+              onChange={(e) => {
+                setCanvasFiles((prev) => ({ ...prev, [canvasActiveTab]: e.target.value }))
+              }}
+              onScroll={syncCanvasScroll}
+              placeholder={
+                canvasActiveTab === 'html'
+                  ? "Add HTML here (or click '+' on an HTML block)..."
+                  : canvasActiveTab === 'css'
+                    ? "Add CSS here (or click '+' on a CSS block)..."
+                    : "Add JS here (or click '+' on a JS block)..."
+              }
+              spellCheck={false}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Preview Modal - Full Screen */}
+      {previewOpen && (
+        <div className="preview-modal-overlay">
+          <div className="preview-modal">
+            <div className="preview-modal-header">
+              <div className="preview-modal-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <span>Preview</span>
+                <span className="preview-modal-lang">combined</span>
+              </div>
+              <div className="preview-modal-actions">
+                <button 
+                  className="preview-modal-refresh"
+                  onClick={runCanvasCode}
+                  title="Refresh Preview"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M23 4v6h-6"/>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                  </svg>
+                </button>
+                <button 
+                  className="preview-modal-close"
+                  onClick={() => setPreviewOpen(false)}
+                  title="Close Preview"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <iframe
+              ref={canvasIframeRef}
+              title="Code Preview"
+              sandbox="allow-scripts allow-same-origin"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="toast">
+          {toast}
+        </div>
+      )}
+
+      {/* Upload Modal */}
+      {showUploadModal && (
+        <div className="upload-modal-overlay" onClick={() => setShowUploadModal(false)}>
+          <div className="upload-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="upload-modal-header">
+              <h2>Upload Documents</h2>
+              <button 
+                className="upload-modal-close"
+                onClick={() => setShowUploadModal(false)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+
+            <div className="upload-modal-content">
+              {/* Drag and Drop Zone */}
+              <div 
+                className={`upload-dropzone ${isDragging ? 'dragging' : ''}`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <div className="upload-dropzone-content">
+                  <div className="upload-dropzone-icon">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="17 8 12 3 7 8"/>
+                      <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                  </div>
+                  <p className="upload-dropzone-text">
+                    Drag & drop files here, or click to browse
+                  </p>
+                  <p className="upload-dropzone-subtext">
+                    Supports PDFs, images, documents, and code files (max 10MB each)
+                  </p>
+                   <input
+                     type="file"
+                     ref={fileInputRef}
+                     onChange={handleFileSelect}
+                     multiple
+                     accept="image/*,.pdf,.doc,.docx,.txt,.json,.csv,.zip,.rar"
+                     className="upload-file-input"
+                   />
+                  <button 
+                    className="upload-browse-btn"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Browse Files
+                  </button>
+                </div>
+              </div>
+
+              {/* Attached Files List */}
+              {attachedFiles.length > 0 && (
+                <div className="upload-files-list">
+                  <div className="upload-files-header">
+                    <span className="upload-files-count">
+                      {attachedFiles.length} file{attachedFiles.length > 1 ? 's' : ''} selected
+                    </span>
+                    <button 
+                      className="upload-clear-all"
+                      onClick={() => {
+                        attachedFiles.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview) })
+                        setAttachedFiles([])
+                        setPreProcessedOcr({ ocrContext: '', postedMessage: '' })
+                      }}
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                  <div className="upload-files-grid">
+                    {attachedFiles.map(file => (
+                      <div key={file.id} className="upload-file-item">
+                        <div className="upload-file-preview">
+                          {file.preview ? (
+                            <img src={file.preview} alt={file.name} />
+                          ) : (
+                            <div className={`upload-file-icon ${getFileIcon(file.type)}`}>
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                              </svg>
+                            </div>
+                          )}
+                        </div>
+                        <div className="upload-file-info">
+                          <span className="upload-file-name">{file.name}</span>
+                          <span className="upload-file-size">{formatFileSize(file.size)}</span>
+                        </div>
+                        <button 
+                          className="upload-file-remove"
+                          onClick={() => removeAttachedFile(file.id)}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/>
+                            <line x1="6" y1="6" x2="18" y2="18"/>
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Upload Actions */}
+              {attachedFiles.length > 0 && (
+                <div className="upload-modal-actions">
+                  <button 
+                    className="upload-cancel-btn"
+                    onClick={() => setShowUploadModal(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    className="upload-confirm-btn"
+                    onClick={() => setShowUploadModal(false)}
+                  >
+                    Done
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Project Modal */}
+      {showCreateProjectModal && (
+        <div className="modal-overlay" onClick={() => setShowCreateProjectModal(false)}>
+          <div className="create-project-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="create-project-header">
+              <h2>Create project</h2>
+              <div className="create-project-header-actions">
+                <button
+                  className="modal-close-btn"
+                  onClick={() => setShowCreateProjectModal(false)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <div className="create-project-content">
+              <div className="project-name-input-wrapper">
+                <div 
+                  className="project-color-picker"
+                  style={{ backgroundColor: newProjectColor }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                  </svg>
+                  <input
+                    type="color"
+                    value={newProjectColor}
+                    onChange={(e) => setNewProjectColor(e.target.value)}
+                    className="color-input-hidden"
+                  />
+                </div>
+                <input
+                  type="text"
+                  className="project-name-input"
+                  placeholder="Project name"
+                  value={newProjectName}
+                  onChange={(e) => setNewProjectName(e.target.value)}
+                  autoFocus
+                />
+              </div>
+
+              <div className="project-color-presets">
+                {['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#84cc16'].map(color => (
+                  <button
+                    key={color}
+                    className={`color-preset ${newProjectColor === color ? 'active' : ''}`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setNewProjectColor(color)}
+                  />
+                ))}
+              </div>
+
+              <div className="project-info-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <path d="M12 16v-4"/>
+                  <path d="M12 8h.01"/>
+                </svg>
+                <p>
+                  Projects keep chats, files, and custom instructions in one place. 
+                  Use them for ongoing work, or just to keep things tidy.
+                </p>
+              </div>
+
+              <div className="project-instructions-section">
+                <label>Custom instructions (optional)</label>
+                <textarea
+                  className="project-instructions-input"
+                  placeholder="Add instructions that will apply to all chats in this project..."
+                  value={newProjectInstructions}
+                  onChange={(e) => setNewProjectInstructions(e.target.value)}
+                  rows={3}
+                />
+              </div>
+            </div>
+
+            <div className="create-project-footer">
+              <button
+                className="create-project-btn-primary"
+                onClick={createProject}
+                disabled={!newProjectName.trim()}
+              >
+                Create project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Profile Modal */}
+      {showProfilePage && (
+        <div className="profile-modal-overlay" onClick={() => setShowProfilePage(false)}>
+          <div className="profile-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="profile-modal-header">
+              <h2>Your Profile</h2>
+              <button
+                className="profile-modal-close"
+                onClick={() => setShowProfilePage(false)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="profile-modal-content">
+              <div className="profile-avatar-section">
+                <div className="profile-avatar-large">{user.avatar}</div>
+                <p className="profile-email">{user.email}</p>
+              </div>
+
+              <div className="profile-form">
+                <div className="profile-field">
+                  <label htmlFor="profile-name">Display Name</label>
+                  <input
+                    id="profile-name"
+                    type="text"
+                    placeholder="How should agents address you?"
+                    value={profileDraft.display_name}
+                    onChange={(e) =>
+                      setProfileDraft((d) => ({ ...d, display_name: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="profile-field">
+                  <label htmlFor="profile-role">Role / Title</label>
+                  <input
+                    id="profile-role"
+                    type="text"
+                    placeholder="e.g. Software Engineer, Designer, Student"
+                    value={profileDraft.role}
+                    onChange={(e) =>
+                      setProfileDraft((d) => ({ ...d, role: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="profile-field">
+                  <label htmlFor="profile-timezone">Timezone</label>
+                  <input
+                    id="profile-timezone"
+                    type="text"
+                    placeholder="e.g. EST, PST, UTC+1"
+                    value={profileDraft.timezone}
+                    onChange={(e) =>
+                      setProfileDraft((d) => ({ ...d, timezone: e.target.value }))
+                    }
+                  />
+                </div>
+
+                <div className="profile-field">
+                  <label htmlFor="profile-about">About You</label>
+                  <textarea
+                    id="profile-about"
+                    placeholder="Share anything you'd like agents to know about you (interests, preferences, context)..."
+                    rows={4}
+                    value={profileDraft.about}
+                    onChange={(e) =>
+                      setProfileDraft((d) => ({ ...d, about: e.target.value }))
+                    }
+                  />
+                </div>
+
+                {profileSaveError && (
+                  <p className="profile-error">{profileSaveError}</p>
+                )}
+
+                <div className="profile-actions">
+                  <button
+                    className="profile-cancel-btn"
+                    onClick={() => setShowProfilePage(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="profile-save-btn"
+                    onClick={async () => {
+                      await saveUserProfile()
+                      if (profileSaveState !== 'error') setShowProfilePage(false)
+                    }}
+                    disabled={profileSaveState === 'saving'}
+                  >
+                    {profileSaveState === 'saving' ? 'Saving...' : 'Save Profile'}
+                  </button>
+                </div>
+              </div>
+
+              <p className="profile-hint">
+                This information helps agents personalize responses and address you by name.
+              </p>
+
+              <div className="profile-logout-section">
+                <button
+                  className="profile-logout-btn"
+                  onClick={async () => {
+                    await supabase.auth.signOut()
+                    setShowProfilePage(false)
+                  }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                    <polyline points="16 17 21 12 16 7"/>
+                    <line x1="21" y1="12" x2="9" y2="12"/>
+                  </svg>
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  if (!isSupabaseConfigured) return appBody
+
+  // If Supabase is configured, require auth before showing the app
+  return (
+    <AuthGate onUser={setAuthUser}>
+      {appBody}
+    </AuthGate>
+  )
+}
+
+export default App
