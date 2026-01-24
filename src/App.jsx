@@ -1498,13 +1498,11 @@ function App() {
   const [deletingRepo, setDeletingRepo] = useState(false)
   const [deleteRepoError, setDeleteRepoError] = useState('')
   
-  // Projects feature
-  const [projects, setProjects] = useState(() => {
-    const saved = localStorage.getItem('projects')
-    return saved ? JSON.parse(saved) : []
-  })
+  // Projects feature (stored in Supabase, scoped per-user)
+  const [projects, setProjects] = useState([])
+  const [projectsLoading, setProjectsLoading] = useState(false)
   const [showCreateProjectModal, setShowCreateProjectModal] = useState(false)
-  const [projectsExpanded, setProjectsExpanded] = useState(true)
+  const [projectsExpanded, setProjectsExpanded] = useState(false)
   const [selectedProjectId, setSelectedProjectId] = useState(null)
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectColor, setNewProjectColor] = useState('#10b981')
@@ -1997,19 +1995,44 @@ function App() {
     }
   }
 
-  // Project management functions
-  const saveProjectsToStorage = (projectsList) => {
-    localStorage.setItem('projects', JSON.stringify(projectsList))
+  // Project management functions (Supabase-backed)
+  const loadProjectsFromDb = async () => {
+    if (!dbEnabled) {
+      setProjects([])
+      return
+    }
+    setProjectsLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('projects')
+        .select('project_id,name,color,instructions,chat_ids,created_at,updated_at')
+        .eq('owner_user_id', authUser.id)
+        .order('updated_at', { ascending: false })
+      if (error) throw error
+      setProjects((data || []).map(p => ({
+        id: p.project_id,
+        name: p.name,
+        color: p.color,
+        instructions: p.instructions || '',
+        chatIds: p.chat_ids || [],
+        createdAt: p.created_at,
+        updatedAt: p.updated_at
+      })))
+    } catch (e) {
+      console.error('Failed to load projects:', e)
+      showToast('Failed to load projects')
+    } finally {
+      setProjectsLoading(false)
+    }
   }
 
-  const createProject = () => {
+  const createProject = async () => {
     if (!newProjectName.trim()) {
       showToast('Please enter a project name')
       return
     }
     
-    const newProject = {
-      id: crypto.randomUUID(),
+    const projectData = {
       name: newProjectName.trim(),
       color: newProjectColor,
       instructions: newProjectInstructions.trim(),
@@ -2017,24 +2040,61 @@ function App() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     }
-    
-    const updatedProjects = [...projects, newProject]
-    setProjects(updatedProjects)
-    saveProjectsToStorage(updatedProjects)
+
+    // If DB enabled, persist to Supabase
+    if (dbEnabled) {
+      try {
+        const { data, error } = await supabase
+          .from('projects')
+          .insert({
+            owner_user_id: authUser.id,
+            name: projectData.name,
+            color: projectData.color,
+            instructions: projectData.instructions,
+            chat_ids: []
+          })
+          .select('project_id,name,color,instructions,chat_ids,created_at,updated_at')
+          .single()
+        if (error) throw error
+        
+        const newProject = {
+          id: data.project_id,
+          name: data.name,
+          color: data.color,
+          instructions: data.instructions || '',
+          chatIds: data.chat_ids || [],
+          createdAt: data.created_at,
+          updatedAt: data.updated_at
+        }
+        setProjects(prev => [newProject, ...prev])
+        showToast(`Project "${newProject.name}" created!`)
+      } catch (e) {
+        console.error('Failed to create project:', e)
+        showToast('Failed to create project')
+        return
+      }
+    } else {
+      // Fallback to local-only (no persistence)
+      const newProject = {
+        id: crypto.randomUUID(),
+        ...projectData
+      }
+      setProjects(prev => [newProject, ...prev])
+      showToast(`Project "${newProject.name}" created!`)
+    }
     
     // Reset form
     setNewProjectName('')
     setNewProjectColor('#10b981')
     setNewProjectInstructions('')
     setShowCreateProjectModal(false)
-    showToast(`Project "${newProject.name}" created!`)
   }
 
-  const deleteProject = (projectId) => {
+  const deleteProject = async (projectId) => {
     const project = projects.find(p => p.id === projectId)
     if (!project) return
     
-    // Remove project assignment from all chats
+    // Remove project assignment from all chats (UI state)
     if (project.chatIds && project.chatIds.length > 0) {
       setConversations(prev => prev.map(conv => ({
         ...conv,
@@ -2042,9 +2102,23 @@ function App() {
       })))
     }
     
-    const updatedProjects = projects.filter(p => p.id !== projectId)
-    setProjects(updatedProjects)
-    saveProjectsToStorage(updatedProjects)
+    // Delete from Supabase if enabled
+    if (dbEnabled) {
+      try {
+        const { error } = await supabase
+          .from('projects')
+          .delete()
+          .eq('project_id', projectId)
+          .eq('owner_user_id', authUser.id)
+        if (error) throw error
+      } catch (e) {
+        console.error('Failed to delete project:', e)
+        showToast('Failed to delete project')
+        return
+      }
+    }
+    
+    setProjects(prev => prev.filter(p => p.id !== projectId))
     
     if (selectedProjectId === projectId) {
       setSelectedProjectId(null)
@@ -2053,7 +2127,7 @@ function App() {
     showToast(`Project "${project.name}" deleted`)
   }
 
-  const addChatToProject = (chatId, projectId) => {
+  const addChatToProject = async (chatId, projectId) => {
     // Remove from any existing project first
     const updatedProjects = projects.map(p => ({
       ...p,
@@ -2067,8 +2141,28 @@ function App() {
       updatedProjects[projectIndex].updatedAt = new Date().toISOString()
     }
     
+    // Persist to Supabase
+    if (dbEnabled) {
+      try {
+        // Update all affected projects
+        for (const p of updatedProjects) {
+          const original = projects.find(op => op.id === p.id)
+          if (JSON.stringify(original?.chatIds) !== JSON.stringify(p.chatIds)) {
+            await supabase
+              .from('projects')
+              .update({ chat_ids: p.chatIds })
+              .eq('project_id', p.id)
+              .eq('owner_user_id', authUser.id)
+          }
+        }
+      } catch (e) {
+        console.error('Failed to update project:', e)
+        showToast('Failed to add chat to project')
+        return
+      }
+    }
+    
     setProjects(updatedProjects)
-    saveProjectsToStorage(updatedProjects)
     
     // Update conversation's projectId
     setConversations(prev => prev.map(conv => 
@@ -2079,14 +2173,31 @@ function App() {
     showToast(`Chat added to "${project?.name}"`)
   }
 
-  const removeChatFromProject = (chatId) => {
+  const removeChatFromProject = async (chatId) => {
     const updatedProjects = projects.map(p => ({
       ...p,
       chatIds: p.chatIds.filter(id => id !== chatId)
     }))
     
+    // Persist to Supabase
+    if (dbEnabled) {
+      try {
+        for (const p of updatedProjects) {
+          const original = projects.find(op => op.id === p.id)
+          if (JSON.stringify(original?.chatIds) !== JSON.stringify(p.chatIds)) {
+            await supabase
+              .from('projects')
+              .update({ chat_ids: p.chatIds })
+              .eq('project_id', p.id)
+              .eq('owner_user_id', authUser.id)
+          }
+        }
+      } catch (e) {
+        console.error('Failed to remove chat from project:', e)
+      }
+    }
+    
     setProjects(updatedProjects)
-    saveProjectsToStorage(updatedProjects)
     
     setConversations(prev => prev.map(conv => 
       conv.id === chatId ? { ...conv, projectId: null } : conv
@@ -2554,6 +2665,20 @@ Respond ONLY with valid JSON, no other text.`
   useEffect(() => {
     localStorage.setItem('n8nWebhookUrl', n8nWebhookUrl)
   }, [n8nWebhookUrl])
+
+  // Load projects when user changes (stored in Supabase)
+  useEffect(() => {
+    if (!authUser?.id) {
+      setProjects([])
+      setSelectedProjectId(null)
+      return
+    }
+    // Only load from DB if Supabase is configured
+    if (dbEnabled) {
+      loadProjectsFromDb()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authUser?.id, dbEnabled])
 
   // Load agents when user changes (user-scoped storage)
   useEffect(() => {

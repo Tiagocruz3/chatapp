@@ -153,6 +153,25 @@ for all using (
   )
 );
 
+-- PROJECTS
+alter table public.projects enable row level security;
+
+drop policy if exists "projects_select_owner" on public.projects;
+create policy "projects_select_owner" on public.projects
+for select using (owner_user_id = auth.uid());
+
+drop policy if exists "projects_insert_owner" on public.projects;
+create policy "projects_insert_owner" on public.projects
+for insert with check (owner_user_id = auth.uid());
+
+drop policy if exists "projects_update_owner" on public.projects;
+create policy "projects_update_owner" on public.projects
+for update using (owner_user_id = auth.uid()) with check (owner_user_id = auth.uid());
+
+drop policy if exists "projects_delete_owner" on public.projects;
+create policy "projects_delete_owner" on public.projects
+for delete using (owner_user_id = auth.uid());
+
 -- GENERATED IMAGES
 drop policy if exists "images_select_owner_or_org" on public.generated_images;
 create policy "images_select_owner_or_org" on public.generated_images

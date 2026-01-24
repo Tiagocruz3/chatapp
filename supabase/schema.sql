@@ -196,6 +196,25 @@ as $$
   limit match_count;
 $$;
 
+-- PROJECTS (folders for organizing chats)
+create table if not exists public.projects (
+  project_id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  name text not null,
+  color text not null default '#10b981',
+  instructions text not null default '',
+  chat_ids uuid[] not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_projects_updated_at on public.projects;
+create trigger trg_projects_updated_at
+before update on public.projects
+for each row execute function public.set_updated_at();
+
+create index if not exists idx_projects_owner on public.projects(owner_user_id, updated_at desc);
+
 -- GENERATED IMAGES
 create table if not exists public.generated_images (
   image_id uuid primary key default gen_random_uuid(),
