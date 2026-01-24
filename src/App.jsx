@@ -1537,6 +1537,7 @@ function App() {
   const [testingWebhook, setTestingWebhook] = useState(false)
   const [showAddAgentForm, setShowAddAgentForm] = useState(false)
   const [newAgent, setNewAgent] = useState({ name: '', description: '', tags: '', webhookUrl: '' })
+  const [editingAgent, setEditingAgent] = useState(null) // Agent being edited
   
   
   // Search Configuration
@@ -3829,6 +3830,41 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
   const handleDeleteAgent = (agentId) => {
     setAgents(prev => prev.filter(agent => agent.id !== agentId))
     showToast('Agent deleted')
+  }
+
+  const handleEditAgent = (agent) => {
+    setEditingAgent(agent)
+    setNewAgent({
+      name: agent.name || '',
+      description: agent.description || '',
+      tags: agent.tags?.join(', ') || '',
+      webhookUrl: agent.webhookUrl || ''
+    })
+    setShowAddAgentForm(true)
+  }
+
+  const handleUpdateAgent = () => {
+    if (!editingAgent) return
+    if (!newAgent.name.trim()) {
+      showToast('Please enter an agent name')
+      return
+    }
+
+    setAgents(prev => prev.map(agent => 
+      agent.id === editingAgent.id 
+        ? {
+            ...agent,
+            name: newAgent.name.trim(),
+            description: newAgent.description.trim() || 'No description',
+            tags: newAgent.tags ? newAgent.tags.split(',').map(t => t.trim()).filter(t => t) : [],
+            webhookUrl: newAgent.webhookUrl.trim() || ''
+          }
+        : agent
+    ))
+    setNewAgent({ name: '', description: '', tags: '', webhookUrl: '' })
+    setShowAddAgentForm(false)
+    setEditingAgent(null)
+    showToast(`Updated "${newAgent.name.trim()}"`)
   }
 
   const handleAddOpenRouterAgent = () => {
@@ -8484,6 +8520,22 @@ else console.log('Deleted successfully')`
                </div>
                {showAddAgentForm && (
                  <div className="settings-add-agent-form">
+                   <div className="settings-form-header">
+                     <h4>{editingAgent ? 'Edit Agent' : 'New Agent'}</h4>
+                     <button 
+                       className="settings-form-close"
+                       onClick={() => {
+                         setShowAddAgentForm(false)
+                         setEditingAgent(null)
+                         setNewAgent({ name: '', description: '', tags: '', webhookUrl: '' })
+                       }}
+                     >
+                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                         <line x1="18" y1="6" x2="6" y2="18"/>
+                         <line x1="6" y1="6" x2="18" y2="18"/>
+                       </svg>
+                     </button>
+                   </div>
                    <div className="settings-form-row">
                      <label htmlFor="agent-name">Agent Name *</label>
                      <input
@@ -8525,17 +8577,40 @@ else console.log('Deleted successfully')`
                     />
                     <span className="settings-form-hint">The webhook URL to trigger this agent's n8n workflow</span>
                   </div>
-                  <button 
-                    className="settings-add-agent-btn"
-                    onClick={handleAddAgent}
-                    disabled={!newAgent.name.trim() || !newAgent.webhookUrl.trim()}
-                  >
-                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                       <line x1="12" y1="5" x2="12" y2="19"/>
-                       <line x1="5" y1="12" x2="19" y2="12"/>
-                     </svg>
-                     Add Agent
-                   </button>
+                  <div className="settings-form-actions">
+                    <button 
+                      className="settings-cancel-btn"
+                      onClick={() => {
+                        setShowAddAgentForm(false)
+                        setEditingAgent(null)
+                        setNewAgent({ name: '', description: '', tags: '', webhookUrl: '' })
+                      }}
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      className="settings-add-agent-btn"
+                      onClick={editingAgent ? handleUpdateAgent : handleAddAgent}
+                      disabled={!newAgent.name.trim() || !newAgent.webhookUrl.trim()}
+                    >
+                       {editingAgent ? (
+                         <>
+                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                             <polyline points="20 6 9 17 4 12"/>
+                           </svg>
+                           Save Changes
+                         </>
+                       ) : (
+                         <>
+                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                             <line x1="12" y1="5" x2="12" y2="19"/>
+                             <line x1="5" y1="12" x2="19" y2="12"/>
+                           </svg>
+                           Add Agent
+                         </>
+                       )}
+                     </button>
+                  </div>
                  </div>
                )}
              </section>
@@ -8686,6 +8761,16 @@ else console.log('Deleted successfully')`
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                          </svg>
+                        </button>
+                        <button 
+                          className="agent-action-btn agent-edit-btn"
+                          onClick={() => handleEditAgent(agent)}
+                          title="Edit Agent"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                           </svg>
                         </button>
                         <button 
