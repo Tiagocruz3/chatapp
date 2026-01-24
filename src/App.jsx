@@ -4020,7 +4020,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
           'Content-Type': 'application/json',
           // Optional but recommended by OpenRouter:
           'HTTP-Referer': window.location.origin,
-          'X-Title': 'chatgpt-clone',
+          'X-Title': 'Brain Mate AI',
         },
       })
       if (!resp.ok) {
@@ -4057,7 +4057,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
             Authorization: `Bearer ${openRouterApiKey.trim()}`,
             'Content-Type': 'application/json',
             'HTTP-Referer': window.location.origin,
-            'X-Title': 'chatgpt-clone',
+            'X-Title': 'Brain Mate AI',
           },
         })
         if (keyResp.ok) {
@@ -4078,7 +4078,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
             Authorization: `Bearer ${openRouterApiKey.trim()}`,
             'Content-Type': 'application/json',
             'HTTP-Referer': window.location.origin,
-            'X-Title': 'chatgpt-clone',
+            'X-Title': 'Brain Mate AI',
           },
           body: JSON.stringify({
             model: testModel,
@@ -6377,7 +6377,7 @@ else console.log('Deleted successfully')`
           method: 'initialize',
           params: {
             protocolVersion: '2024-11-05',
-            clientInfo: { name: 'chatgpt-clone', version: '1.0.0' },
+            clientInfo: { name: 'brain-mate-ai', version: '1.0.0' },
           },
         })
       } catch {
@@ -7656,7 +7656,7 @@ else console.log('Deleted successfully')`
         'Authorization': `Bearer ${openRouterApiKey.trim()}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': window.location.origin,
-        'X-Title': 'chatgpt-clone',
+        'X-Title': 'Brain Mate AI',
       },
         signal,
       body: JSON.stringify(payload),
