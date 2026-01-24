@@ -12894,51 +12894,6 @@ else console.log('Deleted successfully')`
               </div>
             )}
 
-            {/* GitHub New File Modal */}
-            {showGithubNewFileModal && (
-              <div className="code-modal-overlay" onClick={() => setShowGithubNewFileModal(false)}>
-                <div className="code-modal" onClick={e => e.stopPropagation()}>
-                  <div className="code-modal-header">
-                    <h3>New File in {selectedRepo?.name}</h3>
-                    <button className="code-modal-close" onClick={() => setShowGithubNewFileModal(false)}>
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="18" y1="6" x2="6" y2="18"/>
-                        <line x1="6" y1="6" x2="18" y2="18"/>
-                      </svg>
-                    </button>
-                  </div>
-                  <div className="code-modal-body">
-                    <label className="code-modal-label">File Path</label>
-                    <input
-                      className="code-modal-input"
-                      value={githubNewFileName}
-                      onChange={(e) => setGithubNewFileName(e.target.value)}
-                      placeholder="src/example.js"
-                      autoFocus
-                    />
-                    <label className="code-modal-label">Initial Content (optional)</label>
-                    <textarea
-                      className="code-modal-textarea"
-                      value={githubNewFileContent}
-                      onChange={(e) => setGithubNewFileContent(e.target.value)}
-                      placeholder="// Your code here"
-                      rows={6}
-                    />
-                  </div>
-                  <div className="code-modal-actions">
-                    <button className="code-modal-btn" onClick={() => setShowGithubNewFileModal(false)}>Cancel</button>
-                    <button
-                      className="code-modal-btn primary"
-                      onClick={createGithubFile}
-                      disabled={!githubNewFileName.trim() || creatingGithubFile}
-                    >
-                      {creatingGithubFile ? 'Creating...' : 'Create & Commit'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Pending Changes Panel */}
             {Object.keys(pendingFileChanges).length > 0 && (
               <div className="code-pending-panel">
@@ -12993,169 +12948,6 @@ else console.log('Deleted successfully')`
                       </div>
                     </div>
                   ))}
-                </div>
-              </div>
-            )}
-
-            {/* Create Repo Modal */}
-            {showCreateRepoModal && (
-              <div
-                className="code-modal-overlay"
-                onClick={() => !creatingRepo && setShowCreateRepoModal(false)}
-                role="presentation"
-              >
-                <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-                  <div className="code-modal-header">
-                    <h3>Create repository</h3>
-                    <button
-                      className="code-modal-close"
-                      type="button"
-                      onClick={() => setShowCreateRepoModal(false)}
-                      disabled={creatingRepo}
-                      title="Close"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                      </svg>
-                    </button>
-                  </div>
-
-                  <div className="code-modal-body">
-                    <label className="code-modal-label">Name *</label>
-                    <input
-                      className="code-modal-input"
-                      value={createRepoForm.name}
-                      onChange={(e) => setCreateRepoForm((p) => ({ ...p, name: e.target.value }))}
-                      placeholder="my-new-repo"
-                      autoFocus
-                    />
-                    <label className="code-modal-label">Description</label>
-                    <input
-                      className="code-modal-input"
-                      value={createRepoForm.description}
-                      onChange={(e) => setCreateRepoForm((p) => ({ ...p, description: e.target.value }))}
-                      placeholder="Optional"
-                    />
-                    <label className="code-modal-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={!!createRepoForm.private}
-                        onChange={(e) => setCreateRepoForm((p) => ({ ...p, private: e.target.checked }))}
-                      />
-                      Private repository
-                    </label>
-                    {createRepoError && <div className="code-modal-error">{createRepoError}</div>}
-                  </div>
-
-                  <div className="code-modal-actions">
-                    <button
-                      className="code-modal-btn"
-                      type="button"
-                      onClick={() => setShowCreateRepoModal(false)}
-                      disabled={creatingRepo}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      className="code-modal-btn primary"
-                      type="button"
-                      onClick={createRepo}
-                      disabled={creatingRepo || !String(createRepoForm.name || '').trim()}
-                    >
-                      {creatingRepo ? 'Creating…' : 'Create'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Delete Repo Modal */}
-            {showDeleteRepoModal && selectedRepo && (
-              <div
-                className="code-modal-overlay"
-                onClick={() => !deletingRepo && setShowDeleteRepoModal(false)}
-                role="presentation"
-              >
-                <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-                  <div className="code-modal-header">
-                    <h3>Delete repository</h3>
-                    <button
-                      className="code-modal-close"
-                      type="button"
-                      onClick={() => setShowDeleteRepoModal(false)}
-                      disabled={deletingRepo}
-                      title="Close"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                      </svg>
-                    </button>
-                  </div>
-
-                  <div className="code-modal-body">
-                    <div className="code-modal-warning">
-                      This permanently deletes <strong>{selectedRepo.full_name}</strong>. This cannot be undone.
-                    </div>
-                    <label className="code-modal-label">
-                      Type{' '}
-                      <code 
-                        className="code-modal-copy-text"
-                        onClick={() => {
-                          navigator.clipboard.writeText(selectedRepo.full_name)
-                          setDeleteRepoConfirm(selectedRepo.full_name)
-                          showToast('Copied & filled!')
-                        }}
-                        title="Click to copy & fill"
-                      >
-                        {selectedRepo.full_name}
-                      </code>
-                      {' '}to confirm
-                    </label>
-                    <div className="code-modal-input-row">
-                      <input
-                        className="code-modal-input"
-                        value={deleteRepoConfirm}
-                        onChange={(e) => setDeleteRepoConfirm(e.target.value)}
-                        placeholder={selectedRepo.full_name}
-                        autoFocus
-                      />
-                      <button 
-                        type="button"
-                        className="code-modal-copy-btn"
-                        onClick={() => {
-                          setDeleteRepoConfirm(selectedRepo.full_name)
-                        }}
-                        title="Fill with repo name"
-                      >
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                        </svg>
-                      </button>
-                    </div>
-                    {deleteRepoError && <div className="code-modal-error">{deleteRepoError}</div>}
-                  </div>
-
-                  <div className="code-modal-actions">
-                    <button
-                      className="code-modal-btn"
-                      type="button"
-                      onClick={() => setShowDeleteRepoModal(false)}
-                      disabled={deletingRepo}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      className="code-modal-btn danger"
-                      type="button"
-                      onClick={deleteSelectedRepo}
-                      disabled={deletingRepo}
-                    >
-                      {deletingRepo ? 'Deleting…' : 'Delete repo'}
-                    </button>
-                  </div>
                 </div>
               </div>
             )}
@@ -13908,6 +13700,214 @@ else console.log('Deleted successfully')`
                   Sign out
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Repo Modal - Outside coder-page for proper z-index */}
+      {showCreateRepoModal && (
+        <div
+          className="code-modal-overlay"
+          onClick={() => !creatingRepo && setShowCreateRepoModal(false)}
+          role="presentation"
+        >
+          <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="code-modal-header">
+              <h3>Create repository</h3>
+              <button
+                className="code-modal-close"
+                type="button"
+                onClick={() => setShowCreateRepoModal(false)}
+                disabled={creatingRepo}
+                title="Close"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            <div className="code-modal-body">
+              <label className="code-modal-label">Name *</label>
+              <input
+                className="code-modal-input"
+                value={createRepoForm.name}
+                onChange={(e) => setCreateRepoForm((p) => ({ ...p, name: e.target.value }))}
+                placeholder="my-new-repo"
+                autoFocus
+              />
+              <label className="code-modal-label">Description</label>
+              <input
+                className="code-modal-input"
+                value={createRepoForm.description}
+                onChange={(e) => setCreateRepoForm((p) => ({ ...p, description: e.target.value }))}
+                placeholder="Optional"
+              />
+              <label className="code-modal-checkbox">
+                <input
+                  type="checkbox"
+                  checked={!!createRepoForm.private}
+                  onChange={(e) => setCreateRepoForm((p) => ({ ...p, private: e.target.checked }))}
+                />
+                Private repository
+              </label>
+              {createRepoError && <div className="code-modal-error">{createRepoError}</div>}
+            </div>
+
+            <div className="code-modal-actions">
+              <button
+                className="code-modal-btn"
+                type="button"
+                onClick={() => setShowCreateRepoModal(false)}
+                disabled={creatingRepo}
+              >
+                Cancel
+              </button>
+              <button
+                className="code-modal-btn primary"
+                type="button"
+                onClick={createRepo}
+                disabled={creatingRepo || !String(createRepoForm.name || '').trim()}
+              >
+                {creatingRepo ? 'Creating…' : 'Create'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* GitHub New File Modal - Outside coder-page for proper z-index */}
+      {showGithubNewFileModal && (
+        <div className="code-modal-overlay" onClick={() => setShowGithubNewFileModal(false)}>
+          <div className="code-modal" onClick={e => e.stopPropagation()}>
+            <div className="code-modal-header">
+              <h3>New File in {selectedRepo?.name}</h3>
+              <button className="code-modal-close" onClick={() => setShowGithubNewFileModal(false)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"/>
+                  <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+            <div className="code-modal-body">
+              <label className="code-modal-label">File Path</label>
+              <input
+                className="code-modal-input"
+                value={githubNewFileName}
+                onChange={(e) => setGithubNewFileName(e.target.value)}
+                placeholder="src/example.js"
+                autoFocus
+              />
+              <label className="code-modal-label">Initial Content (optional)</label>
+              <textarea
+                className="code-modal-textarea"
+                value={githubNewFileContent}
+                onChange={(e) => setGithubNewFileContent(e.target.value)}
+                placeholder="// Your code here"
+                rows={6}
+              />
+            </div>
+            <div className="code-modal-actions">
+              <button className="code-modal-btn" onClick={() => setShowGithubNewFileModal(false)}>Cancel</button>
+              <button
+                className="code-modal-btn primary"
+                onClick={createGithubFile}
+                disabled={!githubNewFileName.trim() || creatingGithubFile}
+              >
+                {creatingGithubFile ? 'Creating...' : 'Create & Commit'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Repo Modal - Outside coder-page for proper z-index */}
+      {showDeleteRepoModal && selectedRepo && (
+        <div
+          className="code-modal-overlay"
+          onClick={() => !deletingRepo && setShowDeleteRepoModal(false)}
+          role="presentation"
+        >
+          <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="code-modal-header">
+              <h3>Delete repository</h3>
+              <button
+                className="code-modal-close"
+                type="button"
+                onClick={() => setShowDeleteRepoModal(false)}
+                disabled={deletingRepo}
+                title="Close"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+
+            <div className="code-modal-body">
+              <div className="code-modal-warning">
+                This permanently deletes <strong>{selectedRepo.full_name}</strong>. This cannot be undone.
+              </div>
+              <label className="code-modal-label">
+                Type{' '}
+                <code 
+                  className="code-modal-copy-text"
+                  onClick={() => {
+                    navigator.clipboard.writeText(selectedRepo.full_name)
+                    setDeleteRepoConfirm(selectedRepo.full_name)
+                    showToast('Copied & filled!')
+                  }}
+                  title="Click to copy & fill"
+                >
+                  {selectedRepo.full_name}
+                </code>
+                {' '}to confirm
+              </label>
+              <div className="code-modal-input-row">
+                <input
+                  className="code-modal-input"
+                  value={deleteRepoConfirm}
+                  onChange={(e) => setDeleteRepoConfirm(e.target.value)}
+                  placeholder={selectedRepo.full_name}
+                  autoFocus
+                />
+                <button 
+                  type="button"
+                  className="code-modal-copy-btn"
+                  onClick={() => {
+                    setDeleteRepoConfirm(selectedRepo.full_name)
+                  }}
+                  title="Fill with repo name"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                  </svg>
+                </button>
+              </div>
+              {deleteRepoError && <div className="code-modal-error">{deleteRepoError}</div>}
+            </div>
+
+            <div className="code-modal-actions">
+              <button
+                className="code-modal-btn"
+                type="button"
+                onClick={() => setShowDeleteRepoModal(false)}
+                disabled={deletingRepo}
+              >
+                Cancel
+              </button>
+              <button
+                className="code-modal-btn danger"
+                type="button"
+                onClick={deleteSelectedRepo}
+                disabled={deletingRepo || deleteRepoConfirm !== selectedRepo.full_name}
+              >
+                {deletingRepo ? 'Deleting…' : 'Delete repo'}
+              </button>
             </div>
           </div>
         </div>

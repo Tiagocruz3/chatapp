@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabaseClient'
+import './AuthGate.css'
 
 export function AuthGate({ children, onUser }) {
   const [session, setSession] = useState(null)
@@ -8,6 +9,74 @@ export function AuthGate({ children, onUser }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
+  const [isSignUp, setIsSignUp] = useState(false)
+  const [activeFeature, setActiveFeature] = useState(0)
+
+  const features = [
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+      ),
+      title: 'Natural Conversations',
+      description: 'Chat with advanced AI models that understand context and nuance.'
+    },
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 6v6l4 2"/>
+        </svg>
+      ),
+      title: 'Memory & Context',
+      description: 'Your AI remembers preferences and past conversations for personalized responses.'
+    },
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <polyline points="16 18 22 12 16 6"/>
+          <polyline points="8 6 2 12 8 18"/>
+        </svg>
+      ),
+      title: 'Code Assistant',
+      description: 'Write, debug, and deploy code with an intelligent coding companion.'
+    },
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+          <circle cx="8.5" cy="8.5" r="1.5"/>
+          <polyline points="21 15 16 10 5 21"/>
+        </svg>
+      ),
+      title: 'Image Generation',
+      description: 'Create stunning visuals from text descriptions with DALL-E integration.'
+    },
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="16" y1="13" x2="8" y2="13"/>
+          <line x1="16" y1="17" x2="8" y2="17"/>
+        </svg>
+      ),
+      title: 'Knowledge Base',
+      description: 'Upload documents and let AI help you search, analyze, and understand them.'
+    },
+    {
+      icon: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+      ),
+      title: 'Multiple AI Agents',
+      description: 'Switch between specialized agents for different tasks and workflows.'
+    }
+  ]
 
   useEffect(() => {
     let isMounted = true
@@ -27,13 +96,26 @@ export function AuthGate({ children, onUser }) {
     }
   }, [onUser])
 
+  // Auto-rotate features
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActiveFeature(prev => (prev + 1) % features.length)
+    }, 4000)
+    return () => clearInterval(interval)
+  }, [features.length])
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
     setLoading(true)
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password })
-      if (error) throw error
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({ email, password })
+        if (error) throw error
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password })
+        if (error) throw error
+      }
     } catch (err) {
       setError(err.message || 'Authentication failed')
     } finally {
@@ -43,10 +125,14 @@ export function AuthGate({ children, onUser }) {
 
   if (loading) {
     return (
-      <div className="auth-overlay">
-        <div className="auth-loading">
-          <div className="auth-loading-spinner"></div>
-          <span>Loading...</span>
+      <div className="auth-page">
+        <div className="auth-loader">
+          <div className="auth-loader-logo">
+            <svg viewBox="0 0 24 24" fill="currentColor">
+              <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729z"/>
+            </svg>
+          </div>
+          <div className="auth-loader-spinner"></div>
         </div>
       </div>
     )
@@ -54,100 +140,160 @@ export function AuthGate({ children, onUser }) {
 
   if (!session) {
     return (
-      <div className="auth-overlay">
-        <div className="auth-card">
-          <div className="auth-logo">
-            <svg viewBox="0 0 24 24" fill="currentColor">
-              <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729z"/>
-            </svg>
-          </div>
-          <div className="auth-header">
-            <h1>Welcome back</h1>
-            <p>Sign in to access your conversations, memories, and documents.</p>
-          </div>
+      <div className="auth-page">
+        {/* Left Side - Features */}
+        <div className="auth-features">
+          <div className="auth-features-content">
+            <div className="auth-brand">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="auth-brand-logo">
+                <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729z"/>
+              </svg>
+              <span className="auth-brand-name">ChatGPT Clone</span>
+            </div>
+            
+            <h1 className="auth-tagline">
+              Your AI-powered
+              <br />
+              <span className="auth-tagline-highlight">productivity companion</span>
+            </h1>
+            
+            <p className="auth-subtitle">
+              Experience the power of advanced AI with memory, code assistance, 
+              image generation, and more.
+            </p>
 
-          <form className="auth-form" onSubmit={handleSubmit}>
-            <div className="auth-input-group">
-              <label htmlFor="auth-email">Email address</label>
-              <div className="auth-input-wrapper">
-                <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                  <polyline points="22,6 12,13 2,6"/>
-                </svg>
+            {/* Feature Cards */}
+            <div className="auth-feature-cards">
+              {features.map((feature, index) => (
+                <div 
+                  key={index}
+                  className={`auth-feature-card ${activeFeature === index ? 'active' : ''}`}
+                  onClick={() => setActiveFeature(index)}
+                >
+                  <div className="auth-feature-icon">{feature.icon}</div>
+                  <div className="auth-feature-text">
+                    <h3>{feature.title}</h3>
+                    <p>{feature.description}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Feature Indicators */}
+            <div className="auth-feature-indicators">
+              {features.map((_, index) => (
+                <button
+                  key={index}
+                  className={`auth-feature-dot ${activeFeature === index ? 'active' : ''}`}
+                  onClick={() => setActiveFeature(index)}
+                />
+              ))}
+            </div>
+          </div>
+          
+          {/* Gradient Orbs */}
+          <div className="auth-orb auth-orb-1"></div>
+          <div className="auth-orb auth-orb-2"></div>
+          <div className="auth-orb auth-orb-3"></div>
+        </div>
+
+        {/* Right Side - Login Form */}
+        <div className="auth-form-section">
+          <div className="auth-form-container">
+            <div className="auth-form-header">
+              <h2>{isSignUp ? 'Create account' : 'Welcome back'}</h2>
+              <p>{isSignUp ? 'Start your AI journey today' : 'Sign in to continue to your workspace'}</p>
+            </div>
+
+            <form className="auth-form" onSubmit={handleSubmit}>
+              <div className="auth-input-group">
+                <label htmlFor="auth-email">Email address</label>
                 <input 
                   id="auth-email"
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)} 
                   type="email" 
-                  placeholder="you@example.com"
+                  placeholder="name@company.com"
                   required 
                   autoComplete="email"
+                  className="auth-input"
                 />
               </div>
-            </div>
 
-            <div className="auth-input-group">
-              <label htmlFor="auth-password">Password</label>
-              <div className="auth-input-wrapper">
-                <svg className="auth-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                  <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                </svg>
-                <input 
-                  id="auth-password"
-                  value={password} 
-                  onChange={(e) => setPassword(e.target.value)} 
-                  type={showPassword ? 'text' : 'password'}
-                  placeholder="Enter your password"
-                  required 
-                  autoComplete="current-password"
-                />
-                <button 
-                  type="button" 
-                  className="auth-password-toggle"
-                  onClick={() => setShowPassword(!showPassword)}
-                  tabIndex={-1}
-                >
-                  {showPassword ? (
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-                      <line x1="1" y1="1" x2="23" y2="23"/>
-                    </svg>
-                  ) : (
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                      <circle cx="12" cy="12" r="3"/>
-                    </svg>
-                  )}
-                </button>
+              <div className="auth-input-group">
+                <label htmlFor="auth-password">Password</label>
+                <div className="auth-input-wrapper">
+                  <input 
+                    id="auth-password"
+                    value={password} 
+                    onChange={(e) => setPassword(e.target.value)} 
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder="Enter your password"
+                    required 
+                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                    className="auth-input"
+                  />
+                  <button 
+                    type="button" 
+                    className="auth-password-toggle"
+                    onClick={() => setShowPassword(!showPassword)}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                        <line x1="1" y1="1" x2="23" y2="23"/>
+                      </svg>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
               </div>
-            </div>
 
-            {error && (
-              <div className="auth-error">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="12" y1="8" x2="12" y2="12"/>
-                  <line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-                <span>{error}</span>
-              </div>
-            )}
-
-            <button className="auth-primary" type="submit" disabled={loading}>
-              {loading ? (
-                <>
-                  <div className="auth-btn-spinner"></div>
-                  Signing in...
-                </>
-              ) : (
-                'Sign in'
+              {error && (
+                <div className="auth-error">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <line x1="12" y1="8" x2="12" y2="12"/>
+                    <line x1="12" y1="16" x2="12.01" y2="16"/>
+                  </svg>
+                  <span>{error}</span>
+                </div>
               )}
-            </button>
-          </form>
 
-          <div className="auth-footer">
-            <p>Secure authentication powered by your backend</p>
+              <button className="auth-submit-btn" type="submit" disabled={loading}>
+                {loading ? (
+                  <>
+                    <div className="auth-btn-spinner"></div>
+                    {isSignUp ? 'Creating account...' : 'Signing in...'}
+                  </>
+                ) : (
+                  <>
+                    {isSignUp ? 'Create account' : 'Sign in'}
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="5" y1="12" x2="19" y2="12"/>
+                      <polyline points="12 5 19 12 12 19"/>
+                    </svg>
+                  </>
+                )}
+              </button>
+            </form>
+
+            <div className="auth-divider">
+              <span>or</span>
+            </div>
+
+            <button className="auth-switch-btn" onClick={() => setIsSignUp(!isSignUp)}>
+              {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
+            </button>
+
+            <div className="auth-form-footer">
+              <p>By continuing, you agree to our Terms of Service and Privacy Policy</p>
+            </div>
           </div>
         </div>
       </div>
