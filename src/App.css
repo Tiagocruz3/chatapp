@@ -896,6 +896,10 @@
   padding-left: 20px;
 }
 
+.conversation-item.dropdown-open {
+  z-index: 100;
+}
+
 .conversation-actions {
   display: flex;
   align-items: center;
@@ -960,7 +964,7 @@
   position: absolute;
   top: 100%;
   right: 8px;
-  z-index: 100;
+  z-index: 9999;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 8px;

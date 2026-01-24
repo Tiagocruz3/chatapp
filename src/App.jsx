@@ -8168,7 +8168,7 @@ else console.log('Deleted successfully')`
             return (
             <div
               key={conv.id}
-                className={`conversation-item ${conv.id === activeConversation ? 'active' : ''} ${chatProject ? 'in-project' : ''}`}
+                className={`conversation-item ${conv.id === activeConversation ? 'active' : ''} ${chatProject ? 'in-project' : ''} ${moveToChatId === conv.id ? 'dropdown-open' : ''}`}
               onClick={() => setActiveConversation(conv.id)}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
