@@ -678,6 +678,10 @@
   opacity: 0;
 }
 
+.conversation-list.has-dropdown {
+  overflow: visible;
+}
+
 .sidebar-footer {
   padding: 12px;
   border-top: 1px solid var(--border-color);

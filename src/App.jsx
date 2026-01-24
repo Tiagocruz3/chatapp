@@ -8162,7 +8162,7 @@ else console.log('Deleted successfully')`
           <span className="chats-section-count">{filteredConversations.length}</span>
         </div>
 
-        <div className={`conversation-list ${chatsExpanded ? '' : 'collapsed'}`}>
+        <div className={`conversation-list ${chatsExpanded ? '' : 'collapsed'} ${moveToChatId ? 'has-dropdown' : ''}`}>
           {filteredConversations.map(conv => {
             const chatProject = getProjectForChat(conv.id)
             return (
