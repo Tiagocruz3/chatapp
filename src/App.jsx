@@ -6825,7 +6825,8 @@ else console.log('Deleted successfully')`
     const key = openAiEmbeddingsApiKey
     if (!key) throw new Error('OpenAI API key not set (set VITE_OPENAI_API_KEY in .env or Settings → Embeddings)')
     const arr = Array.isArray(inputs) ? inputs : [String(inputs || '')]
-    const resp = await fetch('/api/openai/v1/embeddings', {
+    // Use direct OpenAI API URL (works in both dev and production)
+    const resp = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${key}`,
