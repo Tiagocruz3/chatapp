@@ -1447,6 +1447,19 @@ function App() {
   const [vercelSelectedProject, setVercelSelectedProject] = useState(null)
   const [showVercelDeployments, setShowVercelDeployments] = useState(false)
   const [vercelDeploymentsLoading, setVercelDeploymentsLoading] = useState(false)
+
+  // Claude Code-style Coder State
+  const [coderView, setCoderView] = useState('editor') // 'editor' | 'diff' | 'split-diff'
+  const [aiPlan, setAiPlan] = useState(null) // { steps: [], filesToChange: [], status: 'pending'|'executing'|'complete' }
+  const [proposedChanges, setProposedChanges] = useState([]) // Array of { path, oldContent, newContent, action, status, explanation }
+  const [executionSteps, setExecutionSteps] = useState([]) // { id, description, status: 'pending'|'running'|'success'|'error', output }
+  const [repoAnalysis, setRepoAnalysis] = useState(null) // { structure, techStack, dependencies, fileCount }
+  const [selectedDiffFile, setSelectedDiffFile] = useState(null) // Currently viewing diff for this file
+  const [impactSummary, setImpactSummary] = useState(null) // { filesChanged, linesAdded, linesRemoved, riskLevel }
+  const [coderSidebarTab, setCoderSidebarTab] = useState('files') // 'files' | 'changes' | 'history'
+  const [commandHistory, setCommandHistory] = useState([]) // Track user commands
+  const [isIndexing, setIsIndexing] = useState(false) // Repo indexing in progress
+  const [fileStatuses, setFileStatuses] = useState({}) // path -> 'modified' | 'added' | 'deleted' | 'unchanged'
   const [deletingDeployment, setDeletingDeployment] = useState(null)
 
   // Sidebar Tab Navigation
@@ -10051,7 +10064,681 @@ else console.log('Deleted successfully')`
         </div>
 
         {/* Code Page (Enhanced IDE) */}
-        <div className={`code-page ${showCodePage ? 'slide-in' : 'slide-out'}`}>
+        {/* ============================================
+            CLAUDE CODE-STYLE CODER - 3 Pane Layout
+            ============================================ */}
+        <div className={`coder-page ${showCodePage ? 'open' : ''}`}>
+          {/* Header Bar */}
+          <div className="coder-header">
+            <div className="coder-header-left">
+              <button className="coder-back-btn" onClick={() => setShowCodePage(false)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="15 18 9 12 15 6"/>
+                </svg>
+              </button>
+              <div className="coder-repo-info">
+                {selectedRepo ? (
+                  <>
+                    <svg viewBox="0 0 24 24" fill="currentColor" className="coder-github-icon">
+                      <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                    </svg>
+                    <span className="coder-repo-name">{selectedRepo.full_name}</span>
+                    <select 
+                      className="coder-branch-select"
+                      value={repoBranch}
+                      onChange={(e) => {
+                        setRepoBranch(e.target.value)
+                        loadRepoFiles(selectedRepo, e.target.value)
+                      }}
+                    >
+                      {repoBranches.map(b => (
+                        <option key={b.name} value={b.name}>{b.name}</option>
+                      ))}
+                    </select>
+                  </>
+                ) : (
+                  <span className="coder-no-repo">No repository connected</span>
+                )}
+              </div>
+            </div>
+            <div className="coder-header-actions">
+              {selectedRepo && (
+                <>
+                  <button 
+                    className="coder-action-btn"
+                    onClick={() => loadRepoFiles(selectedRepo, repoBranch)}
+                    title="Refresh files"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="23 4 23 10 17 10"/>
+                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                    </svg>
+                  </button>
+                  <button 
+                    className={`coder-action-btn ${coderView === 'diff' ? 'active' : ''}`}
+                    onClick={() => setCoderView(coderView === 'diff' ? 'editor' : 'diff')}
+                    title="Toggle diff view"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M16 3h5v5"/><path d="M8 3H3v5"/>
+                      <path d="M12 22v-8.3a4 4 0 0 0-1.172-2.828L3 3"/>
+                      <path d="m15 9 6-6"/>
+                    </svg>
+                  </button>
+                </>
+              )}
+              <button 
+                className="coder-action-btn"
+                onClick={() => setShowVercelModal(true)}
+                title="Deploy to Vercel"
+              >
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2L2 19.5h20L12 2z"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {/* 3-Pane Layout */}
+          <div className="coder-layout">
+            {/* LEFT PANE - File Tree */}
+            <div className="coder-pane coder-files-pane">
+              <div className="coder-pane-header">
+                <div className="coder-pane-tabs">
+                  <button 
+                    className={`coder-pane-tab ${coderSidebarTab === 'files' ? 'active' : ''}`}
+                    onClick={() => setCoderSidebarTab('files')}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                    Files
+                  </button>
+                  <button 
+                    className={`coder-pane-tab ${coderSidebarTab === 'changes' ? 'active' : ''}`}
+                    onClick={() => setCoderSidebarTab('changes')}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                      <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    Changes
+                    {proposedChanges.length > 0 && (
+                      <span className="coder-badge">{proposedChanges.length}</span>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {/* Files Tab */}
+              {coderSidebarTab === 'files' && (
+                <div className="coder-file-tree">
+                  {!githubConnected ? (
+                    <div className="coder-connect-prompt">
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                      </svg>
+                      <h3>Connect GitHub</h3>
+                      <p>Connect your GitHub to access repositories</p>
+                      <input
+                        type="password"
+                        placeholder="GitHub Personal Access Token"
+                        value={githubToken}
+                        onChange={(e) => setGithubToken(e.target.value)}
+                        className="coder-token-input"
+                      />
+                      <button className="coder-connect-btn" onClick={connectGitHub}>
+                        Connect
+                      </button>
+                    </div>
+                  ) : !selectedRepo ? (
+                    <div className="coder-repo-list">
+                      <div className="coder-repo-list-header">
+                        <span>Select Repository</span>
+                        <button onClick={loadGitHubRepos} className="coder-refresh-btn">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="23 4 23 10 17 10"/>
+                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                          </svg>
+                        </button>
+                      </div>
+                      {githubReposLoading ? (
+                        <div className="coder-loading">Loading repositories...</div>
+                      ) : (
+                        githubRepos.map(repo => (
+                          <button
+                            key={repo.id}
+                            className="coder-repo-item"
+                            onClick={() => selectRepo(repo)}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                            </svg>
+                            <div className="coder-repo-item-info">
+                              <span className="coder-repo-item-name">{repo.name}</span>
+                              <span className="coder-repo-item-desc">{repo.description || 'No description'}</span>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  ) : repoFilesLoading ? (
+                    <div className="coder-loading">
+                      <span className="coder-spinner"></span>
+                      Indexing repository...
+                    </div>
+                  ) : (
+                    <div className="coder-files-list">
+                      {(() => {
+                        const renderFileTree = (files, depth = 0) => {
+                          return files.map(file => {
+                            const status = fileStatuses[file.path] || 'unchanged'
+                            const statusIcon = status === 'modified' ? '●' : status === 'added' ? '+' : status === 'deleted' ? '−' : ''
+                            const statusClass = `coder-file-status-${status}`
+                            
+                            return (
+                              <div key={file.path} className="coder-file-item-wrapper">
+                                <button
+                                  className={`coder-file-item ${selectedFile?.path === file.path ? 'active' : ''} ${statusClass}`}
+                                  style={{ paddingLeft: `${12 + depth * 16}px` }}
+                                  onClick={() => {
+                                    if (file.type === 'dir') {
+                                      toggleFolder(file.path)
+                                    } else {
+                                      loadFileContent(file)
+                                    }
+                                  }}
+                                >
+                                  {file.type === 'dir' ? (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="coder-file-icon">
+                                      <path d={expandedFolders[file.path] 
+                                        ? "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                                        : "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                                      }/>
+                                    </svg>
+                                  ) : (
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="coder-file-icon">
+                                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                      <polyline points="14 2 14 8 20 8"/>
+                                    </svg>
+                                  )}
+                                  <span className="coder-file-name">{file.name}</span>
+                                  {statusIcon && <span className={`coder-file-status-icon ${statusClass}`}>{statusIcon}</span>}
+                                </button>
+                                {file.type === 'dir' && expandedFolders[file.path] && file.children && (
+                                  <div className="coder-file-children">
+                                    {renderFileTree(file.children, depth + 1)}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })
+                        }
+                        return renderFileTree(repoFiles)
+                      })()}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Changes Tab - Proposed Changes */}
+              {coderSidebarTab === 'changes' && (
+                <div className="coder-changes-list">
+                  {proposedChanges.length === 0 ? (
+                    <div className="coder-no-changes">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M9 12l2 2 4-4"/>
+                        <circle cx="12" cy="12" r="10"/>
+                      </svg>
+                      <p>No pending changes</p>
+                      <span>AI-proposed changes will appear here</span>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="coder-changes-header">
+                        <span>{proposedChanges.length} files changed</span>
+                        <button 
+                          className="coder-apply-all-btn"
+                          onClick={() => {
+                            proposedChanges.forEach(change => {
+                              if (change.action !== 'delete') {
+                                setPendingFileChanges(prev => ({
+                                  ...prev,
+                                  [change.path]: { content: change.newContent, action: change.action }
+                                }))
+                              }
+                            })
+                            setProposedChanges([])
+                            showToast('Changes applied')
+                          }}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="20 6 9 17 4 12"/>
+                          </svg>
+                          Apply All
+                        </button>
+                      </div>
+                      {proposedChanges.map((change, idx) => (
+                        <div key={idx} className={`coder-change-item coder-change-${change.action}`}>
+                          <div className="coder-change-file">
+                            <span className={`coder-change-action ${change.action}`}>
+                              {change.action === 'create' ? '+' : change.action === 'delete' ? '−' : '●'}
+                            </span>
+                            <span 
+                              className="coder-change-path"
+                              onClick={() => setSelectedDiffFile(change)}
+                            >
+                              {change.path}
+                            </span>
+                          </div>
+                          <div className="coder-change-actions">
+                            <button
+                              className="coder-change-btn accept"
+                              onClick={() => {
+                                setPendingFileChanges(prev => ({
+                                  ...prev,
+                                  [change.path]: { content: change.newContent, action: change.action }
+                                }))
+                                setProposedChanges(prev => prev.filter((_, i) => i !== idx))
+                                showToast(`Accepted: ${change.path}`)
+                              }}
+                              title="Accept change"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="20 6 9 17 4 12"/>
+                              </svg>
+                            </button>
+                            <button
+                              className="coder-change-btn reject"
+                              onClick={() => {
+                                setProposedChanges(prev => prev.filter((_, i) => i !== idx))
+                              }}
+                              title="Reject change"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                  
+                  {/* Impact Summary */}
+                  {impactSummary && (
+                    <div className="coder-impact-summary">
+                      <h4>Impact Summary</h4>
+                      <div className="coder-impact-stats">
+                        <div className="coder-impact-stat">
+                          <span className="coder-impact-value">{impactSummary.filesChanged}</span>
+                          <span className="coder-impact-label">Files</span>
+                        </div>
+                        <div className="coder-impact-stat added">
+                          <span className="coder-impact-value">+{impactSummary.linesAdded}</span>
+                          <span className="coder-impact-label">Added</span>
+                        </div>
+                        <div className="coder-impact-stat removed">
+                          <span className="coder-impact-value">−{impactSummary.linesRemoved}</span>
+                          <span className="coder-impact-label">Removed</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* CENTER PANE - Editor / Diff View */}
+            <div className="coder-pane coder-editor-pane">
+              {/* Editor Tabs */}
+              {selectedFile && (
+                <div className="coder-editor-header">
+                  <div className="coder-editor-tabs">
+                    <div className="coder-editor-tab active">
+                      <span>{selectedFile.name}</span>
+                      <button className="coder-tab-close" onClick={() => setSelectedFile(null)}>×</button>
+                    </div>
+                  </div>
+                  <div className="coder-editor-actions">
+                    <button
+                      className={`coder-view-btn ${coderView === 'editor' ? 'active' : ''}`}
+                      onClick={() => setCoderView('editor')}
+                    >
+                      Code
+                    </button>
+                    <button
+                      className={`coder-view-btn ${coderView === 'diff' ? 'active' : ''}`}
+                      onClick={() => setCoderView('diff')}
+                    >
+                      Diff
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="coder-editor-content">
+                {!selectedFile && !selectedDiffFile ? (
+                  <div className="coder-editor-empty">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                      <polyline points="16 18 22 12 16 6"/>
+                      <polyline points="8 6 2 12 8 18"/>
+                    </svg>
+                    <h3>Select a file to view</h3>
+                    <p>Choose a file from the tree or ask the AI to make changes</p>
+                  </div>
+                ) : coderView === 'diff' && selectedDiffFile ? (
+                  /* Diff View */
+                  <div className="coder-diff-view">
+                    <div className="coder-diff-header">
+                      <span className="coder-diff-filename">{selectedDiffFile.path}</span>
+                      {selectedDiffFile.explanation && (
+                        <div className="coder-diff-explanation">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 16v-4"/>
+                            <path d="M12 8h.01"/>
+                          </svg>
+                          {selectedDiffFile.explanation}
+                        </div>
+                      )}
+                    </div>
+                    <div className="coder-diff-content">
+                      {(() => {
+                        const oldLines = (selectedDiffFile.oldContent || '').split('\n')
+                        const newLines = (selectedDiffFile.newContent || '').split('\n')
+                        const maxLines = Math.max(oldLines.length, newLines.length)
+                        
+                        return Array.from({ length: maxLines }).map((_, i) => {
+                          const oldLine = oldLines[i] || ''
+                          const newLine = newLines[i] || ''
+                          const isAdded = !oldLines[i] && newLines[i]
+                          const isRemoved = oldLines[i] && !newLines[i]
+                          const isChanged = oldLines[i] !== newLines[i] && oldLines[i] && newLines[i]
+                          
+                          return (
+                            <div key={i} className={`coder-diff-line ${isAdded ? 'added' : isRemoved ? 'removed' : isChanged ? 'changed' : ''}`}>
+                              <span className="coder-diff-line-num">{i + 1}</span>
+                              <span className="coder-diff-line-marker">
+                                {isAdded ? '+' : isRemoved ? '−' : isChanged ? '~' : ' '}
+                              </span>
+                              <span className="coder-diff-line-content">
+                                {isRemoved ? oldLine : newLine}
+                              </span>
+                            </div>
+                          )
+                        })
+                      })()}
+                    </div>
+                  </div>
+                ) : (
+                  /* Code Editor */
+                  <div className="coder-code-editor">
+                    {fileContentLoading ? (
+                      <div className="coder-loading">Loading file...</div>
+                    ) : (
+                      <pre className="coder-code-content">
+                        <code>{fileContent}</code>
+                      </pre>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* RIGHT PANE - AI Chat */}
+            <div className="coder-pane coder-chat-pane">
+              <div className="coder-chat-header">
+                <h3>AI Assistant</h3>
+                <div className="coder-chat-model">
+                  <button 
+                    className="coder-model-selector"
+                    onClick={() => setShowAgentSelector(!showAgentSelector)}
+                  >
+                    <span>{selectedAgent?.name || 'Select Agent'}</span>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="6 9 12 15 18 9"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div className="coder-chat-messages">
+                {codeMessages.length === 0 ? (
+                  <div className="coder-chat-empty">
+                    <div className="coder-chat-welcome">
+                      <h4>How can I help?</h4>
+                      <p>Ask me to analyze, modify, or create code in your repository.</p>
+                    </div>
+                    <div className="coder-chat-suggestions">
+                      <button onClick={() => setCodeInput('/explain this repository')}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <circle cx="12" cy="12" r="10"/>
+                          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
+                          <path d="M12 17h.01"/>
+                        </svg>
+                        Explain repo structure
+                      </button>
+                      <button onClick={() => setCodeInput('/find security issues')}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                        </svg>
+                        Find security issues
+                      </button>
+                      <button onClick={() => setCodeInput('/add tests for ')}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                        </svg>
+                        Add tests
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  codeMessages.map((msg, i) => (
+                    <div key={i} className={`coder-chat-message ${msg.role}`}>
+                      <div className="coder-chat-message-header">
+                        {msg.role === 'user' ? 'You' : 'AI Assistant'}
+                      </div>
+                      <div className="coder-chat-message-content">
+                        {msg.role === 'assistant' && msg.plan ? (
+                          <div className="coder-ai-plan">
+                            <div className="coder-plan-header">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="16" y1="13" x2="8" y2="13"/>
+                                <line x1="16" y1="17" x2="8" y2="17"/>
+                              </svg>
+                              Plan
+                            </div>
+                            <div className="coder-plan-steps">
+                              {msg.plan.map((step, si) => (
+                                <div key={si} className="coder-plan-step">
+                                  <span className="coder-plan-step-num">{si + 1}</span>
+                                  <span className="coder-plan-step-text">{step}</span>
+                                </div>
+                              ))}
+                            </div>
+                            {msg.filesToChange && msg.filesToChange.length > 0 && (
+                              <div className="coder-plan-files">
+                                <strong>Files to modify:</strong>
+                                <ul>
+                                  {msg.filesToChange.map((f, fi) => (
+                                    <li key={fi}>{f}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div 
+                            className="coder-message-text"
+                            dangerouslySetInnerHTML={{ 
+                              __html: typeof msg.content === 'string' 
+                                ? msg.content.replace(/\n/g, '<br/>') 
+                                : msg.content 
+                            }}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+                {codeGenerating && (
+                  <div className="coder-chat-message assistant generating">
+                    <div className="coder-chat-message-header">AI Assistant</div>
+                    <div className="coder-chat-message-content">
+                      <div className="coder-typing-indicator">
+                        <span></span><span></span><span></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={codeChatEndRef} />
+              </div>
+
+              {/* Chat Input */}
+              <form 
+                className="coder-chat-input-form"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  handleCodeChat(codeInput)
+                }}
+              >
+                <div className="coder-chat-input-wrapper">
+                  <textarea
+                    value={codeInput}
+                    onChange={(e) => setCodeInput(e.target.value)}
+                    placeholder="Ask about code, use /commands..."
+                    rows={1}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleCodeChat(codeInput)
+                      }
+                    }}
+                  />
+                  <button 
+                    type="submit" 
+                    disabled={!codeInput.trim() || codeGenerating}
+                    className="coder-send-btn"
+                  >
+                    {codeGenerating ? (
+                      <span className="coder-spinner"></span>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                      </svg>
+                    )}
+                  </button>
+                </div>
+                <div className="coder-chat-hints">
+                  <span>/explain</span>
+                  <span>/modify</span>
+                  <span>/add-file</span>
+                  <span>/find</span>
+                  <span>/commit</span>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          {/* Execution Steps Panel (shown when AI is working) */}
+          {executionSteps.length > 0 && (
+            <div className="coder-execution-panel">
+              <div className="coder-execution-header">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/>
+                  <path d="M12 6v6l4 2"/>
+                </svg>
+                <span>Execution Progress</span>
+              </div>
+              <div className="coder-execution-steps">
+                {executionSteps.map((step, i) => (
+                  <div key={i} className={`coder-exec-step ${step.status}`}>
+                    <span className="coder-exec-step-icon">
+                      {step.status === 'running' && <span className="coder-spinner small"></span>}
+                      {step.status === 'success' && '✓'}
+                      {step.status === 'error' && '✗'}
+                      {step.status === 'pending' && '○'}
+                    </span>
+                    <span className="coder-exec-step-text">{step.description}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Agent Selector Dropdown */}
+          {showAgentSelector && (
+            <div className="coder-agent-dropdown">
+              {allAgents.map(agent => (
+                <button
+                  key={agent.id}
+                  className={`coder-agent-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+                  onClick={() => {
+                    setSelectedAgent(agent)
+                    setShowAgentSelector(false)
+                  }}
+                >
+                  <span>{agent.name}</span>
+                  <span className="coder-agent-badge">
+                    {agent.provider === 'openrouter' ? 'OR' : agent.provider === 'lmstudio' ? 'LM' : 'n8n'}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Modals */}
+          {showVercelModal && (
+            <div className="code-modal-overlay" onClick={() => setShowVercelModal(false)}>
+              <div className="code-modal vercel-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="code-modal-header">
+                  <h3>
+                    <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+                      <path d="M12 2L2 19.5h20L12 2z"/>
+                    </svg>
+                    Vercel Integration
+                  </h3>
+                  <button className="code-modal-close" onClick={() => setShowVercelModal(false)}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18"/>
+                      <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
+                </div>
+                <div className="code-modal-body">
+                  {vercelConnected ? (
+                    <div className="vercel-connected-info">
+                      <p>Connected as {vercelUser?.username || vercelUser?.email}</p>
+                      <button className="code-modal-btn danger" onClick={disconnectVercel}>
+                        Disconnect
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="vercel-connect-form">
+                      <p>Connect your Vercel account to deploy.</p>
+                      <input
+                        type="password"
+                        placeholder="Vercel Token"
+                        value={vercelToken}
+                        onChange={(e) => setVercelToken(e.target.value)}
+                      />
+                      <button className="code-modal-btn primary" onClick={connectVercel}>
+                        Connect
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* OLD CODE PAGE - Hidden, kept for backward compatibility */}
+        <div className={`code-page ${false ? 'slide-in' : 'slide-out'}`} style={{ display: 'none' }}>
           <div className={`code-page-layout ${showCodeChat ? '' : 'chat-collapsed'}`}>
             {/* Left Sidebar - Projects & Files */}
             <div className="code-sidebar">
