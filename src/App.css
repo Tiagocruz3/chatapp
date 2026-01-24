@@ -294,10 +294,14 @@
   padding: 4px 8px;
 }
 
+.project-wrapper {
+  margin-bottom: 2px;
+}
+
 .project-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 8px 12px;
   border-radius: 8px;
   cursor: pointer;
@@ -310,6 +314,68 @@
 
 .project-item.active {
   background-color: rgba(16, 185, 129, 0.1);
+}
+
+.project-chevron {
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.project-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
+.project-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+/* Nested chats in project */
+.project-chats-list {
+  padding-left: 28px;
+  margin-top: 2px;
+}
+
+.project-chat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.08s;
+}
+
+.project-chat-item:hover {
+  background-color: var(--hover-bg);
+}
+
+.project-chat-item.active {
+  background-color: rgba(99, 102, 241, 0.15);
+}
+
+.project-chat-item svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.project-chat-title {
+  font-size: 13px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-chat-item.active .project-chat-title {
+  color: var(--text-primary);
 }
 
 .project-color-dot {
@@ -804,6 +870,67 @@
   white-space: nowrap;
 }
 
+.conversation-rename-input {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 13px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  color: var(--text-primary);
+  outline: none;
+}
+
+.conversation-rename-input:focus {
+  border-color: #6366f1;
+}
+
+.conversation-project-badge {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.conversation-item.in-project {
+  padding-left: 20px;
+}
+
+.conversation-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.08s;
+}
+
+.conversation-item:hover .conversation-actions {
+  opacity: 1;
+}
+
+.conversation-action-btn {
+  padding: 4px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.08s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.conversation-action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.conversation-action-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
 .delete-btn {
   opacity: 0;
   padding: 4px;
@@ -826,6 +953,97 @@
 .delete-btn svg {
   width: 14px;
   height: 14px;
+}
+
+/* Move to project dropdown */
+.conversation-move-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 8px;
+  z-index: 100;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  min-width: 180px;
+  max-width: 220px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  animation: dropdownFadeIn 0.15s ease;
+}
+
+@keyframes dropdownFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.conversation-move-header {
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.conversation-move-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.08s;
+}
+
+.conversation-move-option:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.conversation-move-option.current {
+  color: var(--text-primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.conversation-move-option.remove {
+  color: #ef4444;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.conversation-move-option.remove:hover {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.conversation-move-option .project-color-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.conversation-move-option .current-check {
+  width: 14px;
+  height: 14px;
+  margin-left: auto;
+  color: #10b981;
+}
+
+.conversation-move-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
 }
 
 /* Main Chat Area */
@@ -5389,6 +5607,41 @@ button,
   opacity: 0.7;
 }
 
+.agent-system-prompt-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 8px 10px;
+  background: rgba(99, 102, 241, 0.08);
+  border-radius: 6px;
+  border-left: 2px solid #6366f1;
+}
+
+.agent-system-prompt-preview svg {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  opacity: 0.7;
+  margin-top: 1px;
+}
+
+.system-prompt-text {
+  line-height: 1.4;
+  opacity: 0.8;
+  word-break: break-word;
+}
+
+.system-prompt-textarea {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 100px;
+}
+
 .agent-actions {
   display: flex;
   gap: 6px;
@@ -7377,6 +7630,239 @@ button,
   text-overflow: ellipsis;
 }
 
+/* Repo list actions */
+.coder-repo-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.coder-create-repo-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: rgba(99, 102, 241, 0.15);
+  color: #6366f1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.coder-create-repo-btn:hover {
+  background: rgba(99, 102, 241, 0.25);
+}
+
+.coder-create-repo-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Repo item wrapper for actions */
+.coder-repo-item-wrapper {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  border-radius: 8px;
+  transition: background 0.15s ease;
+}
+
+.coder-repo-item-wrapper:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.coder-repo-item-wrapper .coder-repo-item {
+  flex: 1;
+}
+
+.coder-repo-item-wrapper:hover .coder-repo-item-actions {
+  opacity: 1;
+}
+
+.coder-repo-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.coder-repo-action-btn {
+  width: 26px;
+  height: 26px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.coder-repo-action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+}
+
+.coder-repo-action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.coder-repo-action-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.coder-repo-private-badge {
+  margin-left: auto;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.coder-repo-private-badge svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Files container with header */
+.coder-files-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.coder-files-container .coder-files-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.coder-files-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.coder-back-to-repos-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.coder-back-to-repos-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.coder-back-to-repos-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.coder-files-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.coder-file-action-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.coder-file-action-btn:hover {
+  background: rgba(99, 102, 241, 0.15);
+  color: #6366f1;
+}
+
+.coder-file-action-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.coder-file-action-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* File item wrapper with actions */
+.coder-file-item-wrapper {
+  position: relative;
+}
+
+.coder-file-item-wrapper:hover .coder-file-item-actions {
+  opacity: 1;
+}
+
+.coder-file-item-actions {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 2;
+}
+
+.coder-file-mini-btn {
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: rgba(30, 30, 30, 0.9);
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.coder-file-mini-btn:hover {
+  background: rgba(99, 102, 241, 0.2);
+  color: #6366f1;
+}
+
+.coder-file-mini-btn.danger:hover {
+  background: rgba(239, 68, 68, 0.2);
+  color: #ef4444;
+}
+
+.coder-file-mini-btn svg {
+  width: 12px;
+  height: 12px;
+}
+
 .coder-loading {
   display: flex;
   align-items: center;
@@ -7868,17 +8354,47 @@ button,
 .coder-code-editor {
   height: 100%;
   overflow: auto;
+  background: #0d0d0d;
 }
 
 .coder-code-content {
-  margin: 0;
-  padding: 16px;
-  font-family: 'SF Mono', 'Fira Code', monospace;
+  display: flex;
+  min-height: 100%;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   font-size: 13px;
   line-height: 1.6;
+}
+
+.coder-line-numbers {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 0;
+  background: rgba(0, 0, 0, 0.3);
+  border-right: 1px solid var(--border-color);
+  user-select: none;
+  position: sticky;
+  left: 0;
+}
+
+.coder-line-numbers .coder-line-num {
+  padding: 0 12px;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 12px;
+  min-width: 40px;
+}
+
+.coder-code-text {
+  margin: 0;
+  padding: 16px;
+  flex: 1;
   color: var(--text-primary);
-  white-space: pre-wrap;
-  word-break: break-all;
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.coder-code-text code {
+  display: block;
 }
 
 /* Right Pane - Chat */

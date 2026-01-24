@@ -1350,6 +1350,9 @@ function App() {
   const [sidebarChatSearchOpen, setSidebarChatSearchOpen] = useState(false)
   const [sidebarChatSearchQuery, setSidebarChatSearchQuery] = useState('')
   const [chatsExpanded, setChatsExpanded] = useState(true)
+  const [renamingChatId, setRenamingChatId] = useState(null)
+  const [renameChatTitle, setRenameChatTitle] = useState('')
+  const [moveToChatId, setMoveToChatId] = useState(null) // Chat ID for move-to-project dropdown
   const [copiedMessageId, setCopiedMessageId] = useState(null)
   const [newlyGeneratedMessageId, setNewlyGeneratedMessageId] = useState(null) // For typing animation
   const [reactions, setReactions] = useState({}) // { messageId: 'liked' | 'disliked' | null }
@@ -1536,7 +1539,7 @@ function App() {
   const [webhookError, setWebhookError] = useState('')
   const [testingWebhook, setTestingWebhook] = useState(false)
   const [showAddAgentForm, setShowAddAgentForm] = useState(false)
-  const [newAgent, setNewAgent] = useState({ name: '', description: '', tags: '', webhookUrl: '' })
+  const [newAgent, setNewAgent] = useState({ name: '', description: '', tags: '', webhookUrl: '', systemPrompt: '' })
   const [editingAgent, setEditingAgent] = useState(null) // Agent being edited
   
   
@@ -2999,6 +3002,82 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     })
   }
 
+  // Rename a chat
+  const renameChat = async (chatId, newTitle) => {
+    if (!newTitle.trim()) return
+    
+    if (dbEnabled) {
+      try {
+        await supabase
+          .from('chats')
+          .update({ title: newTitle.trim() })
+          .eq('chat_id', chatId)
+      } catch (e) {
+        console.error('Failed to rename chat in DB:', e)
+        showToast('Failed to rename chat')
+        return
+      }
+    }
+    
+    setConversations(prev => prev.map(c => 
+      c.id === chatId ? { ...c, title: newTitle.trim() } : c
+    ))
+    setRenamingChatId(null)
+    setRenameChatTitle('')
+    showToast('Chat renamed')
+  }
+
+  // Generate dynamic chat title using AI
+  const generateChatTitle = async (chatId, firstMessage) => {
+    if (!openAiApiKey || !firstMessage) return
+    
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openAiApiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: 'Generate a short, concise title (3-6 words) for this chat based on the user\'s first message. Do not use quotes or punctuation. Just return the title.'
+            },
+            {
+              role: 'user',
+              content: firstMessage
+            }
+          ],
+          max_tokens: 20,
+          temperature: 0.7
+        })
+      })
+      
+      if (!response.ok) return
+      
+      const data = await response.json()
+      const generatedTitle = data.choices?.[0]?.message?.content?.trim()
+      
+      if (generatedTitle) {
+        // Update in DB if enabled
+        if (dbEnabled) {
+          await supabase
+            .from('chats')
+            .update({ title: generatedTitle })
+            .eq('chat_id', chatId)
+        }
+        
+        setConversations(prev => prev.map(c => 
+          c.id === chatId ? { ...c, title: generatedTitle } : c
+        ))
+      }
+    } catch (e) {
+      console.error('Failed to generate chat title:', e)
+    }
+  }
+
   const simulateResponse = (userMessage) => {
     const responses = [
       "That's an interesting question! Let me think about that for a moment. Based on what you've shared, I can provide some helpful insights that might guide you in the right direction.",
@@ -3393,6 +3472,11 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       // Extract memories from this conversation turn (non-blocking)
       if (dbEnabled && selectedAgent && !responseContent.startsWith('**Image generated**')) {
         extractMemoriesFromConversation(userMessage.content, responseContent).catch(console.error)
+      }
+      
+      // Generate dynamic chat title for first message (non-blocking)
+      if (currentConv && currentConv.messages.length <= 1) {
+        generateChatTitle(chatIdForThisTurn || activeConversation, userMessage.content).catch(console.error)
       }
     } catch (err) {
       // Ignore aborts (Stop generating)
@@ -3814,11 +3898,12 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       name: newAgent.name.trim(),
       description: newAgent.description.trim() || 'No description',
       tags: newAgent.tags ? newAgent.tags.split(',').map(t => t.trim()).filter(t => t) : [],
-      webhookUrl: newAgent.webhookUrl.trim() || ''
+      webhookUrl: newAgent.webhookUrl.trim() || '',
+      systemPrompt: newAgent.systemPrompt.trim() || ''
     }
 
     setAgents(prev => [...prev, agent])
-    setNewAgent({ name: '', description: '', tags: '', webhookUrl: '' })
+    setNewAgent({ name: '', description: '', tags: '', webhookUrl: '', systemPrompt: '' })
     setShowAddAgentForm(false)
     showToast(`Added "${agent.name}"`)
   }
@@ -3838,7 +3923,8 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       name: agent.name || '',
       description: agent.description || '',
       tags: agent.tags?.join(', ') || '',
-      webhookUrl: agent.webhookUrl || ''
+      webhookUrl: agent.webhookUrl || '',
+      systemPrompt: agent.systemPrompt || ''
     })
     setShowAddAgentForm(true)
   }
@@ -3857,11 +3943,12 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
             name: newAgent.name.trim(),
             description: newAgent.description.trim() || 'No description',
             tags: newAgent.tags ? newAgent.tags.split(',').map(t => t.trim()).filter(t => t) : [],
-            webhookUrl: newAgent.webhookUrl.trim() || ''
+            webhookUrl: newAgent.webhookUrl.trim() || '',
+            systemPrompt: newAgent.systemPrompt.trim() || ''
           }
         : agent
     ))
-    setNewAgent({ name: '', description: '', tags: '', webhookUrl: '' })
+    setNewAgent({ name: '', description: '', tags: '', webhookUrl: '', systemPrompt: '' })
     setShowAddAgentForm(false)
     setEditingAgent(null)
     showToast(`Updated "${newAgent.name.trim()}"`)
@@ -5729,6 +5816,15 @@ Be concise but thorough. When showing code, always include the full file or the 
       return () => document.removeEventListener('click', handleClick)
     }
   }, [contextMenuFile])
+
+  // Close move-to-project dropdown on click outside
+  useEffect(() => {
+    const handleClick = () => setMoveToChatId(null)
+    if (moveToChatId) {
+      document.addEventListener('click', handleClick)
+      return () => document.removeEventListener('click', handleClick)
+    }
+  }, [moveToChatId])
 
   // =============== END LOCAL CODE EDITOR FUNCTIONS ===============
 
@@ -7866,37 +7962,63 @@ else console.log('Deleted successfully')`
 
           {projectsExpanded && projects.length > 0 && (
             <div className="projects-list">
-              {projects.map(project => (
-                <div
-                  key={project.id}
-                  className={`project-item ${selectedProjectId === project.id ? 'active' : ''}`}
-                  onClick={() => setSelectedProjectId(selectedProjectId === project.id ? null : project.id)}
-                >
-                  <div 
-                    className="project-color-dot" 
-                    style={{ backgroundColor: project.color }}
-                  />
-                  <span className="project-name">{project.name}</span>
-                  <span className="project-chat-count">
-                    {project.chatIds?.length || 0}
-                  </span>
-                  <button
-                    className="project-delete-btn"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (confirm(`Delete project "${project.name}"?`)) {
-                        deleteProject(project.id)
-                      }
-                    }}
-                    title="Delete project"
+              {projects.map(project => {
+                const projectChats = getChatsInProject(project.id)
+                return (
+                <div key={project.id} className="project-wrapper">
+                  <div
+                    className={`project-item ${selectedProjectId === project.id ? 'active' : ''}`}
+                    onClick={() => setSelectedProjectId(selectedProjectId === project.id ? null : project.id)}
                   >
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M3 6h18"/>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                  </button>
+                    <span className={`project-chevron ${selectedProjectId === project.id ? 'expanded' : ''}`}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="9 18 15 12 9 6" />
+                      </svg>
+                    </span>
+                    <div 
+                      className="project-color-dot" 
+                      style={{ backgroundColor: project.color }}
+                    />
+                    <span className="project-name">{project.name}</span>
+                    <span className="project-chat-count">
+                      {project.chatIds?.length || 0}
+                    </span>
+                    <button
+                      className="project-delete-btn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (confirm(`Delete project "${project.name}"?`)) {
+                          deleteProject(project.id)
+                        }
+                      }}
+                      title="Delete project"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 6h18"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                      </svg>
+                    </button>
+                  </div>
+                  {/* Nested chats in project */}
+                  {selectedProjectId === project.id && projectChats.length > 0 && (
+                    <div className="project-chats-list">
+                      {projectChats.map(chat => (
+                        <div
+                          key={chat.id}
+                          className={`project-chat-item ${chat.id === activeConversation ? 'active' : ''}`}
+                          onClick={() => setActiveConversation(chat.id)}
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                          </svg>
+                          <span className="project-chat-title">{chat.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
@@ -7916,30 +8038,148 @@ else console.log('Deleted successfully')`
         </div>
 
         <div className={`conversation-list ${chatsExpanded ? '' : 'collapsed'}`}>
-          {filteredConversations.map(conv => (
+          {filteredConversations.map(conv => {
+            const chatProject = getProjectForChat(conv.id)
+            return (
             <div
               key={conv.id}
-              className={`conversation-item ${conv.id === activeConversation ? 'active' : ''}`}
+                className={`conversation-item ${conv.id === activeConversation ? 'active' : ''} ${chatProject ? 'in-project' : ''}`}
               onClick={() => setActiveConversation(conv.id)}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
               </svg>
-              <span className="conversation-title">{conv.title}</span>
+                {renamingChatId === conv.id ? (
+                  <input
+                    type="text"
+                    className="conversation-rename-input"
+                    value={renameChatTitle}
+                    onChange={(e) => setRenameChatTitle(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation()
+                      if (e.key === 'Enter') {
+                        renameChat(conv.id, renameChatTitle)
+                      } else if (e.key === 'Escape') {
+                        setRenamingChatId(null)
+                        setRenameChatTitle('')
+                      }
+                    }}
+                    onBlur={() => {
+                      if (renameChatTitle.trim()) {
+                        renameChat(conv.id, renameChatTitle)
+                      } else {
+                        setRenamingChatId(null)
+                        setRenameChatTitle('')
+                      }
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    autoFocus
+                  />
+                ) : (
+                  <span className="conversation-title">{conv.title}</span>
+                )}
+                {chatProject && (
+                  <span 
+                    className="conversation-project-badge"
+                    style={{ backgroundColor: chatProject.color }}
+                    title={`In project: ${chatProject.name}`}
+                  />
+                )}
+                <div className="conversation-actions">
+                  {/* Rename button */}
+                  <button 
+                    className="conversation-action-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setRenamingChatId(conv.id)
+                      setRenameChatTitle(conv.title)
+                    }}
+                    title="Rename chat"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                    </svg>
+                  </button>
+                  {/* Move to project button */}
+                  <button 
+                    className="conversation-action-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setMoveToChatId(moveToChatId === conv.id ? null : conv.id)
+                    }}
+                    title="Move to project"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                    </svg>
+                  </button>
+                  {/* Delete button */}
               <button 
                 className="delete-btn"
                 onClick={(e) => {
                   e.stopPropagation()
                   deleteConversation(conv.id)
                 }}
+                    title="Delete chat"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 6h18"></path>
                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                 </svg>
               </button>
+                </div>
+                {/* Move to project dropdown */}
+                {moveToChatId === conv.id && (
+                  <div className="conversation-move-dropdown" onClick={(e) => e.stopPropagation()}>
+                    <div className="conversation-move-header">Move to project</div>
+                    {chatProject && (
+                      <button 
+                        className="conversation-move-option remove"
+                        onClick={() => {
+                          removeChatFromProject(conv.id)
+                          setMoveToChatId(null)
+                        }}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="18" y1="6" x2="6" y2="18"/>
+                          <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                        Remove from {chatProject.name}
+                      </button>
+                    )}
+                    {projects.length === 0 ? (
+                      <div className="conversation-move-empty">
+                        No projects yet. Create one first.
+                      </div>
+                    ) : (
+                      projects.map(project => (
+                        <button
+                          key={project.id}
+                          className={`conversation-move-option ${chatProject?.id === project.id ? 'current' : ''}`}
+                          onClick={() => {
+                            addChatToProject(conv.id, project.id)
+                            setMoveToChatId(null)
+                          }}
+                        >
+                          <div 
+                            className="project-color-dot" 
+                            style={{ backgroundColor: project.color }}
+                          />
+                          {project.name}
+                          {chatProject?.id === project.id && (
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="current-check">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                          )}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
             </div>
-          ))}
+            )
+          })}
         </div>
 
         {/* Sidebar Footer */}
@@ -8527,7 +8767,7 @@ else console.log('Deleted successfully')`
                        onClick={() => {
                          setShowAddAgentForm(false)
                          setEditingAgent(null)
-                         setNewAgent({ name: '', description: '', tags: '', webhookUrl: '' })
+                         setNewAgent({ name: '', description: '', tags: '', webhookUrl: '', systemPrompt: '' })
                        }}
                      >
                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -8567,7 +8807,7 @@ else console.log('Deleted successfully')`
                     />
                   </div>
                   <div className="settings-form-row">
-                    <label htmlFor="agent-webhook">n8n Workflow Webhook URL *</label>
+                    <label htmlFor="agent-webhook">n8n Workflow Webhook URL</label>
                     <input
                       id="agent-webhook"
                       type="url"
@@ -8577,13 +8817,25 @@ else console.log('Deleted successfully')`
                     />
                     <span className="settings-form-hint">The webhook URL to trigger this agent's n8n workflow</span>
                   </div>
+                  <div className="settings-form-row">
+                    <label htmlFor="agent-system-prompt">System Prompt</label>
+                    <textarea
+                      id="agent-system-prompt"
+                      value={newAgent.systemPrompt}
+                      onChange={(e) => setNewAgent({ ...newAgent, systemPrompt: e.target.value })}
+                      placeholder="You are a helpful assistant that..."
+                      rows={5}
+                      className="system-prompt-textarea"
+                    />
+                    <span className="settings-form-hint">The system instructions that define how this agent behaves</span>
+                  </div>
                   <div className="settings-form-actions">
                     <button 
                       className="settings-cancel-btn"
                       onClick={() => {
                         setShowAddAgentForm(false)
                         setEditingAgent(null)
-                        setNewAgent({ name: '', description: '', tags: '', webhookUrl: '' })
+                        setNewAgent({ name: '', description: '', tags: '', webhookUrl: '', systemPrompt: '' })
                       }}
                     >
                       Cancel
@@ -8591,7 +8843,7 @@ else console.log('Deleted successfully')`
                     <button 
                       className="settings-add-agent-btn"
                       onClick={editingAgent ? handleUpdateAgent : handleAddAgent}
-                      disabled={!newAgent.name.trim() || !newAgent.webhookUrl.trim()}
+                      disabled={!newAgent.name.trim()}
                     >
                        {editingAgent ? (
                          <>
@@ -8736,6 +8988,21 @@ else console.log('Deleted successfully')`
                                 <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
                               </svg>
                               <span className="webhook-url-text">{agent.webhookUrl}</span>
+                            </div>
+                          )}
+                          {agent.systemPrompt && (
+                            <div className="agent-system-prompt-preview">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                                <line x1="16" y1="13" x2="8" y2="13"/>
+                                <line x1="16" y1="17" x2="8" y2="17"/>
+                              </svg>
+                              <span className="system-prompt-text">
+                                {agent.systemPrompt.length > 100 
+                                  ? agent.systemPrompt.substring(0, 100) + '...' 
+                                  : agent.systemPrompt}
+                              </span>
                             </div>
                           )}
                         </div>
@@ -10281,30 +10548,82 @@ else console.log('Deleted successfully')`
                     <div className="coder-repo-list">
                       <div className="coder-repo-list-header">
                         <span>Select Repository</span>
-                        <button onClick={loadGitHubRepos} className="coder-refresh-btn">
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <polyline points="23 4 23 10 17 10"/>
-                            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                          </svg>
-                        </button>
+                        <div className="coder-repo-list-actions">
+                          <button 
+                            onClick={() => setShowCreateRepoModal(true)} 
+                            className="coder-create-repo-btn"
+                            title="Create new repository"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <line x1="12" y1="5" x2="12" y2="19"/>
+                              <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                          </button>
+                          <button onClick={loadGitHubRepos} className="coder-refresh-btn" title="Refresh repos">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="23 4 23 10 17 10"/>
+                              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                       {githubReposLoading ? (
                         <div className="coder-loading">Loading repositories...</div>
                       ) : (
                         githubRepos.map(repo => (
-                          <button
-                            key={repo.id}
-                            className="coder-repo-item"
-                            onClick={() => selectRepo(repo)}
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-                            </svg>
-                            <div className="coder-repo-item-info">
-                              <span className="coder-repo-item-name">{repo.name}</span>
-                              <span className="coder-repo-item-desc">{repo.description || 'No description'}</span>
+                          <div key={repo.id} className="coder-repo-item-wrapper">
+                            <button
+                              className="coder-repo-item"
+                              onClick={() => selectRepo(repo)}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+                              </svg>
+                              <div className="coder-repo-item-info">
+                                <span className="coder-repo-item-name">{repo.name}</span>
+                                <span className="coder-repo-item-desc">{repo.description || 'No description'}</span>
+                              </div>
+                              {repo.private && (
+                                <span className="coder-repo-private-badge">
+                                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                  </svg>
+                                </span>
+                              )}
+                            </button>
+                            <div className="coder-repo-item-actions">
+                              <button
+                                className="coder-repo-action-btn"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  window.open(`https://github.com/${repo.full_name}/settings`, '_blank')
+                                }}
+                                title="Edit on GitHub"
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                </svg>
+                              </button>
+                              <button
+                                className="coder-repo-action-btn danger"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setSelectedRepo(repo)
+                                  setShowDeleteRepoModal(true)
+                                }}
+                                title="Delete repository"
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <polyline points="3 6 5 6 21 6"/>
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                  <line x1="10" y1="11" x2="10" y2="17"/>
+                                  <line x1="14" y1="11" x2="14" y2="17"/>
+                                </svg>
+                              </button>
                             </div>
-                          </button>
+                          </div>
                         ))
                       )}
                     </div>
@@ -10314,54 +10633,138 @@ else console.log('Deleted successfully')`
                       Indexing repository...
                     </div>
                   ) : (
-                    <div className="coder-files-list">
-                      {(() => {
-                        const renderFileTree = (files, depth = 0) => {
-                          return files.map(file => {
-                            const status = fileStatuses[file.path] || 'unchanged'
-                            const statusIcon = status === 'modified' ? '●' : status === 'added' ? '+' : status === 'deleted' ? '−' : ''
-                            const statusClass = `coder-file-status-${status}`
-                            
-                            return (
-                              <div key={file.path} className="coder-file-item-wrapper">
-                                <button
-                                  className={`coder-file-item ${selectedFile?.path === file.path ? 'active' : ''} ${statusClass}`}
-                                  style={{ paddingLeft: `${12 + depth * 16}px` }}
-                                  onClick={() => {
-                                    if (file.type === 'dir') {
-                                      toggleFolder(file.path)
-                                    } else {
-                                      loadFileContent(file)
-                                    }
-                                  }}
-                                >
-                                  {file.type === 'dir' ? (
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="coder-file-icon">
-                                      <path d={expandedFolders[file.path] 
-                                        ? "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-                                        : "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
-                                      }/>
-                                    </svg>
-                                  ) : (
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="coder-file-icon">
-                                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                                      <polyline points="14 2 14 8 20 8"/>
-                                    </svg>
+                    <div className="coder-files-container">
+                      {/* Back to repos header */}
+                      <div className="coder-files-header">
+                        <button 
+                          className="coder-back-to-repos-btn"
+                          onClick={exitRepo}
+                          title="Back to repositories"
+                        >
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <polyline points="15 18 9 12 15 6"/>
+                          </svg>
+                          <span>All Repos</span>
+                        </button>
+                        <div className="coder-files-actions">
+                          <button 
+                            className="coder-file-action-btn"
+                            onClick={() => setShowGithubNewFileModal(true)}
+                            title="Create new file"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                              <polyline points="14 2 14 8 20 8"/>
+                              <line x1="12" y1="18" x2="12" y2="12"/>
+                              <line x1="9" y1="15" x2="15" y2="15"/>
+                            </svg>
+                          </button>
+                          <button 
+                            className="coder-file-action-btn danger"
+                            onClick={() => setShowDeleteRepoModal(true)}
+                            title="Delete repository"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="3 6 5 6 21 6"/>
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                      <div className="coder-files-list">
+                        {(() => {
+                          const renderFileTree = (files, depth = 0) => {
+                            return files.map(file => {
+                              const status = fileStatuses[file.path] || 'unchanged'
+                              const statusIcon = status === 'modified' ? '●' : status === 'added' ? '+' : status === 'deleted' ? '−' : ''
+                              const statusClass = `coder-file-status-${status}`
+                              
+                              return (
+                                <div key={file.path} className="coder-file-item-wrapper">
+                                  <button
+                                    className={`coder-file-item ${selectedFile?.path === file.path ? 'active' : ''} ${statusClass}`}
+                                    style={{ paddingLeft: `${12 + depth * 16}px` }}
+                                    onClick={() => {
+                                      if (file.type === 'dir') {
+                                        toggleFolder(file.path)
+                                      } else {
+                                        setSelectedFile(file)
+                                        loadFileContent(selectedRepo.owner.login, selectedRepo.name, file.path, repoBranch)
+                                      }
+                                    }}
+                                  >
+                                    {file.type === 'dir' ? (
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="coder-file-icon">
+                                        <path d={expandedFolders[file.path] 
+                                          ? "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                                          : "M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+                                        }/>
+                                      </svg>
+                                    ) : (
+                                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="coder-file-icon">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                        <polyline points="14 2 14 8 20 8"/>
+                                      </svg>
+                                    )}
+                                    <span className="coder-file-name">{file.name}</span>
+                                    {statusIcon && <span className={`coder-file-status-icon ${statusClass}`}>{statusIcon}</span>}
+                                  </button>
+                                  {/* File actions (edit/delete) */}
+                                  {file.type !== 'dir' && (
+                                    <div className="coder-file-item-actions">
+                                      <button
+                                        className="coder-file-mini-btn"
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setSelectedFile(file)
+                                          loadFileContent(selectedRepo.owner.login, selectedRepo.name, file.path, repoBranch)
+                                        }}
+                                        title="Edit file"
+                                      >
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                        </svg>
+                                      </button>
+                                      <button
+                                        className="coder-file-mini-btn danger"
+                                        onClick={async (e) => {
+                                          e.stopPropagation()
+                                          if (confirm(`Delete ${file.name}?`)) {
+                                            try {
+                                              const fileData = await githubApi(`/repos/${selectedRepo.owner.login}/${selectedRepo.name}/contents/${file.path}?ref=${repoBranch}`)
+                                              await deleteFile(selectedRepo.owner.login, selectedRepo.name, file.path, fileData.sha, `Delete ${file.name}`)
+                                              await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
+                                              if (selectedFile?.path === file.path) {
+                                                setSelectedFile(null)
+                                                setFileContent('')
+                                              }
+                                            } catch (err) {
+                                              showToast(`Failed to delete: ${err.message}`)
+                                            }
+                                          }
+                                        }}
+                                        title="Delete file"
+                                      >
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                          <polyline points="3 6 5 6 21 6"/>
+                                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                        </svg>
+                                      </button>
+                                    </div>
                                   )}
-                                  <span className="coder-file-name">{file.name}</span>
-                                  {statusIcon && <span className={`coder-file-status-icon ${statusClass}`}>{statusIcon}</span>}
-                                </button>
-                                {file.type === 'dir' && expandedFolders[file.path] && file.children && (
-                                  <div className="coder-file-children">
-                                    {renderFileTree(file.children, depth + 1)}
-                                  </div>
-                                )}
-                              </div>
-                            )
-                          })
-                        }
-                        return renderFileTree(repoFiles)
-                      })()}
+                                  {file.type === 'dir' && expandedFolders[file.path] && file.children && (
+                                    <div className="coder-file-children">
+                                      {renderFileTree(file.children, depth + 1)}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })
+                          }
+                          return renderFileTree(repoFiles)
+                        })()}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -10562,11 +10965,21 @@ else console.log('Deleted successfully')`
                   /* Code Editor */
                   <div className="coder-code-editor">
                     {fileContentLoading ? (
-                      <div className="coder-loading">Loading file...</div>
+                      <div className="coder-loading">
+                        <span className="coder-spinner"></span>
+                        Loading file...
+                      </div>
                     ) : (
-                      <pre className="coder-code-content">
-                        <code>{fileContent}</code>
-                      </pre>
+                      <div className="coder-code-content">
+                        <div className="coder-line-numbers">
+                          {fileContent.split('\n').map((_, i) => (
+                            <span key={i} className="coder-line-num">{i + 1}</span>
+                          ))}
+                        </div>
+                        <pre className="coder-code-text">
+                          <code>{fileContent}</code>
+                        </pre>
+                      </div>
                     )}
                   </div>
                 )}
