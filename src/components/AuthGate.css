@@ -452,48 +452,6 @@
   animation: auth-spin 0.8s linear infinite;
 }
 
-/* Divider */
-.auth-divider {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin: 24px 0;
-}
-
-.auth-divider::before,
-.auth-divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: #e5e5e5;
-}
-
-.auth-divider span {
-  font-size: 13px;
-  color: #999;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-/* Switch Button */
-.auth-switch-btn {
-  width: 100%;
-  padding: 14px;
-  font-size: 14px;
-  font-weight: 500;
-  color: #0a0a0a;
-  background: transparent;
-  border: 1px solid #e5e5e5;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.auth-switch-btn:hover {
-  background: #f7f7f8;
-  border-color: #d5d5d5;
-}
-
 /* Footer */
 .auth-form-footer {
   margin-top: 32px;
@@ -576,24 +534,6 @@
   
   .auth-submit-btn:hover:not(:disabled) {
     background: #0e8c6b;
-  }
-  
-  .auth-switch-btn {
-    color: #fff;
-    border-color: rgba(255, 255, 255, 0.1);
-  }
-  
-  .auth-switch-btn:hover {
-    background: rgba(255, 255, 255, 0.05);
-  }
-  
-  .auth-divider::before,
-  .auth-divider::after {
-    background: rgba(255, 255, 255, 0.1);
-  }
-  
-  .auth-divider span {
-    color: rgba(255, 255, 255, 0.4);
   }
   
   .auth-form-footer p {

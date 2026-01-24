@@ -9,7 +9,6 @@ export function AuthGate({ children, onUser }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [isSignUp, setIsSignUp] = useState(false)
   const [activeFeature, setActiveFeature] = useState(0)
 
   const features = [
@@ -109,13 +108,8 @@ export function AuthGate({ children, onUser }) {
     setError('')
     setLoading(true)
     try {
-      if (isSignUp) {
-        const { error } = await supabase.auth.signUp({ email, password })
-        if (error) throw error
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password })
-        if (error) throw error
-      }
+      const { error } = await supabase.auth.signInWithPassword({ email, password })
+      if (error) throw error
     } catch (err) {
       setError(err.message || 'Authentication failed')
     } finally {
@@ -201,8 +195,8 @@ export function AuthGate({ children, onUser }) {
         <div className="auth-form-section">
           <div className="auth-form-container">
             <div className="auth-form-header">
-              <h2>{isSignUp ? 'Create account' : 'Welcome back'}</h2>
-              <p>{isSignUp ? 'Start your AI journey today' : 'Sign in to continue to your workspace'}</p>
+              <h2>Welcome back</h2>
+              <p>Sign in to continue to your workspace</p>
             </div>
 
             <form className="auth-form" onSubmit={handleSubmit}>
@@ -230,7 +224,7 @@ export function AuthGate({ children, onUser }) {
                     type={showPassword ? 'text' : 'password'}
                     placeholder="Enter your password"
                     required 
-                    autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                    autoComplete="current-password"
                     className="auth-input"
                   />
                   <button 
@@ -269,11 +263,11 @@ export function AuthGate({ children, onUser }) {
                 {loading ? (
                   <>
                     <div className="auth-btn-spinner"></div>
-                    {isSignUp ? 'Creating account...' : 'Signing in...'}
+                    Signing in...
                   </>
                 ) : (
                   <>
-                    {isSignUp ? 'Create account' : 'Sign in'}
+                    Sign in
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <line x1="5" y1="12" x2="19" y2="12"/>
                       <polyline points="12 5 19 12 12 19"/>
@@ -282,14 +276,6 @@ export function AuthGate({ children, onUser }) {
                 )}
               </button>
             </form>
-
-            <div className="auth-divider">
-              <span>or</span>
-            </div>
-
-            <button className="auth-switch-btn" onClick={() => setIsSignUp(!isSignUp)}>
-              {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
-            </button>
 
             <div className="auth-form-footer">
               <p>By continuing, you agree to our Terms of Service and Privacy Policy</p>
