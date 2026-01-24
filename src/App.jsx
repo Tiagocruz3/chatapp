@@ -345,7 +345,7 @@ function FileTree({ files, expandedFolders, selectedFile, onToggleFolder, onSele
   )
 }
 
-// Knowledge Graph Component - Interactive graph (user-controlled movement only)
+// Knowledge Graph Component - Enhanced for large datasets with clustering, filtering, and search
 function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
   const svgRef = useRef(null)
   const containerRef = useRef(null)
@@ -357,21 +357,38 @@ function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [dragNode, setDragNode] = useState(null)
-  // 3D rotation state
-  const [rotation, setRotation] = useState({ x: 15, y: 0 })
-  const [isRotating, setIsRotating] = useState(false)
-  const [rotateStart, setRotateStart] = useState({ x: 0, y: 0 })
+  const [isPanning, setIsPanning] = useState(false)
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 })
+  
+  // Enhanced features state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [viewMode, setViewMode] = useState('clustered') // 'clustered' | 'timeline' | 'radial'
+  const [displayLimit, setDisplayLimit] = useState(50)
+  const [typeFilters, setTypeFilters] = useState({
+    memory: true, document: true, pdf: true, image: true,
+    preference: true, personal_detail: true, project_context: true, fact: true
+  })
+  const [expandedClusters, setExpandedClusters] = useState({})
+  const [showMinimap, setShowMinimap] = useState(true)
 
-  // Node type colors
+  // Node type colors and categories
   const nodeColors = {
-    memory: { fill: '#10b981', stroke: '#059669', label: 'Memory' },
-    document: { fill: '#6366f1', stroke: '#4f46e5', label: 'Document' },
-    pdf: { fill: '#ef4444', stroke: '#dc2626', label: 'PDF' },
-    image: { fill: '#f59e0b', stroke: '#d97706', label: 'Image' },
-    preference: { fill: '#14b8a6', stroke: '#0d9488', label: 'Preference' },
-    personal_detail: { fill: '#ec4899', stroke: '#db2777', label: 'Personal' },
-    project_context: { fill: '#3b82f6', stroke: '#2563eb', label: 'Project' },
-    fact: { fill: '#8b5cf6', stroke: '#7c3aed', label: 'Fact' },
+    memory: { fill: '#10b981', stroke: '#059669', label: 'Memory', category: 'memories' },
+    document: { fill: '#6366f1', stroke: '#4f46e5', label: 'Document', category: 'documents' },
+    pdf: { fill: '#ef4444', stroke: '#dc2626', label: 'PDF', category: 'documents' },
+    image: { fill: '#f59e0b', stroke: '#d97706', label: 'Image', category: 'documents' },
+    preference: { fill: '#14b8a6', stroke: '#0d9488', label: 'Preference', category: 'memories' },
+    personal_detail: { fill: '#ec4899', stroke: '#db2777', label: 'Personal', category: 'memories' },
+    project_context: { fill: '#3b82f6', stroke: '#2563eb', label: 'Project', category: 'memories' },
+    fact: { fill: '#8b5cf6', stroke: '#7c3aed', label: 'Fact', category: 'memories' },
+  }
+
+  // Cluster configuration
+  const clusterConfig = {
+    memories: { label: 'Memories', color: '#10b981', icon: 'brain' },
+    documents: { label: 'Documents', color: '#6366f1', icon: 'file' },
+    pdfs: { label: 'PDFs', color: '#ef4444', icon: 'pdf' },
+    images: { label: 'Images', color: '#f59e0b', icon: 'image' }
   }
 
   // Detect document type from metadata or filename
@@ -388,6 +405,84 @@ function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
     return 'document'
   }
 
+  // Calculate cluster positions based on view mode
+  const getClusterLayout = useCallback((totalNodes, dimensions) => {
+    const centerX = dimensions.width / 2
+    const centerY = dimensions.height / 2
+    const maxRadius = Math.min(dimensions.width, dimensions.height) * 0.42
+
+    if (viewMode === 'clustered') {
+      // Arrange clusters in a circle around center
+      return {
+        memories: { x: centerX - maxRadius * 0.5, y: centerY - maxRadius * 0.3, radius: maxRadius * 0.35 },
+        documents: { x: centerX + maxRadius * 0.5, y: centerY - maxRadius * 0.3, radius: maxRadius * 0.35 },
+        pdfs: { x: centerX - maxRadius * 0.3, y: centerY + maxRadius * 0.4, radius: maxRadius * 0.25 },
+        images: { x: centerX + maxRadius * 0.3, y: centerY + maxRadius * 0.4, radius: maxRadius * 0.25 }
+      }
+    } else if (viewMode === 'timeline') {
+      // Horizontal timeline layout
+      return {
+        memories: { x: centerX * 0.5, y: centerY, radius: maxRadius * 0.3 },
+        documents: { x: centerX * 1.0, y: centerY, radius: maxRadius * 0.3 },
+        pdfs: { x: centerX * 1.3, y: centerY, radius: maxRadius * 0.25 },
+        images: { x: centerX * 1.6, y: centerY, radius: maxRadius * 0.25 }
+      }
+    } else {
+      // Radial layout - all around center
+      return {
+        memories: { x: centerX, y: centerY, radius: maxRadius * 0.3 },
+        documents: { x: centerX, y: centerY, radius: maxRadius * 0.5 },
+        pdfs: { x: centerX, y: centerY, radius: maxRadius * 0.7 },
+        images: { x: centerX, y: centerY, radius: maxRadius * 0.85 }
+      }
+    }
+  }, [viewMode])
+
+  // Force-directed layout simulation with collision detection
+  const applyForceLayout = useCallback((nodes, iterations = 50) => {
+    const workingNodes = nodes.map(n => ({ ...n }))
+    const minDistance = 50
+    const repulsionStrength = 500
+    const centerPull = 0.01
+
+    for (let iter = 0; iter < iterations; iter++) {
+      for (let i = 0; i < workingNodes.length; i++) {
+        let fx = 0, fy = 0
+        const node = workingNodes[i]
+
+        // Repulsion from other nodes
+        for (let j = 0; j < workingNodes.length; j++) {
+          if (i === j) continue
+          const other = workingNodes[j]
+          const dx = node.x - other.x
+          const dy = node.y - other.y
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1
+          
+          if (dist < minDistance * 2) {
+            const force = repulsionStrength / (dist * dist)
+            fx += (dx / dist) * force
+            fy += (dy / dist) * force
+          }
+        }
+
+        // Gentle pull toward cluster center
+        if (node.clusterCenter) {
+          const dx = node.clusterCenter.x - node.x
+          const dy = node.clusterCenter.y - node.y
+          fx += dx * centerPull
+          fy += dy * centerPull
+        }
+
+        // Apply forces with damping
+        const damping = 1 - (iter / iterations) * 0.5
+        workingNodes[i].x += fx * damping
+        workingNodes[i].y += fy * damping
+      }
+    }
+
+    return workingNodes
+  }, [])
+
   // Generate nodes and edges from memories and documents
   useEffect(() => {
     if (memories.length === 0 && documents.length === 0) {
@@ -396,133 +491,170 @@ function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
       return
     }
 
-    const centerX = dimensions.width / 2
-    const centerY = dimensions.height / 2
-    const radius = Math.min(dimensions.width, dimensions.height) * 0.35
-
-    // Create nodes
+    const clusterLayout = getClusterLayout(memories.length + documents.length, dimensions)
     const newNodes = []
     const newEdges = []
-    
-    // Add memory nodes
-    memories.forEach((mem, i) => {
-      const angle = (i / memories.length) * Math.PI * 2
+
+    // Filter and limit data
+    const filteredMemories = memories
+      .filter(mem => {
+        const memType = mem.memory_type || 'memory'
+        return typeFilters[memType] !== false
+      })
+      .filter(mem => {
+        if (!searchQuery) return true
+        return mem.content?.toLowerCase().includes(searchQuery.toLowerCase())
+      })
+      .slice(0, displayLimit)
+
+    const filteredDocuments = documents
+      .filter(doc => {
+        const docType = getDocumentType(doc)
+        return typeFilters[docType] !== false
+      })
+      .filter(doc => {
+        if (!searchQuery) return true
+        return doc.title?.toLowerCase().includes(searchQuery.toLowerCase())
+      })
+      .slice(0, displayLimit)
+
+    // Group by type for clustering
+    const memoryTypes = {}
+    const documentTypes = { document: [], pdf: [], image: [] }
+
+    // Process memories
+    filteredMemories.forEach((mem, i) => {
       const nodeType = mem.memory_type || 'memory'
-      newNodes.push({
-        id: `mem-${mem.memory_id}`,
-        type: nodeColors[nodeType] ? nodeType : 'memory',
-        label: mem.content?.substring(0, 30) + (mem.content?.length > 30 ? '...' : ''),
-        fullContent: mem.content,
-        x: centerX + Math.cos(angle) * radius * 0.6,
-        y: centerY + Math.sin(angle) * radius * 0.6,
-        radius: 20,
-        data: mem,
-        confidence: mem.confidence || 0.5,
-        created: new Date(mem.created_at)
-      })
+      if (!memoryTypes[nodeType]) memoryTypes[nodeType] = []
+      memoryTypes[nodeType].push(mem)
     })
 
-    // Add document nodes with type detection
-    documents.forEach((doc, i) => {
-      const angle = (i / documents.length) * Math.PI * 2 + Math.PI
+    // Process documents
+    filteredDocuments.forEach((doc) => {
       const docType = getDocumentType(doc)
-      newNodes.push({
-        id: `doc-${doc.document_id}`,
-        type: docType,
-        label: doc.title?.substring(0, 25) + (doc.title?.length > 25 ? '...' : '') || 'Untitled',
-        fullContent: doc.title || 'Untitled document',
-        x: centerX + Math.cos(angle) * radius,
-        y: centerY + Math.sin(angle) * radius,
-        radius: 24,
-        data: doc,
-        sourceType: doc.source_type,
-        isEmbedded: doc.is_embedded || false,
-        embeddedCount: doc.embedded_count || 0,
-        created: new Date(doc.created_at)
+      documentTypes[docType].push(doc)
+    })
+
+    // Calculate dynamic node size based on total count
+    const totalItems = filteredMemories.length + filteredDocuments.length
+    const baseRadius = totalItems > 100 ? 12 : totalItems > 50 ? 16 : totalItems > 20 ? 20 : 24
+    const spacing = totalItems > 100 ? 30 : totalItems > 50 ? 40 : 50
+
+    // Layout memories within their cluster
+    let memIndex = 0
+    Object.entries(memoryTypes).forEach(([type, mems]) => {
+      const cluster = clusterLayout.memories
+      const subClusterAngleOffset = Object.keys(memoryTypes).indexOf(type) * (Math.PI / 4)
+      
+      mems.forEach((mem, i) => {
+        const totalInType = mems.length
+        const angle = subClusterAngleOffset + (i / Math.max(totalInType, 1)) * Math.PI * 0.5
+        const radiusVariation = cluster.radius * (0.3 + (i % 3) * 0.25)
+        
+        newNodes.push({
+          id: `mem-${mem.memory_id}`,
+          type: type,
+          label: mem.content?.substring(0, 25) + (mem.content?.length > 25 ? '...' : ''),
+          fullContent: mem.content,
+          x: cluster.x + Math.cos(angle) * radiusVariation,
+          y: cluster.y + Math.sin(angle) * radiusVariation,
+          radius: baseRadius,
+          data: mem,
+          confidence: mem.confidence || 0.5,
+          created: new Date(mem.created_at),
+          cluster: 'memories',
+          clusterCenter: { x: cluster.x, y: cluster.y }
+        })
+        memIndex++
       })
     })
 
-    // Create edges based on relationships
-    // Connect memories of the same type
-    const memoryByType = {}
-    newNodes.filter(n => n.id.startsWith('mem-')).forEach(node => {
-      const type = node.type
-      if (!memoryByType[type]) memoryByType[type] = []
-      memoryByType[type].push(node)
-    })
-
-    Object.values(memoryByType).forEach(typeNodes => {
-      for (let i = 0; i < typeNodes.length; i++) {
-        for (let j = i + 1; j < typeNodes.length; j++) {
-          // Only connect if created within 7 days of each other
-          const timeDiff = Math.abs(typeNodes[i].created - typeNodes[j].created)
-          const daysDiff = timeDiff / (1000 * 60 * 60 * 24)
-          if (daysDiff < 7) {
-            newEdges.push({
-              id: `edge-${typeNodes[i].id}-${typeNodes[j].id}`,
-              source: typeNodes[i].id,
-              target: typeNodes[j].id,
-              strength: 0.3,
-              type: 'same-type'
-            })
-          }
-        }
-      }
-    })
-
-    // Connect documents to memories created around same time (within 1 day)
-    newNodes.filter(n => n.id.startsWith('doc-')).forEach(docNode => {
-      newNodes.filter(n => n.id.startsWith('mem-')).forEach(memNode => {
-        const timeDiff = Math.abs(docNode.created - memNode.created)
-        const daysDiff = timeDiff / (1000 * 60 * 60 * 24)
-        if (daysDiff < 1) {
-          newEdges.push({
-            id: `edge-${docNode.id}-${memNode.id}`,
-            source: docNode.id,
-            target: memNode.id,
-            strength: 0.5,
-            type: 'temporal'
-          })
-        }
+    // Layout documents within their clusters
+    Object.entries(documentTypes).forEach(([docType, docs]) => {
+      if (docs.length === 0) return
+      
+      const clusterKey = docType === 'pdf' ? 'pdfs' : docType === 'image' ? 'images' : 'documents'
+      const cluster = clusterLayout[clusterKey]
+      
+      docs.forEach((doc, i) => {
+        const totalInCluster = docs.length
+        const spiralAngle = (i / Math.max(totalInCluster, 1)) * Math.PI * 2 * Math.ceil(totalInCluster / 8)
+        const spiralRadius = cluster.radius * (0.2 + (i / totalInCluster) * 0.8)
+        
+        newNodes.push({
+          id: `doc-${doc.document_id}`,
+          type: docType,
+          label: doc.title?.substring(0, 20) + (doc.title?.length > 20 ? '...' : '') || 'Untitled',
+          fullContent: doc.title || 'Untitled document',
+          x: cluster.x + Math.cos(spiralAngle) * spiralRadius,
+          y: cluster.y + Math.sin(spiralAngle) * spiralRadius,
+          radius: baseRadius + 2,
+          data: doc,
+          sourceType: doc.source_type,
+          isEmbedded: doc.is_embedded || false,
+          embeddedCount: doc.embedded_count || 0,
+          created: new Date(doc.created_at),
+          cluster: clusterKey,
+          clusterCenter: { x: cluster.x, y: cluster.y }
+        })
       })
     })
 
-    // Connect nodes with similar content (basic keyword matching)
-    const getKeywords = (text) => {
-      if (!text) return []
-      return text.toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
-        .split(/\s+/)
-        .filter(w => w.length > 4)
-    }
+    // Apply force-directed layout for better spacing
+    const layoutedNodes = applyForceLayout(newNodes, totalItems > 50 ? 30 : 50)
 
-    for (let i = 0; i < newNodes.length; i++) {
-      const keywords1 = getKeywords(newNodes[i].fullContent)
-      for (let j = i + 1; j < newNodes.length; j++) {
-        const keywords2 = getKeywords(newNodes[j].fullContent)
-        const commonWords = keywords1.filter(w => keywords2.includes(w))
-        if (commonWords.length >= 2) {
-          // Check if edge already exists
-          const existingEdge = newEdges.find(e => 
-            (e.source === newNodes[i].id && e.target === newNodes[j].id) ||
-            (e.source === newNodes[j].id && e.target === newNodes[i].id)
-          )
-          if (!existingEdge) {
-            newEdges.push({
-              id: `edge-content-${newNodes[i].id}-${newNodes[j].id}`,
-              source: newNodes[i].id,
-              target: newNodes[j].id,
-              strength: Math.min(commonWords.length / 5, 1),
-              type: 'content'
-            })
+    // Create edges - limit connections for performance
+    const maxEdgesPerNode = totalItems > 100 ? 2 : totalItems > 50 ? 3 : 5
+    const nodeConnections = {}
+
+    // Connect nodes within the same cluster (limited)
+    const nodesByCluster = {}
+    layoutedNodes.forEach(node => {
+      if (!nodesByCluster[node.cluster]) nodesByCluster[node.cluster] = []
+      nodesByCluster[node.cluster].push(node)
+    })
+
+    Object.values(nodesByCluster).forEach(clusterNodes => {
+      for (let i = 0; i < clusterNodes.length && i < 20; i++) {
+        const node = clusterNodes[i]
+        nodeConnections[node.id] = nodeConnections[node.id] || 0
+        
+        // Connect to nearest neighbors
+        const nearestCount = Math.min(maxEdgesPerNode, clusterNodes.length - 1)
+        const sortedByDistance = clusterNodes
+          .filter(n => n.id !== node.id)
+          .map(n => ({
+            node: n,
+            dist: Math.sqrt((n.x - node.x) ** 2 + (n.y - node.y) ** 2)
+          }))
+          .sort((a, b) => a.dist - b.dist)
+          .slice(0, nearestCount)
+
+        sortedByDistance.forEach(({ node: nearNode }) => {
+          const edgeId = `edge-${node.id}-${nearNode.id}`
+          const reverseEdgeId = `edge-${nearNode.id}-${node.id}`
+          
+          if (!newEdges.find(e => e.id === edgeId || e.id === reverseEdgeId)) {
+            if (nodeConnections[node.id] < maxEdgesPerNode && 
+                (nodeConnections[nearNode.id] || 0) < maxEdgesPerNode) {
+              newEdges.push({
+                id: edgeId,
+                source: node.id,
+                target: nearNode.id,
+                strength: 0.3,
+                type: 'cluster'
+              })
+              nodeConnections[node.id]++
+              nodeConnections[nearNode.id] = (nodeConnections[nearNode.id] || 0) + 1
+            }
           }
-        }
+        })
       }
-    }
+    })
 
-    setNodes(newNodes)
+    setNodes(layoutedNodes)
     setEdges(newEdges)
-  }, [memories, documents, dimensions])
+  }, [memories, documents, dimensions, typeFilters, searchQuery, displayLimit, viewMode, getClusterLayout, applyForceLayout])
 
   // Handle container resize
   useEffect(() => {
@@ -542,42 +674,35 @@ function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
     return () => resizeObserver.disconnect()
   }, [])
 
-  // Mouse handlers - only user can move nodes
+  // Mouse handlers
   const handleMouseDown = (e, node) => {
     e.stopPropagation()
     setDragNode(node)
     setSelectedNode(node)
   }
 
-  // Handle background click for 3D rotation
   const handleBackgroundMouseDown = (e) => {
     if (e.target === svgRef.current || e.target.tagName === 'svg') {
-      setIsRotating(true)
-      setRotateStart({ x: e.clientX, y: e.clientY })
+      setIsPanning(true)
+      setPanStart({ x: e.clientX - pan.x, y: e.clientY - pan.y })
     }
   }
 
   const handleMouseMove = (e) => {
-    // Handle 3D rotation
-    if (isRotating) {
-      const deltaX = e.clientX - rotateStart.x
-      const deltaY = e.clientY - rotateStart.y
-      setRotation(prev => ({
-        x: Math.max(-60, Math.min(60, prev.x - deltaY * 0.3)),
-        y: prev.y + deltaX * 0.3
-      }))
-      setRotateStart({ x: e.clientX, y: e.clientY })
+    if (isPanning) {
+      setPan({
+        x: e.clientX - panStart.x,
+        y: e.clientY - panStart.y
+      })
       return
     }
 
-    // Handle node dragging
     if (!dragNode || !svgRef.current) return
     const svg = svgRef.current
     const rect = svg.getBoundingClientRect()
     const x = (e.clientX - rect.left - pan.x) / zoom
     const y = (e.clientY - rect.top - pan.y) / zoom
     
-    // Update only the dragged node
     setNodes(prevNodes => prevNodes.map(n => 
       n.id === dragNode.id ? { ...n, x, y } : n
     ))
@@ -585,51 +710,44 @@ function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
 
   const handleMouseUp = () => {
     setDragNode(null)
-    setIsRotating(false)
+    setIsPanning(false)
   }
 
   const handleWheel = (e) => {
     e.preventDefault()
     const delta = e.deltaY > 0 ? 0.9 : 1.1
-    setZoom(z => Math.max(0.3, Math.min(3, z * delta)))
-  }
-
-  // Calculate 3D transform for a node based on rotation
-  const get3DTransform = (node) => {
-    // Convert 2D position to 3D with rotation
-    const centerX = dimensions.width / 2
-    const centerY = dimensions.height / 2
-    
-    // Offset from center
-    const dx = node.x - centerX
-    const dy = node.y - centerY
-    
-    // Apply rotation (simplified 3D projection)
-    const radX = (rotation.x * Math.PI) / 180
-    const radY = (rotation.y * Math.PI) / 180
-    
-    // Rotate around Y axis
-    const rotatedX = dx * Math.cos(radY)
-    const z = dx * Math.sin(radY)
-    
-    // Rotate around X axis
-    const rotatedY = dy * Math.cos(radX) - z * Math.sin(radX)
-    const finalZ = dy * Math.sin(radX) + z * Math.cos(radX)
-    
-    // Apply perspective
-    const perspective = 800
-    const scale = perspective / (perspective - finalZ)
-    
-    return {
-      x: centerX + rotatedX * scale,
-      y: centerY + rotatedY * scale,
-      scale: Math.max(0.5, Math.min(1.5, scale)),
-      z: finalZ,
-      opacity: Math.max(0.3, Math.min(1, 0.5 + scale * 0.5))
-    }
+    setZoom(z => Math.max(0.2, Math.min(4, z * delta)))
   }
 
   const getNodeById = (id) => nodes.find(n => n.id === id)
+
+  // Toggle filter
+  const toggleFilter = (type) => {
+    setTypeFilters(prev => ({ ...prev, [type]: !prev[type] }))
+  }
+
+  // Count items by type
+  const typeCounts = useMemo(() => {
+    const counts = { memory: 0, document: 0, pdf: 0, image: 0, preference: 0, personal_detail: 0, project_context: 0, fact: 0 }
+    memories.forEach(m => {
+      const type = m.memory_type || 'memory'
+      counts[type] = (counts[type] || 0) + 1
+    })
+    documents.forEach(d => {
+      const type = getDocumentType(d)
+      counts[type] = (counts[type] || 0) + 1
+    })
+    return counts
+  }, [memories, documents])
+
+  // Calculate minimap viewport
+  const minimapScale = 0.12
+  const minimapViewport = useMemo(() => ({
+    x: -pan.x / zoom * minimapScale,
+    y: -pan.y / zoom * minimapScale,
+    width: (dimensions.width / zoom) * minimapScale,
+    height: (dimensions.height / zoom) * minimapScale
+  }), [pan, zoom, dimensions])
 
   // Empty state
   if (memories.length === 0 && documents.length === 0 && !isLoading) {
@@ -661,53 +779,154 @@ function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
     )
   }
 
+  const totalItems = memories.length + documents.length
+  const visibleItems = nodes.length
+
   return (
     <div className="kb-panel kb-graph-panel">
-      <div className="kb-panel-header">
-        <div className="kb-panel-info">
-          <h2>Knowledge Graph</h2>
-          <p>Interactive visualization of your knowledge connections. Drag nodes to rearrange.</p>
+      {/* Enhanced Header with Search and Filters */}
+      <div className="kb-graph-header">
+        <div className="kb-graph-title-row">
+          <div className="kb-panel-info">
+            <h2>Knowledge Graph</h2>
+            <p>{visibleItems} of {totalItems} items • Drag to pan, scroll to zoom</p>
+          </div>
+          <div className="kb-graph-controls">
+            <button 
+              className="kb-zoom-btn" 
+              onClick={() => setZoom(z => Math.min(4, z * 1.3))}
+              title="Zoom in"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                <line x1="11" y1="8" x2="11" y2="14"/>
+                <line x1="8" y1="11" x2="14" y2="11"/>
+              </svg>
+            </button>
+            <button 
+              className="kb-zoom-btn" 
+              onClick={() => setZoom(z => Math.max(0.2, z * 0.7))}
+              title="Zoom out"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                <line x1="8" y1="11" x2="14" y2="11"/>
+              </svg>
+            </button>
+            <button 
+              className="kb-zoom-btn" 
+              onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); }}
+              title="Reset view"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+              </svg>
+            </button>
+            <button 
+              className={`kb-zoom-btn ${showMinimap ? 'active' : ''}`}
+              onClick={() => setShowMinimap(!showMinimap)}
+              title="Toggle minimap"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <rect x="13" y="13" width="6" height="6" rx="1"/>
+              </svg>
+            </button>
+          </div>
         </div>
-        <div className="kb-graph-controls">
-          <button 
-            className="kb-zoom-btn" 
-            onClick={() => setZoom(z => Math.min(3, z * 1.2))}
-            title="Zoom in"
-          >
+
+        {/* Search and View Controls */}
+        <div className="kb-graph-toolbar">
+          <div className="kb-graph-search">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="11" cy="11" r="8"/>
               <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-              <line x1="11" y1="8" x2="11" y2="14"/>
-              <line x1="8" y1="11" x2="14" y2="11"/>
             </svg>
-          </button>
-          <button 
-            className="kb-zoom-btn" 
-            onClick={() => setZoom(z => Math.max(0.3, z * 0.8))}
-            title="Zoom out"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8"/>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-              <line x1="8" y1="11" x2="14" y2="11"/>
-            </svg>
-          </button>
-          <button 
-            className="kb-zoom-btn" 
-            onClick={() => { setZoom(1); setPan({ x: 0, y: 0 }); setRotation({ x: 15, y: 0 }); }}
-            title="Reset view"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-              <path d="M3 3v5h5"/>
-            </svg>
-          </button>
+            <input
+              type="text"
+              placeholder="Search nodes..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <button className="kb-search-clear" onClick={() => setSearchQuery('')}>×</button>
+            )}
+          </div>
+
+          <div className="kb-graph-view-modes">
+            <button 
+              className={`kb-view-btn ${viewMode === 'clustered' ? 'active' : ''}`}
+              onClick={() => setViewMode('clustered')}
+              title="Clustered view"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="6" cy="6" r="3"/><circle cx="18" cy="6" r="3"/>
+                <circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/>
+              </svg>
+            </button>
+            <button 
+              className={`kb-view-btn ${viewMode === 'radial' ? 'active' : ''}`}
+              onClick={() => setViewMode('radial')}
+              title="Radial view"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="3"/>
+                <circle cx="12" cy="12" r="7" strokeDasharray="2 2"/>
+                <circle cx="12" cy="12" r="10" strokeDasharray="2 2"/>
+              </svg>
+            </button>
+            <button 
+              className={`kb-view-btn ${viewMode === 'timeline' ? 'active' : ''}`}
+              onClick={() => setViewMode('timeline')}
+              title="Timeline view"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/>
+              </svg>
+            </button>
+          </div>
+
+          <div className="kb-graph-limit">
+            <label>Show:</label>
+            <select value={displayLimit} onChange={(e) => setDisplayLimit(Number(e.target.value))}>
+              <option value={25}>25 items</option>
+              <option value={50}>50 items</option>
+              <option value={100}>100 items</option>
+              <option value={200}>200 items</option>
+              <option value={999999}>All items</option>
+            </select>
+          </div>
         </div>
-        <div className="kb-graph-rotation-hint">
-          Drag background to rotate in 3D • Drag nodes to move
+
+        {/* Type Filters */}
+        <div className="kb-graph-filters">
+          {Object.entries(nodeColors).map(([type, config]) => {
+            const count = typeCounts[type] || 0
+            if (count === 0) return null
+            return (
+              <button
+                key={type}
+                className={`kb-filter-btn ${typeFilters[type] ? 'active' : 'inactive'}`}
+                onClick={() => toggleFilter(type)}
+                style={{ 
+                  '--filter-color': config.fill,
+                  borderColor: typeFilters[type] ? config.fill : 'transparent'
+                }}
+              >
+                <span className="kb-filter-dot" style={{ background: config.fill }}></span>
+                <span className="kb-filter-label">{config.label}</span>
+                <span className="kb-filter-count">{count}</span>
+              </button>
+            )
+          })}
         </div>
       </div>
 
+      {/* Graph Container */}
       <div className="kb-graph-container" ref={containerRef}>
         {isLoading ? (
           <div className="kb-loading">
@@ -715,183 +934,225 @@ function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
             <span>Building knowledge graph...</span>
           </div>
         ) : (
-          <svg
-            ref={svgRef}
-            className="kb-graph-svg"
-            viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
-            onMouseDown={handleBackgroundMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
-            onWheel={handleWheel}
-            style={{ cursor: isRotating ? 'grabbing' : 'grab' }}
-          >
-            <defs>
-              {/* Gradient for depth effect */}
-              <radialGradient id="depthGradient" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stopColor="rgba(255,255,255,0.1)" />
-                <stop offset="100%" stopColor="rgba(0,0,0,0)" />
-              </radialGradient>
-            </defs>
-            
-            {/* Background grid for 3D effect */}
-            <g opacity="0.1" transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-              {Array.from({ length: 11 }).map((_, i) => {
-                const pos = (i / 10) * dimensions.width
-                return (
-                  <line 
-                    key={`grid-v-${i}`} 
-                    x1={pos} y1={0} 
-                    x2={pos} y2={dimensions.height} 
-                    stroke="white" 
-                    strokeWidth="0.5"
-                  />
-                )
-              })}
-              {Array.from({ length: 11 }).map((_, i) => {
-                const pos = (i / 10) * dimensions.height
-                return (
-                  <line 
-                    key={`grid-h-${i}`} 
-                    x1={0} y1={pos} 
-                    x2={dimensions.width} y2={pos} 
-                    stroke="white" 
-                    strokeWidth="0.5"
-                  />
-                )
-              })}
-            </g>
+          <>
+            <svg
+              ref={svgRef}
+              className="kb-graph-svg"
+              viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
+              onMouseDown={handleBackgroundMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              onWheel={handleWheel}
+              style={{ cursor: isPanning ? 'grabbing' : 'grab' }}
+            >
+              <defs>
+                <radialGradient id="depthGradient" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="rgba(255,255,255,0.05)" />
+                  <stop offset="100%" stopColor="rgba(0,0,0,0)" />
+                </radialGradient>
+                {/* Cluster background gradients */}
+                <radialGradient id="clusterBg-memories">
+                  <stop offset="0%" stopColor="rgba(16,185,129,0.08)" />
+                  <stop offset="100%" stopColor="rgba(16,185,129,0)" />
+                </radialGradient>
+                <radialGradient id="clusterBg-documents">
+                  <stop offset="0%" stopColor="rgba(99,102,241,0.08)" />
+                  <stop offset="100%" stopColor="rgba(99,102,241,0)" />
+                </radialGradient>
+                <radialGradient id="clusterBg-pdfs">
+                  <stop offset="0%" stopColor="rgba(239,68,68,0.08)" />
+                  <stop offset="100%" stopColor="rgba(239,68,68,0)" />
+                </radialGradient>
+                <radialGradient id="clusterBg-images">
+                  <stop offset="0%" stopColor="rgba(245,158,11,0.08)" />
+                  <stop offset="100%" stopColor="rgba(245,158,11,0)" />
+                </radialGradient>
+              </defs>
 
-            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
-              {/* Edges with 3D transforms */}
-              {edges.map(edge => {
-                const source = getNodeById(edge.source)
-                const target = getNodeById(edge.target)
-                if (!source || !target) return null
-                
-                const source3D = get3DTransform(source)
-                const target3D = get3DTransform(target)
-                const avgOpacity = (source3D.opacity + target3D.opacity) / 2
-                
-                const isHighlighted = selectedNode && 
-                  (selectedNode.id === edge.source || selectedNode.id === edge.target)
-                return (
-                  <line
-                    key={edge.id}
-                    x1={source3D.x}
-                    y1={source3D.y}
-                    x2={target3D.x}
-                    y2={target3D.y}
-                    stroke={isHighlighted ? '#10b981' : 'rgba(255,255,255,0.15)'}
-                    strokeWidth={isHighlighted ? 2 : 1}
-                    strokeDasharray={edge.type === 'content' ? '4,4' : 'none'}
-                    opacity={avgOpacity}
-                  />
-                )
-              })}
-
-              {/* Nodes - sorted by depth for proper 3D layering */}
-              {nodes
-                .map(node => ({ ...node, transform3D: get3DTransform(node) }))
-                .sort((a, b) => a.transform3D.z - b.transform3D.z)
-                .map(node => {
-                const color = nodeColors[node.type] || nodeColors.memory
-                const isSelected = selectedNode?.id === node.id
-                const isHovered = hoveredNode?.id === node.id
-                const t3d = node.transform3D
-                const nodeScale = t3d.scale * (isSelected ? 1.2 : isHovered ? 1.1 : 1)
-                return (
-                  <g
-                    key={node.id}
-                    transform={`translate(${t3d.x}, ${t3d.y}) scale(${nodeScale})`}
-                    onMouseDown={(e) => handleMouseDown(e, node)}
-                    onMouseEnter={() => setHoveredNode(node)}
-                    onMouseLeave={() => setHoveredNode(null)}
-                    style={{ cursor: dragNode ? 'grabbing' : 'grab' }}
-                    opacity={t3d.opacity}
-                  >
-                    {/* Glow effect for selected */}
-                    {isSelected && (
+              <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+                {/* Cluster backgrounds */}
+                {viewMode === 'clustered' && (
+                  <>
+                    {Object.entries(getClusterLayout(nodes.length, dimensions)).map(([cluster, pos]) => (
                       <circle
-                        r={node.radius + 8}
-                        fill="none"
-                        stroke={color.fill}
-                        strokeWidth="3"
-                        opacity="0.3"
+                        key={`cluster-bg-${cluster}`}
+                        cx={pos.x}
+                        cy={pos.y}
+                        r={pos.radius * 1.2}
+                        fill={`url(#clusterBg-${cluster})`}
+                        opacity={0.6}
                       />
-                    )}
-                    {/* Node circle */}
-                    <circle
-                      r={node.radius}
-                      fill={color.fill}
-                      stroke={isSelected ? '#fff' : color.stroke}
-                      strokeWidth={isSelected ? 3 : 2}
-                      opacity={0.9}
+                    ))}
+                  </>
+                )}
+
+                {/* Edges */}
+                {edges.map(edge => {
+                  const source = getNodeById(edge.source)
+                  const target = getNodeById(edge.target)
+                  if (!source || !target) return null
+                  
+                  const isHighlighted = selectedNode && 
+                    (selectedNode.id === edge.source || selectedNode.id === edge.target)
+                  const isSearchMatch = searchQuery && (
+                    source.fullContent?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                    target.fullContent?.toLowerCase().includes(searchQuery.toLowerCase())
+                  )
+                  
+                  return (
+                    <line
+                      key={edge.id}
+                      x1={source.x}
+                      y1={source.y}
+                      x2={target.x}
+                      y2={target.y}
+                      stroke={isHighlighted ? '#10b981' : isSearchMatch ? '#6366f1' : 'rgba(255,255,255,0.08)'}
+                      strokeWidth={isHighlighted ? 2 : 1}
+                      opacity={isHighlighted ? 1 : 0.5}
                     />
-                    {/* Icon - different for each document type */}
-                    {node.type === 'pdf' ? (
-                      <g transform="translate(-10, -10)">
-                        {/* PDF icon */}
-                        <rect x="2" y="0" width="16" height="20" rx="2" fill="none" stroke="#fff" strokeWidth="1.5"/>
-                        <text x="10" y="14" textAnchor="middle" fill="#fff" fontSize="7" fontWeight="bold">PDF</text>
-                      </g>
-                    ) : node.type === 'image' ? (
-                      <g transform="translate(-10, -10)">
-                        {/* Image icon */}
-                        <rect x="2" y="2" width="16" height="16" rx="2" fill="none" stroke="#fff" strokeWidth="1.5"/>
-                        <circle cx="7" cy="8" r="2" fill="#fff"/>
-                        <path d="M2 16l5-5 3 3 4-4 4 4v2H2z" fill="#fff" opacity="0.8"/>
-                      </g>
-                    ) : node.type === 'document' ? (
-                      <g transform="translate(-8, -10)">
-                        {/* Document icon */}
-                        <path
-                          d="M12 2H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V6l-5-4z"
+                  )
+                })}
+
+                {/* Nodes */}
+                {nodes.map(node => {
+                  const color = nodeColors[node.type] || nodeColors.memory
+                  const isSelected = selectedNode?.id === node.id
+                  const isHovered = hoveredNode?.id === node.id
+                  const isSearchMatch = searchQuery && node.fullContent?.toLowerCase().includes(searchQuery.toLowerCase())
+                  const nodeScale = isSelected ? 1.3 : isHovered ? 1.15 : isSearchMatch ? 1.1 : 1
+                  const nodeOpacity = searchQuery && !isSearchMatch ? 0.3 : 1
+
+                  return (
+                    <g
+                      key={node.id}
+                      transform={`translate(${node.x}, ${node.y}) scale(${nodeScale})`}
+                      onMouseDown={(e) => handleMouseDown(e, node)}
+                      onMouseEnter={() => setHoveredNode(node)}
+                      onMouseLeave={() => setHoveredNode(null)}
+                      style={{ cursor: dragNode ? 'grabbing' : 'pointer' }}
+                      opacity={nodeOpacity}
+                    >
+                      {/* Highlight ring for search matches */}
+                      {isSearchMatch && !isSelected && (
+                        <circle
+                          r={node.radius + 6}
                           fill="none"
-                          stroke="white"
-                          strokeWidth="1.5"
-                          transform="scale(0.9)"
+                          stroke="#6366f1"
+                          strokeWidth="2"
+                          opacity="0.6"
+                          strokeDasharray="4 2"
                         />
-                        <path d="M12 2v4h4" fill="none" stroke="white" strokeWidth="1.5" transform="scale(0.9)"/>
-                      </g>
-                    ) : (
-                      <g transform="translate(-7, -7)">
-                        <circle cx="7" cy="7" r="5" fill="none" stroke="white" strokeWidth="1.5"/>
-                        <circle cx="7" cy="5" r="1.5" fill="white"/>
-                        <path d="M4 10c0-1.5 1.5-2.5 3-2.5s3 1 3 2.5" fill="none" stroke="white" strokeWidth="1.5"/>
-                      </g>
-                    )}
-                    
-                    {/* Embedded badge indicator */}
-                    {node.isEmbedded && (
-                      <g transform={`translate(${node.radius - 6}, ${-node.radius + 2})`}>
-                        <circle r="8" fill="#10b981" stroke="#fff" strokeWidth="1.5"/>
-                        <path 
-                          d="M-3 0l2 2 4-4" 
-                          fill="none" 
-                          stroke="#fff" 
-                          strokeWidth="2" 
-                          strokeLinecap="round" 
-                          strokeLinejoin="round"
+                      )}
+                      {/* Selection glow */}
+                      {isSelected && (
+                        <circle
+                          r={node.radius + 8}
+                          fill="none"
+                          stroke={color.fill}
+                          strokeWidth="3"
+                          opacity="0.4"
                         />
-                      </g>
-                    )}
-                  </g>
-                )
-              })}
-            </g>
-          </svg>
+                      )}
+                      {/* Node circle */}
+                      <circle
+                        r={node.radius}
+                        fill={color.fill}
+                        stroke={isSelected ? '#fff' : color.stroke}
+                        strokeWidth={isSelected ? 2.5 : 1.5}
+                        opacity={0.9}
+                      />
+                      {/* Node icon */}
+                      {node.type === 'pdf' ? (
+                        <text x="0" y="4" textAnchor="middle" fill="#fff" fontSize={node.radius * 0.6} fontWeight="bold">PDF</text>
+                      ) : node.type === 'image' ? (
+                        <g transform={`translate(${-node.radius * 0.4}, ${-node.radius * 0.4})`}>
+                          <rect width={node.radius * 0.8} height={node.radius * 0.6} rx="1" fill="none" stroke="#fff" strokeWidth="1"/>
+                          <circle cx={node.radius * 0.25} cy={node.radius * 0.2} r={node.radius * 0.1} fill="#fff"/>
+                        </g>
+                      ) : node.type === 'document' ? (
+                        <g transform={`translate(${-node.radius * 0.35}, ${-node.radius * 0.45})`}>
+                          <rect width={node.radius * 0.7} height={node.radius * 0.9} rx="1" fill="none" stroke="#fff" strokeWidth="1"/>
+                          <line x1={node.radius * 0.15} y1={node.radius * 0.3} x2={node.radius * 0.55} y2={node.radius * 0.3} stroke="#fff" strokeWidth="1"/>
+                          <line x1={node.radius * 0.15} y1={node.radius * 0.5} x2={node.radius * 0.55} y2={node.radius * 0.5} stroke="#fff" strokeWidth="1"/>
+                        </g>
+                      ) : (
+                        <circle cx="0" cy="-2" r={node.radius * 0.25} fill="#fff" opacity="0.9"/>
+                      )}
+                      {/* Embedded badge */}
+                      {node.isEmbedded && (
+                        <g transform={`translate(${node.radius * 0.6}, ${-node.radius * 0.6})`}>
+                          <circle r={node.radius * 0.35} fill="#10b981" stroke="#fff" strokeWidth="1"/>
+                          <path d={`M${-node.radius * 0.12} 0l${node.radius * 0.08} ${node.radius * 0.08} ${node.radius * 0.15}-${node.radius * 0.15}`} fill="none" stroke="#fff" strokeWidth="1.5" strokeLinecap="round"/>
+                        </g>
+                      )}
+                    </g>
+                  )
+                })}
+
+                {/* Cluster labels */}
+                {viewMode === 'clustered' && Object.entries(getClusterLayout(nodes.length, dimensions)).map(([cluster, pos]) => {
+                  const config = clusterConfig[cluster]
+                  if (!config) return null
+                  const clusterNodes = nodes.filter(n => n.cluster === cluster)
+                  if (clusterNodes.length === 0) return null
+                  
+                  return (
+                    <g key={`label-${cluster}`} transform={`translate(${pos.x}, ${pos.y - pos.radius - 15})`}>
+                      <text
+                        textAnchor="middle"
+                        fill={config.color}
+                        fontSize="13"
+                        fontWeight="600"
+                        opacity="0.9"
+                      >
+                        {config.label} ({clusterNodes.length})
+                      </text>
+                    </g>
+                  )
+                })}
+              </g>
+            </svg>
+
+            {/* Minimap */}
+            {showMinimap && nodes.length > 0 && (
+              <div className="kb-graph-minimap">
+                <svg viewBox={`0 0 ${dimensions.width * minimapScale} ${dimensions.height * minimapScale}`}>
+                  {/* Minimap nodes */}
+                  {nodes.map(node => (
+                    <circle
+                      key={`mini-${node.id}`}
+                      cx={node.x * minimapScale}
+                      cy={node.y * minimapScale}
+                      r={2}
+                      fill={nodeColors[node.type]?.fill || '#10b981'}
+                      opacity={0.8}
+                    />
+                  ))}
+                  {/* Viewport indicator */}
+                  <rect
+                    x={Math.max(0, minimapViewport.x)}
+                    y={Math.max(0, minimapViewport.y)}
+                    width={minimapViewport.width}
+                    height={minimapViewport.height}
+                    fill="none"
+                    stroke="#fff"
+                    strokeWidth="1"
+                    opacity="0.6"
+                  />
+                </svg>
+              </div>
+            )}
+          </>
         )}
 
         {/* Tooltip */}
-        {hoveredNode && !dragNode && !isRotating && (() => {
-          const t3d = get3DTransform(hoveredNode)
-          return (
+        {hoveredNode && !dragNode && !isPanning && (
           <div 
             className="kb-graph-tooltip"
             style={{
-              left: t3d.x * zoom + pan.x + 30,
-              top: t3d.y * zoom + pan.y - 20
+              left: Math.min(hoveredNode.x * zoom + pan.x + 30, dimensions.width - 250),
+              top: Math.min(hoveredNode.y * zoom + pan.y - 20, dimensions.height - 100)
             }}
           >
             <div className="kb-tooltip-type" style={{ color: nodeColors[hoveredNode.type]?.fill }}>
@@ -911,9 +1172,13 @@ function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
                 ✓ Embedded ({hoveredNode.embeddedCount} chunks)
               </div>
             )}
+            {hoveredNode.created && (
+              <div className="kb-tooltip-meta">
+                Created: {hoveredNode.created.toLocaleDateString()}
+              </div>
+            )}
           </div>
-          )
-        })()}
+        )}
       </div>
 
       {/* Stats bar */}
@@ -929,6 +1194,10 @@ function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
         <div className="kb-graph-stat">
           <span className="kb-stat-dot" style={{ background: '#fff' }}></span>
           {edges.length} Connections
+        </div>
+        <div className="kb-graph-stat">
+          <span className="kb-stat-dot" style={{ background: '#8b5cf6' }}></span>
+          Zoom: {Math.round(zoom * 100)}%
         </div>
         {selectedNode && (
           <div className="kb-graph-selected">
@@ -4337,11 +4606,13 @@ Be concise but thorough. When showing code, always include the full file or the 
       if (selectedAgent?.provider === 'openrouter') {
         const openRouterKey = (openRouterApiKey || '').trim()
         if (!openRouterKey) throw new Error('OpenRouter API key not set (Settings → OpenRouter)')
-        const resp = await fetch('/api/openrouter/chat/completions', {
+        // Use direct OpenRouter API (works in both dev and production)
+        const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${openRouterKey.trim()}`,
+            'HTTP-Referer': window.location.origin,
           },
           body: JSON.stringify({
             model: selectedAgent.model || 'openai/gpt-4o',
@@ -4350,7 +4621,22 @@ Be concise but thorough. When showing code, always include the full file or the 
             temperature: Number(selectedAgent.temperature ?? 0.7),
           })
         })
-        const data = await resp.json()
+        const text = await resp.text()
+        if (!resp.ok) {
+          try {
+            const errData = JSON.parse(text)
+            throw new Error(errData.error?.message || `OpenRouter error: ${resp.status}`)
+          } catch (e) {
+            if (e.message.includes('OpenRouter error')) throw e
+            throw new Error(`OpenRouter API error (${resp.status}): ${text.slice(0, 150)}`)
+          }
+        }
+        let data
+        try {
+          data = JSON.parse(text)
+        } catch {
+          throw new Error(`OpenRouter returned invalid JSON: ${text.slice(0, 150)}`)
+        }
         if (data.error) throw new Error(data.error.message)
         response = data.choices?.[0]?.message?.content || ''
       } else if (selectedAgent?.provider === 'lmstudio') {
@@ -4376,7 +4662,8 @@ Be concise but thorough. When showing code, always include the full file or the 
         try { data = JSON.parse(text) } catch { throw new Error(`LM Studio returned non-JSON response: ${text.slice(0, 200)}`) }
         response = data.choices?.[0]?.message?.content || ''
       } else if ((openAiApiKey || '').trim()) {
-        const resp = await fetch('/api/openai/v1/chat/completions', {
+        // Use direct OpenAI API (works in both dev and production)
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -4388,7 +4675,23 @@ Be concise but thorough. When showing code, always include the full file or the 
             max_tokens: 4096,
           })
         })
-        const data = await resp.json()
+        const text = await resp.text()
+        if (!resp.ok) {
+          // Try to parse as JSON error, otherwise show raw text
+          try {
+            const errData = JSON.parse(text)
+            throw new Error(errData.error?.message || `OpenAI error: ${resp.status}`)
+          } catch (e) {
+            if (e.message.includes('OpenAI error')) throw e
+            throw new Error(`OpenAI API error (${resp.status}): ${text.slice(0, 150)}`)
+          }
+        }
+        let data
+        try {
+          data = JSON.parse(text)
+        } catch {
+          throw new Error(`OpenAI returned invalid JSON: ${text.slice(0, 150)}`)
+        }
         if (data.error) throw new Error(data.error.message)
         response = data.choices?.[0]?.message?.content || ''
       } else {
