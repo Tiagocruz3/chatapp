@@ -1503,6 +1503,10 @@ function App() {
   const [deleteRepoConfirm, setDeleteRepoConfirm] = useState('')
   const [deletingRepo, setDeletingRepo] = useState(false)
   const [deleteRepoError, setDeleteRepoError] = useState('')
+  const [showDeleteFileModal, setShowDeleteFileModal] = useState(false)
+  const [deleteFileTarget, setDeleteFileTarget] = useState(null) // { path, sha, name }
+  const [deletingFile, setDeletingFile] = useState(false)
+  const [deleteFileError, setDeleteFileError] = useState('')
   
   // Projects feature (stored in Supabase, scoped per-user)
   const [projects, setProjects] = useState([])
@@ -4626,6 +4630,27 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     }
   }
 
+  const removeRepoFileFromTree = (items, targetPath) => {
+    if (!Array.isArray(items)) return items
+    return items
+      .filter(item => item.path !== targetPath)
+      .map(item => {
+        if (item.type !== 'dir') return item
+        return item
+      })
+  }
+
+  const removeRepoFileFromExpanded = (expanded, targetPath) => {
+    const next = { ...expanded }
+    Object.keys(next).forEach((key) => {
+      const list = next[key]
+      if (Array.isArray(list)) {
+        next[key] = removeRepoFileFromTree(list, targetPath)
+      }
+    })
+    return next
+  }
+
   const loadFileContent = async (owner, repo, path, branch = repoBranch) => {
     setFileContentLoading(true)
     try {
@@ -4762,32 +4787,44 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
 
   // Delete a GitHub file
   const deleteGithubFile = async () => {
-    if (!selectedRepo || !selectedFile) return
+    if (!selectedRepo || !deleteFileTarget) return
+    setDeletingFile(true)
+    setDeleteFileError('')
 
-    if (!confirm(`Delete "${selectedFile.path}" from ${selectedRepo.name}?`)) return
+    const targetPath = deleteFileTarget.path
+    const targetSha = deleteFileTarget.sha
+
+    // Optimistic UI update
+    setRepoFiles(prev => removeRepoFileFromTree(prev, targetPath))
+    setExpandedFolders(prev => removeRepoFileFromExpanded(prev, targetPath))
+    if (targetPath) closeGithubTab(targetPath)
+    setSelectedFile(null)
+    setFileContent('')
+    setGithubFileEditing(false)
 
     try {
       const success = await deleteFile(
         selectedRepo.owner.login,
         selectedRepo.name,
-        selectedFile.path,
-        selectedFile.sha,
-        `Delete ${selectedFile.path}`
+        targetPath,
+        targetSha,
+        `Delete ${targetPath}`
       )
 
-      if (success) {
-        if (selectedFile?.path) {
-          closeGithubTab(selectedFile.path)
-        } else {
-          setSelectedFile(null)
-          setFileContent('')
-        }
-        setGithubFileEditing(false)
-        // Reload files
+      if (!success) {
         await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
+        setDeleteFileError('Failed to delete file. Please check permissions.')
+        return
       }
+
+      setShowDeleteFileModal(false)
+      setDeleteFileTarget(null)
+      showToast(`Deleted ${targetPath}`)
     } catch (err) {
-      showToast(`Failed to delete: ${err.message}`)
+      await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
+      setDeleteFileError(err.message || 'Failed to delete file')
+    } finally {
+      setDeletingFile(false)
     }
   }
 
@@ -4857,15 +4894,17 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     }
     setDeleteRepoError('')
     setDeletingRepo(true)
+    // Optimistic UI update
+    setGithubRepos(prev => prev.filter(r => r.id !== selectedRepo.id))
     try {
       await githubApi(`/repos/${selectedRepo.owner.login}/${selectedRepo.name}`, { method: 'DELETE' })
       setShowDeleteRepoModal(false)
       setDeleteRepoConfirm('')
       showToast(`Deleted repo: ${full}`)
       exitRepo()
-      await loadGitHubRepos()
     } catch (e) {
       console.error(e)
+      await loadGitHubRepos()
       setDeleteRepoError(e.message || 'Failed to delete repository')
     } finally {
       setDeletingRepo(false)
@@ -4915,6 +4954,32 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     'swift': 'main.swift', 'kt': 'Main.kt',
   }
 
+  const flattenRepoFiles = (items = [], expanded = {}) => {
+    const files = []
+    items.forEach((item) => {
+      if (item.type === 'file') {
+        files.push(item.path)
+      } else if (item.type === 'dir') {
+        const children = expanded[item.path]
+        if (Array.isArray(children)) {
+          files.push(...flattenRepoFiles(children, expanded))
+        }
+      }
+    })
+    return files
+  }
+
+  const getCurrentFileList = () => {
+    if (codeEditorMode === 'local' && activeLocalProject) {
+      const projectData = localProjectFiles[activeLocalProject.id]
+      return (projectData?.files || []).filter(f => f.type === 'file').map(f => f.path)
+    }
+    if (codeEditorMode === 'github' && selectedRepo) {
+      return flattenRepoFiles(repoFiles, expandedFolders)
+    }
+    return []
+  }
+
   // Code chat handler - sends message to selected agent with GitHub context
   const handleCodeChat = async (messageOverride) => {
     const draftMessage = typeof messageOverride === 'string' ? messageOverride : codeInput
@@ -4950,9 +5015,14 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
         }
       }
 
+      const fileList = getCurrentFileList()
+      const fileListContext = fileList.length
+        ? `\n[Project Files]\n- ${fileList.join('\n- ')}`
+        : '\n[Project Files]\n- (no files loaded yet)'
+
       const targetContext = codeEditorMode === 'github'
-        ? `\n[Target: GitHub]\n${githubContext || 'No repository selected'}`
-        : `\n[Target: Local Project]\n[Project: ${activeLocalProject?.name || 'No project selected'}]`
+        ? `\n[Target: GitHub]\n${githubContext || 'No repository selected'}${fileListContext}`
+        : `\n[Target: Local Project]\n[Project: ${activeLocalProject?.name || 'No project selected'}]${fileListContext}`
 
       // System prompt for code assistance
       const systemPrompt = `You are a code assistant helping users create and modify code files.
@@ -4981,6 +5051,7 @@ RULES:
 3. Keep explanations brief - just describe what each file does
 4. Do NOT repeat or explain the code line by line
 5. The files will be automatically created in the editor
+6. If the user asks for a change without naming a file, choose the most likely file from the Project Files list and edit it
 
 Target Context:${targetContext}
 
@@ -11117,7 +11188,11 @@ else console.log('Deleted successfully')`
                           </button>
                           <button 
                             className="coder-file-action-btn danger"
-                            onClick={() => setShowDeleteRepoModal(true)}
+                            onClick={() => {
+                              setDeleteRepoError('')
+                              setDeleteRepoConfirm('')
+                              setShowDeleteRepoModal(true)
+                            }}
                             title="Delete repository"
                           >
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -12866,7 +12941,15 @@ else console.log('Deleted successfully')`
                                 </button>
                                 <button
                                   className="code-toolbar-btn danger"
-                                  onClick={deleteGithubFile}
+                                  onClick={() => {
+                                    setDeleteFileTarget({
+                                      path: selectedFile.path,
+                                      sha: selectedFile.sha,
+                                      name: selectedFile.name
+                                    })
+                                    setDeleteFileError('')
+                                    setShowDeleteFileModal(true)
+                                  }}
                                   title="Delete file"
                                 >
                                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -14481,6 +14564,57 @@ else console.log('Deleted successfully')`
                 disabled={deletingRepo || deleteRepoConfirm !== selectedRepo.full_name}
               >
                 {deletingRepo ? 'Deleting…' : 'Delete repo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete File Modal - Outside coder-page for proper z-index */}
+      {showDeleteFileModal && deleteFileTarget && (
+        <div
+          className="code-modal-overlay"
+          onClick={() => !deletingFile && setShowDeleteFileModal(false)}
+          role="presentation"
+        >
+          <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+            <div className="code-modal-header">
+              <h3>Delete file</h3>
+              <button
+                className="code-modal-close"
+                type="button"
+                onClick={() => setShowDeleteFileModal(false)}
+                disabled={deletingFile}
+                title="Close"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <div className="code-modal-body">
+              <div className="code-modal-warning">
+                This permanently deletes <strong>{deleteFileTarget.path}</strong>. This cannot be undone.
+              </div>
+              {deleteFileError && <div className="code-modal-error">{deleteFileError}</div>}
+            </div>
+            <div className="code-modal-actions">
+              <button
+                className="code-modal-btn"
+                type="button"
+                onClick={() => setShowDeleteFileModal(false)}
+                disabled={deletingFile}
+              >
+                Cancel
+              </button>
+              <button
+                className="code-modal-btn danger"
+                type="button"
+                onClick={deleteGithubFile}
+                disabled={deletingFile}
+              >
+                {deletingFile ? 'Deleting…' : 'Delete file'}
               </button>
             </div>
           </div>
