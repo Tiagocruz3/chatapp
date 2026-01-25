@@ -1340,6 +1340,9 @@ function App() {
   })
   const chatInputRef = useRef(null) // Ref for the isolated chat textarea
   const codeChatEndRef = useRef(null)
+  const codeChatMessagesRef = useRef(null)
+  const codeChatSidebarRef = useRef(null)
+  const [codeChatAutoScroll, setCodeChatAutoScroll] = useState(true)
   const [inputHistoryIndex, setInputHistoryIndex] = useState(-1) // -1 = not navigating history
   const [isTyping, setIsTyping] = useState(false)
   const [typingStatus, setTypingStatus] = useState('') // 'generating' | 'image' | 'searching'
@@ -2627,11 +2630,12 @@ Respond ONLY with valid JSON, no other text.`
 
   useEffect(() => {
     if (!showCodeChat) return
+    if (!codeChatAutoScroll) return
     const raf = requestAnimationFrame(() => {
       codeChatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
     })
     return () => cancelAnimationFrame(raf)
-  }, [codeMessages, codeGenerating, showCodeChat])
+  }, [codeMessages, codeGenerating, showCodeChat, codeChatAutoScroll])
 
   // DB mode: load chats once authenticated
   useEffect(() => {
@@ -11620,7 +11624,15 @@ else console.log('Deleted successfully')`
                 </div>
               </div>
 
-              <div className="coder-chat-messages">
+              <div
+                className="coder-chat-messages"
+                ref={codeChatMessagesRef}
+                onScroll={(e) => {
+                  const el = e.currentTarget
+                  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+                  setCodeChatAutoScroll(atBottom)
+                }}
+              >
                 {codeMessages.length === 0 ? (
                   <div className="coder-chat-empty">
                     <div className="coder-chat-welcome">
@@ -13250,7 +13262,15 @@ else console.log('Deleted successfully')`
                 )}
               </div>
 
-              <div className="code-chat-sidebar-messages">
+              <div
+                className="code-chat-sidebar-messages"
+                ref={codeChatSidebarRef}
+                onScroll={(e) => {
+                  const el = e.currentTarget
+                  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+                  setCodeChatAutoScroll(atBottom)
+                }}
+              >
                 {codeMessages.length === 0 ? (
                   <div className="code-chat-sidebar-empty">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
