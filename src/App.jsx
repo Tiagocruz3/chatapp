@@ -5029,110 +5029,77 @@ Respond with the code files first, then a brief summary of what was created.`
         response = await sendMessageToAgent(userMessage, [], systemPrompt, undefined)
       }
 
-      // Parse response for file changes - supports both explicit filenames and language-based code blocks
-      // Format 1: ```filename:path/to/file.js
-      // Format 2: ```javascript:filename.js (language:filename)
-      const fileChangeRegex = /```(?:filename:)?([^\n:]+):([^\n]+)\n([\s\S]*?)```/g
-      let match
+      // Parse response for file changes - supports multiple formats
       const newPendingChanges = { ...pendingFileChanges }
       let didChangePending = false
-      const createdFilePaths = []
+      const generatedFiles = {}
+      const fileTypeCounters = {}
       
-      // Parse code blocks with filename specifiers
-      while ((match = fileChangeRegex.exec(response)) !== null) {
-        const part1 = match[1].trim().toLowerCase()
-        const part2 = match[2].trim()
-        const fileContent = match[3]
+      // Parse ALL code blocks and extract files
+      const allBlocksRegex = /```([^\n]*)\n([\s\S]*?)```/g
+      let match
+      
+      while ((match = allBlocksRegex.exec(response)) !== null) {
+        const header = match[1].trim()
+        const content = match[2]
         
-        let filePath
-        // Check if part1 is a language and part2 is a filename
-        if (codeLangToExt[part1] || ['js', 'ts', 'jsx', 'tsx', 'py', 'html', 'css', 'json', 'md'].includes(part1)) {
-          // Format: ```javascript:filename.js
-          filePath = part2
-        } else if (part1 === 'filename') {
-          // Format: ```filename:path/to/file.js
-          filePath = part2
+        if (!content.trim()) continue
+        
+        let filePath = null
+        let lang = null
+        
+        // Check for language:filename format (e.g., html:index.html, javascript:game.js)
+        if (header.includes(':')) {
+          const parts = header.split(':')
+          const part1 = parts[0].trim().toLowerCase()
+          const part2 = parts.slice(1).join(':').trim()
+          
+          if (part1 === 'filename') {
+            // Format: filename:path/to/file.js
+            filePath = part2
+          } else if (codeLangToExt[part1]) {
+            // Format: javascript:filename.js
+            lang = part1
+            filePath = part2
+          } else {
+            // Unknown format, treat as language
+            lang = part1
+          }
         } else {
-          // Assume part1:part2 is a path like src:app.js
-          filePath = `${part1}/${part2}`
+          // Standard format: just language (e.g., ```html)
+          lang = header.toLowerCase()
         }
         
-        newPendingChanges[filePath] = {
-          content: fileContent,
-          action: 'update'
+        // If we got a filename, use it
+        if (filePath) {
+          generatedFiles[filePath] = content
+          newPendingChanges[filePath] = { content, action: 'update' }
+          didChangePending = true
+        } else if (lang && codeLangToExt[lang]) {
+          // Assign default filename based on language
+          const ext = codeLangToExt[lang]
+          fileTypeCounters[ext] = (fileTypeCounters[ext] || 0) + 1
+          const count = fileTypeCounters[ext]
+          const defaultName = codeExtToDefaultName[ext] || `file.${ext}`
+          
+          if (count === 1) {
+            filePath = defaultName
+          } else {
+            const baseName = defaultName.replace(`.${ext}`, '')
+            filePath = `${baseName}_${count}.${ext}`
+          }
+          
+          generatedFiles[filePath] = content
+          newPendingChanges[filePath] = { content, action: 'update' }
+          didChangePending = true
         }
-        createdFilePaths.push(filePath)
-        didChangePending = true
       }
       
-      // For local projects: Create files from parsed code blocks
+      // For local projects: Create files in the project
       if (codeEditorMode === 'local' && activeLocalProject) {
         const projectData = localProjectFiles[activeLocalProject.id] || { files: [], fileContents: {}, expandedFolders: {} }
         const existingFiles = projectData.files || []
         const existingContents = projectData.fileContents || {}
-        
-        const generatedFiles = {}
-        const fileTypeCounters = {}
-        
-        // First, add files from the filename: pattern matches
-        createdFilePaths.forEach(filePath => {
-          if (newPendingChanges[filePath]) {
-            generatedFiles[filePath] = newPendingChanges[filePath].content
-          }
-        })
-        
-        // Also parse standard code blocks without filename markers
-        const standardBlockRegex = /```(\w+)\n([\s\S]*?)```/g
-        let codeMatch
-        
-        while ((codeMatch = standardBlockRegex.exec(response)) !== null) {
-          const fullMatch = codeMatch[0]
-          const lang = (codeMatch[1] || '').toLowerCase()
-          const code = codeMatch[2].trim()
-          
-          // Skip if this block has a filename marker (already processed)
-          if (fullMatch.includes(':') && !fullMatch.startsWith('```' + lang + '\n')) {
-            continue
-          }
-          
-          if (!lang || !code) continue
-          
-          const ext = codeLangToExt[lang]
-          if (!ext) continue
-          
-          // Check if already have this file from filename: parsing
-          const alreadyHasFile = Object.keys(generatedFiles).some(p => p.endsWith('.' + ext))
-          if (alreadyHasFile) continue
-          
-          // Find existing file with matching extension or create new one
-          const existingFile = existingFiles.find(f => 
-            f.type === 'file' && f.name.endsWith('.' + ext)
-          )
-          
-          let targetPath
-          if (existingFile) {
-            targetPath = existingFile.path
-          } else {
-            // Create new file with unique name if multiple of same type
-            fileTypeCounters[ext] = (fileTypeCounters[ext] || 0) + 1
-            const count = fileTypeCounters[ext]
-            const defaultName = codeExtToDefaultName[ext] || `file.${ext}`
-            
-            if (count === 1) {
-              targetPath = defaultName
-            } else {
-              const baseName = defaultName.replace(`.${ext}`, '')
-              targetPath = `${baseName}_${count}.${ext}`
-            }
-          }
-          
-          // Accumulate code for the same file type
-          if (generatedFiles[targetPath]) {
-            generatedFiles[targetPath] += '\n\n' + code
-          } else {
-            generatedFiles[targetPath] = code
-          }
-        }
         
         // Update local project files with generated code
         if (Object.keys(generatedFiles).length > 0) {
@@ -5186,90 +5153,14 @@ Respond with the code files first, then a brief summary of what was created.`
         }
       }
       
-      // For GitHub mode: parse standard code blocks when filename tags are missing
-      if (codeEditorMode === 'github' && selectedRepo) {
-        const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g
-        let codeMatch
-        const fileTypeCounters = {}
-        let usedSelectedFile = false
-        const selectedExt = selectedFile?.path?.split('.').pop()?.toLowerCase()
-
-        while ((codeMatch = codeBlockRegex.exec(response)) !== null) {
-          const lang = (codeMatch[1] || '').toLowerCase()
-          const code = codeMatch[2].trim()
-
-          if (response.substring(codeMatch.index - 10, codeMatch.index).includes('filename:')) {
-            continue
-          }
-          if (!code) continue
-
-          const ext = codeLangToExt[lang]
-          let targetPath = null
-
-          if (selectedFile && !usedSelectedFile && (!ext || ext === selectedExt)) {
-            targetPath = selectedFile.path
-            usedSelectedFile = true
-          } else if (ext) {
-            fileTypeCounters[ext] = (fileTypeCounters[ext] || 0) + 1
-            const count = fileTypeCounters[ext]
-            const defaultName = codeExtToDefaultName[ext] || `file.${ext}`
-            if (count === 1) {
-              targetPath = defaultName
-            } else {
-              const baseName = defaultName.replace(`.${ext}`, '')
-              targetPath = `${baseName}_${count}.${ext}`
-            }
-          }
-
-          if (!targetPath) continue
-
-          const existing = newPendingChanges[targetPath]?.content
-          newPendingChanges[targetPath] = {
-            content: existing ? `${existing}\n\n${code}` : code,
-            action: 'update'
-          }
-          didChangePending = true
-        }
-      }
-
+      // For GitHub mode, files are added to pending changes (already done above)
       if (didChangePending) {
         setPendingFileChanges(newPendingChanges)
       }
 
       // Extract explanation text (remove code blocks) for chat display
       let explanationText = response
-      const createdFiles = []
-      
-      // For local projects, track created files
-      if (codeEditorMode === 'local' && activeLocalProject) {
-        // Parse code blocks to get file names
-        const filenameTagRegex = /```\w*:([^\n]+)\n[\s\S]*?```/g
-        let match
-        while ((match = filenameTagRegex.exec(response)) !== null) {
-          createdFiles.push(match[1].trim())
-        }
-        // Also check standard code blocks
-        const standardBlockRegex = /```(\w+)?\n[\s\S]*?```/g
-        let blockMatch
-        while ((blockMatch = standardBlockRegex.exec(response)) !== null) {
-          const lang = (blockMatch[1] || '').toLowerCase()
-          if (lang && codeExtToDefaultName[codeLangToExt[lang]]) {
-            const ext = codeLangToExt[lang]
-            if (!createdFiles.some(f => f.endsWith(`.${ext}`))) {
-              createdFiles.push(codeExtToDefaultName[ext] || `file.${ext}`)
-            }
-          }
-        }
-      }
-      
-      // For GitHub, track pending files
-      if (codeEditorMode === 'github' && selectedRepo) {
-        Object.keys(newPendingChanges).forEach(path => {
-          if (!createdFiles.includes(path)) {
-            createdFiles.push(path)
-          }
-        })
-      }
+      const createdFiles = Object.keys(generatedFiles)
       
       // Remove code blocks from explanation text
       explanationText = response.replace(/```[\s\S]*?```/g, '').trim()
