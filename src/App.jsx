@@ -11126,6 +11126,29 @@ else console.log('Deleted successfully')`
                       <polyline points="6 9 12 15 18 9"/>
                     </svg>
                   </button>
+                  {showAgentSelector && (
+                    <div className="coder-model-dropdown">
+                      {allAgents.length === 0 ? (
+                        <div className="coder-model-empty">No agents configured</div>
+                      ) : (
+                        allAgents.map(agent => (
+                          <button
+                            key={agent.id}
+                            className={`coder-model-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+                            onClick={() => {
+                              setSelectedAgent(agent)
+                              setShowAgentSelector(false)
+                            }}
+                          >
+                            <span className="coder-model-option-name">{agent.name}</span>
+                            <span className={`coder-model-option-badge ${agent.provider}`}>
+                              {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.mcpServerId ? 'mcp' : 'n8n'}
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
