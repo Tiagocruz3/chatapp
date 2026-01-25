@@ -5156,27 +5156,29 @@ Respond with the code files first, then a brief summary of what was created.`
       // For GitHub mode, auto-apply the changes to create files in the repo
       if (codeEditorMode === 'github' && selectedRepo && didChangePending) {
         setPendingFileChanges(newPendingChanges)
-        
+
         // Auto-apply all pending changes to GitHub
         const filePaths = Object.keys(newPendingChanges)
+        const failedPaths = []
         for (const filePath of filePaths) {
           try {
             const change = newPendingChanges[filePath]
             const owner = selectedRepo.owner.login
             const repo = selectedRepo.name
-            
+
             // Check if file exists to get SHA
             let sha = null
             try {
               const existing = await githubApi(`/repos/${owner}/${repo}/contents/${filePath}?ref=${repoBranch}`)
               sha = existing.sha
-            } catch (e) {
+            } catch {
               // File doesn't exist, that's fine
             }
-            
+
             // Create or update file
             await githubApi(`/repos/${owner}/${repo}/contents/${filePath}`, {
               method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 message: sha ? `Update ${filePath}` : `Create ${filePath}`,
                 content: btoa(unescape(encodeURIComponent(change.content))),
@@ -5186,13 +5188,24 @@ Respond with the code files first, then a brief summary of what was created.`
             })
           } catch (e) {
             console.error(`Failed to create/update ${filePath}:`, e)
+            failedPaths.push(filePath)
           }
         }
-        
-        // Clear pending changes and refresh file tree
-        setPendingFileChanges({})
-        await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
-        showToast(`Created ${filePaths.length} file(s) in ${selectedRepo.name}`)
+
+        if (failedPaths.length === 0) {
+          // Clear pending changes and refresh file tree
+          setPendingFileChanges({})
+          await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
+          showToast(`Created ${filePaths.length} file(s) in ${selectedRepo.name}`)
+        } else {
+          // Keep failed paths in pending changes for manual retry
+          const remaining = {}
+          failedPaths.forEach(path => {
+            if (newPendingChanges[path]) remaining[path] = newPendingChanges[path]
+          })
+          setPendingFileChanges(remaining)
+          showToast(`Failed to write ${failedPaths.length} file(s). Check GitHub token permissions.`)
+        }
       }
 
       // Extract explanation text (remove code blocks) for chat display
