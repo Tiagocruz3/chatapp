@@ -4895,23 +4895,35 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
 
       // System prompt for code assistance
       const systemPrompt = `You are a code assistant helping users create and modify code files.
-You can help with:
-- Reading and understanding code files
-- Writing new code
-- Modifying existing code
-- Creating, updating, and deleting files
-- Explaining code structure
 
-When the user asks you to modify or create files, respond with the complete file content in a code block with the filename like:
-\`\`\`filename:path/to/file.js
-// file content here
+IMPORTANT: When creating or modifying files, use this format for EACH file:
+\`\`\`language:filename.ext
+// complete file content
 \`\`\`
 
-If you are updating the currently selected file, you may provide a single code block without the filename prefix and we will apply it to that file.
+Examples:
+\`\`\`javascript:game.js
+// game code here
+\`\`\`
+
+\`\`\`html:index.html
+<!DOCTYPE html>...
+\`\`\`
+
+\`\`\`css:styles.css
+/* styles here */
+\`\`\`
+
+RULES:
+1. Always use the \`\`\`language:filename format for code files
+2. Create separate code blocks for each file
+3. Keep explanations brief - just describe what each file does
+4. Do NOT repeat or explain the code line by line
+5. The files will be automatically created in the editor
 
 Target Context:${targetContext}
 
-Be concise but thorough. When showing code, always include the full file or the complete modified section.`
+Respond with the code files first, then a brief summary of what was created.`
 
       // Build messages array
       const messagesForApi = [
@@ -5018,40 +5030,68 @@ Be concise but thorough. When showing code, always include the full file or the 
       }
 
       // Parse response for file changes - supports both explicit filenames and language-based code blocks
-      const fileChangeRegex = /```filename:([^\n]+)\n([\s\S]*?)```/g
+      // Format 1: ```filename:path/to/file.js
+      // Format 2: ```javascript:filename.js (language:filename)
+      const fileChangeRegex = /```(?:filename:)?([^\n:]+):([^\n]+)\n([\s\S]*?)```/g
       let match
       const newPendingChanges = { ...pendingFileChanges }
       let didChangePending = false
+      const createdFilePaths = []
       
-      // First, parse explicit filename:path code blocks
+      // Parse code blocks with filename specifiers
       while ((match = fileChangeRegex.exec(response)) !== null) {
-        const filePath = match[1].trim()
-        const fileContent = match[2]
+        const part1 = match[1].trim().toLowerCase()
+        const part2 = match[2].trim()
+        const fileContent = match[3]
+        
+        let filePath
+        // Check if part1 is a language and part2 is a filename
+        if (codeLangToExt[part1] || ['js', 'ts', 'jsx', 'tsx', 'py', 'html', 'css', 'json', 'md'].includes(part1)) {
+          // Format: ```javascript:filename.js
+          filePath = part2
+        } else if (part1 === 'filename') {
+          // Format: ```filename:path/to/file.js
+          filePath = part2
+        } else {
+          // Assume part1:part2 is a path like src:app.js
+          filePath = `${part1}/${part2}`
+        }
+        
         newPendingChanges[filePath] = {
           content: fileContent,
           action: 'update'
         }
+        createdFilePaths.push(filePath)
         didChangePending = true
       }
       
-      // For local projects: Also parse standard code blocks and create discrete files
+      // For local projects: Create files from parsed code blocks
       if (codeEditorMode === 'local' && activeLocalProject) {
         const projectData = localProjectFiles[activeLocalProject.id] || { files: [], fileContents: {}, expandedFolders: {} }
         const existingFiles = projectData.files || []
         const existingContents = projectData.fileContents || {}
         
-        // Parse standard code blocks with language specifiers
-        const codeBlockRegex = /```(\w+)?\n([\s\S]*?)```/g
-        let codeMatch
         const generatedFiles = {}
         const fileTypeCounters = {}
         
-        while ((codeMatch = codeBlockRegex.exec(response)) !== null) {
+        // First, add files from the filename: pattern matches
+        createdFilePaths.forEach(filePath => {
+          if (newPendingChanges[filePath]) {
+            generatedFiles[filePath] = newPendingChanges[filePath].content
+          }
+        })
+        
+        // Also parse standard code blocks without filename markers
+        const standardBlockRegex = /```(\w+)\n([\s\S]*?)```/g
+        let codeMatch
+        
+        while ((codeMatch = standardBlockRegex.exec(response)) !== null) {
+          const fullMatch = codeMatch[0]
           const lang = (codeMatch[1] || '').toLowerCase()
           const code = codeMatch[2].trim()
           
-          // Skip if this was already matched by filename: pattern
-          if (response.substring(codeMatch.index - 10, codeMatch.index).includes('filename:')) {
+          // Skip if this block has a filename marker (already processed)
+          if (fullMatch.includes(':') && !fullMatch.startsWith('```' + lang + '\n')) {
             continue
           }
           
@@ -5059,6 +5099,10 @@ Be concise but thorough. When showing code, always include the full file or the 
           
           const ext = codeLangToExt[lang]
           if (!ext) continue
+          
+          // Check if already have this file from filename: parsing
+          const alreadyHasFile = Object.keys(generatedFiles).some(p => p.endsWith('.' + ext))
+          if (alreadyHasFile) continue
           
           // Find existing file with matching extension or create new one
           const existingFile = existingFiles.find(f => 
@@ -5192,7 +5236,57 @@ Be concise but thorough. When showing code, always include the full file or the 
         setPendingFileChanges(newPendingChanges)
       }
 
-      setCodeMessages(prev => [...prev, { role: 'assistant', content: response }])
+      // Extract explanation text (remove code blocks) for chat display
+      let explanationText = response
+      const createdFiles = []
+      
+      // For local projects, track created files
+      if (codeEditorMode === 'local' && activeLocalProject) {
+        // Parse code blocks to get file names
+        const filenameTagRegex = /```\w*:([^\n]+)\n[\s\S]*?```/g
+        let match
+        while ((match = filenameTagRegex.exec(response)) !== null) {
+          createdFiles.push(match[1].trim())
+        }
+        // Also check standard code blocks
+        const standardBlockRegex = /```(\w+)?\n[\s\S]*?```/g
+        let blockMatch
+        while ((blockMatch = standardBlockRegex.exec(response)) !== null) {
+          const lang = (blockMatch[1] || '').toLowerCase()
+          if (lang && codeExtToDefaultName[codeLangToExt[lang]]) {
+            const ext = codeLangToExt[lang]
+            if (!createdFiles.some(f => f.endsWith(`.${ext}`))) {
+              createdFiles.push(codeExtToDefaultName[ext] || `file.${ext}`)
+            }
+          }
+        }
+      }
+      
+      // For GitHub, track pending files
+      if (codeEditorMode === 'github' && selectedRepo) {
+        Object.keys(newPendingChanges).forEach(path => {
+          if (!createdFiles.includes(path)) {
+            createdFiles.push(path)
+          }
+        })
+      }
+      
+      // Remove code blocks from explanation text
+      explanationText = response.replace(/```[\s\S]*?```/g, '').trim()
+      
+      // If no explanation left, create a summary
+      if (!explanationText || explanationText.length < 20) {
+        if (createdFiles.length > 0) {
+          explanationText = `I've created/updated the following files:\n${createdFiles.map(f => `• ${f}`).join('\n')}\n\nYou can view and edit them in the code editor.`
+        } else {
+          explanationText = 'Done! Check the code editor for the generated files.'
+        }
+      } else if (createdFiles.length > 0) {
+        // Add file summary to explanation
+        explanationText += `\n\n**Files created/updated:**\n${createdFiles.map(f => `• ${f}`).join('\n')}`
+      }
+
+      setCodeMessages(prev => [...prev, { role: 'assistant', content: explanationText, files: createdFiles }])
     } catch (err) {
       showToast(`Error: ${err.message}`)
       setCodeMessages(prev => [...prev, { 
