@@ -5169,6 +5169,43 @@ Respond with the code files first, then a brief summary of what was created.`
         response = await sendMessageToAgent(userMessage, [], systemPrompt, undefined)
       }
 
+      // If the agent returned only a summary with no code blocks, retry once with strict output
+      const hasCodeBlocks = /```/.test(response || '')
+      const mentionsFiles = /(files created|files updated|created .*files|updated .*files|files:)/i.test(response || '')
+      if (!hasCodeBlocks && mentionsFiles) {
+        const strictSystemPrompt = `${systemPrompt}\n\nIMPORTANT: Return ONLY code blocks for files. No explanations or summaries.`
+        if (selectedAgent?.provider === 'openrouter') {
+          const strictMessages = [
+            { role: 'system', content: strictSystemPrompt },
+            ...codeMessages.slice(-6),
+            { role: 'user', content: userMessage }
+          ]
+          const strictResp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openRouterApiKey.trim()}`,
+              'HTTP-Referer': window.location.origin,
+            },
+            body: JSON.stringify({
+              model: selectedAgent.model || 'openai/gpt-4o',
+              messages: strictMessages,
+              max_tokens: 4096,
+              temperature: Number(selectedAgent.temperature ?? 0.7),
+            })
+          })
+          const strictText = await strictResp.text()
+          if (strictResp.ok) {
+            try {
+              const strictData = JSON.parse(strictText)
+              response = strictData?.choices?.[0]?.message?.content || response
+            } catch {}
+          }
+        } else {
+          response = await sendMessageToAgent(userMessage, [], strictSystemPrompt, undefined)
+        }
+      }
+
       // Parse response for file changes - supports multiple formats
       const newPendingChanges = { ...pendingFileChanges }
       let didChangePending = false
@@ -5233,6 +5270,10 @@ Respond with the code files first, then a brief summary of what was created.`
           newPendingChanges[filePath] = { content, action: 'update' }
           didChangePending = true
         }
+      }
+
+      if (Object.keys(generatedFiles).length === 0) {
+        showToast('No code blocks returned. Ask for code changes or try again.')
       }
       
       // For local projects: Create files in the project
