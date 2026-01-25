@@ -11195,6 +11195,24 @@ else console.log('Deleted successfully')`
                             </svg>
                           </button>
                           <button 
+                            className="coder-file-action-btn"
+                            onClick={() => {
+                              if (!selectedRepo) {
+                                showToast('Select a repository to preview')
+                                return
+                              }
+                              openPreviewModal()
+                            }}
+                            title="Preview"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M15 3h6v6"/>
+                              <path d="M9 21H3v-6"/>
+                              <path d="M21 3l-7 7"/>
+                              <path d="M3 21l7-7"/>
+                            </svg>
+                          </button>
+                          <button 
                             className="coder-file-action-btn danger"
                             onClick={() => {
                               setDeleteRepoError('')
@@ -12208,6 +12226,25 @@ else console.log('Deleted successfully')`
                               <polyline points="14 2 14 8 20 8"/>
                               <line x1="12" y1="18" x2="12" y2="12"/>
                               <line x1="9" y1="15" x2="15" y2="15"/>
+                            </svg>
+                          </button>
+                          <button
+                            className="code-files-action-btn"
+                            type="button"
+                            onClick={() => {
+                              if (!selectedRepo) {
+                                showToast('Select a repository to preview')
+                                return
+                              }
+                              openPreviewModal()
+                            }}
+                            title="Preview"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M15 3h6v6"/>
+                              <path d="M9 21H3v-6"/>
+                              <path d="M21 3l-7 7"/>
+                              <path d="M3 21l7-7"/>
                             </svg>
                           </button>
                           <button
