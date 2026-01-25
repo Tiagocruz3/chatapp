@@ -2716,37 +2716,48 @@ Respond ONLY with valid JSON, no other text.`
       const n8n = []
       const or = []
       const lm = []
+      let legacySelectedId = profileRow?.settings?.selected_agent_id || null
+      let legacyMatch = null
       ;(data || []).forEach((row) => {
         const config = row.config && typeof row.config === 'object' ? row.config : {}
         if (row.provider === 'n8n') {
-          n8n.push({
+          const agent = {
             id: row.agent_id,
+            legacyId: config.legacy_id || null,
             name: row.name,
             description: config.description || 'No description',
             tags: Array.isArray(config.tags) ? config.tags : [],
             webhookUrl: config.webhookUrl || '',
             systemPrompt: config.systemPrompt || ''
-          })
+          }
+          n8n.push(agent)
+          if (!legacyMatch && legacySelectedId && agent.legacyId === legacySelectedId) legacyMatch = agent
         } else if (row.provider === 'openrouter') {
-          or.push({
+          const agent = {
             id: row.agent_id,
             provider: 'openrouter',
+            legacyId: config.legacy_id || null,
             name: row.name,
             model: row.model || '',
             systemPrompt: config.systemPrompt || 'You are a helpful assistant.',
             temperature: Number(config.temperature ?? 0.7),
-          })
+          }
+          or.push(agent)
+          if (!legacyMatch && legacySelectedId && agent.legacyId === legacySelectedId) legacyMatch = agent
         } else if (row.provider === 'lmstudio') {
-          lm.push({
+          const agent = {
             id: row.agent_id,
             provider: 'lmstudio',
+            legacyId: config.legacy_id || null,
             name: row.name,
             model: row.model || '',
             baseUrl: config.baseUrl || '',
             apiKey: config.apiKey || '',
             systemPrompt: config.systemPrompt || 'You are a helpful assistant.',
             temperature: Number(config.temperature ?? 0.7),
-          })
+          }
+          lm.push(agent)
+          if (!legacyMatch && legacySelectedId && agent.legacyId === legacySelectedId) legacyMatch = agent
         }
       })
 
@@ -2776,6 +2787,17 @@ Respond ONLY with valid JSON, no other text.`
       setAgents(n8n)
       setOpenRouterAgents(or)
       setLmStudioAgents(lm)
+      if (legacyMatch) {
+        setSelectedAgent(legacyMatch)
+        const nextSettings = {
+          ...(profileRow?.settings && typeof profileRow.settings === 'object' ? profileRow.settings : {}),
+          selected_agent_id: legacyMatch.id
+        }
+        await supabase
+          .from('profiles')
+          .update({ settings: nextSettings })
+          .eq('user_id', authUser.id)
+      }
       agentsLoadedRef.current = true
     } catch (e) {
       console.error('Failed to load agents:', e)
@@ -2785,10 +2807,12 @@ Respond ONLY with valid JSON, no other text.`
 
   const syncAgentsToDb = async (n8nAgents, openRouterList, lmStudioList) => {
     if (!dbEnabled || !authUser?.id) return
+    const isUuid = (val) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(val || '')
     const rows = []
     ;(n8nAgents || []).forEach((a) => {
+      const legacyId = a.id && !isUuid(a.id) ? a.id : null
       rows.push({
-        agent_id: a.id || crypto.randomUUID(),
+        agent_id: isUuid(a.id) ? a.id : crypto.randomUUID(),
         owner_user_id: authUser.id,
         provider: 'n8n',
         name: a.name || 'Agent',
@@ -2797,26 +2821,30 @@ Respond ONLY with valid JSON, no other text.`
           description: a.description || '',
           tags: Array.isArray(a.tags) ? a.tags : [],
           webhookUrl: a.webhookUrl || '',
-          systemPrompt: a.systemPrompt || ''
+          systemPrompt: a.systemPrompt || '',
+          legacy_id: legacyId
         }
       })
     })
     ;(openRouterList || []).forEach((a) => {
+      const legacyId = a.id && !isUuid(a.id) ? a.id : null
       rows.push({
-        agent_id: a.id || crypto.randomUUID(),
+        agent_id: isUuid(a.id) ? a.id : crypto.randomUUID(),
         owner_user_id: authUser.id,
         provider: 'openrouter',
         name: a.name || 'OpenRouter Agent',
         model: a.model || '',
         config: {
           systemPrompt: a.systemPrompt || '',
-          temperature: Number(a.temperature ?? 0.7)
+          temperature: Number(a.temperature ?? 0.7),
+          legacy_id: legacyId
         }
       })
     })
     ;(lmStudioList || []).forEach((a) => {
+      const legacyId = a.id && !isUuid(a.id) ? a.id : null
       rows.push({
-        agent_id: a.id || crypto.randomUUID(),
+        agent_id: isUuid(a.id) ? a.id : crypto.randomUUID(),
         owner_user_id: authUser.id,
         provider: 'lmstudio',
         name: a.name || 'LM Studio Agent',
@@ -2825,7 +2853,8 @@ Respond ONLY with valid JSON, no other text.`
           baseUrl: a.baseUrl || '',
           apiKey: a.apiKey || '',
           systemPrompt: a.systemPrompt || '',
-          temperature: Number(a.temperature ?? 0.7)
+          temperature: Number(a.temperature ?? 0.7),
+          legacy_id: legacyId
         }
       })
     })
@@ -3056,9 +3085,9 @@ Respond ONLY with valid JSON, no other text.`
 
   useEffect(() => {
     if (!dbEnabled || !profileRow?.settings) return
+    if (selectedAgent?.id) return
     const selectedId = profileRow.settings.selected_agent_id
     if (!selectedId) return
-    if (selectedAgent?.id === selectedId) return
     const match = allAgents.find(a => a.id === selectedId)
     if (match) setSelectedAgent(match)
   }, [dbEnabled, profileRow?.settings, allAgents, selectedAgent?.id])
@@ -4266,7 +4295,8 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     }
 
     const agent = {
-      id: `agent-${Date.now()}`,
+      id: crypto.randomUUID(),
+      provider: 'n8n',
       name: newAgent.name.trim(),
       description: newAgent.description.trim() || 'No description',
       tags: newAgent.tags ? newAgent.tags.split(',').map(t => t.trim()).filter(t => t) : [],
@@ -4339,7 +4369,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     const modelId = newOpenRouterAgent.model.trim()
 
     const agent = {
-      id: `or-${crypto.randomUUID()}`,
+      id: crypto.randomUUID(),
       provider: 'openrouter',
       name: newOpenRouterAgent.name.trim(),
       model: modelId,
@@ -4625,7 +4655,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     const friendly = model?.name || modelId
     const name = (newLmStudioAgent?.name || '').trim() || `LM Studio • ${friendly}`
     const agent = {
-      id: `lmstudio_${crypto.randomUUID()}`,
+      id: crypto.randomUUID(),
       name,
       model: modelId,
       baseUrl: base,
