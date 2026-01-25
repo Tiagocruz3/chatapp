@@ -6573,8 +6573,8 @@ Respond with the code files first, then a brief summary of what was created.`
   useEffect(() => {
     const handleClick = () => setShowCoderAgentSelector(false)
     if (showCoderAgentSelector) {
-      document.addEventListener('click', handleClick)
-      return () => document.removeEventListener('click', handleClick)
+      document.addEventListener('mousedown', handleClick)
+      return () => document.removeEventListener('mousedown', handleClick)
     }
   }, [showCoderAgentSelector])
 
