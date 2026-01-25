@@ -5593,6 +5593,13 @@ Respond with the code files first, then a brief summary of what was created.`
                 ...(sha && { sha })
               })
             })
+
+            // Update current view immediately if this file is open/selected
+            if (selectedFile?.path === filePath) {
+              setFileContent(change.content)
+              setSelectedFile((prev) => prev ? { ...prev, decodedContent: change.content } : prev)
+            }
+            setGithubTabContents((prev) => ({ ...prev, [filePath]: change.content }))
           } catch (e) {
             console.error(`Failed to create/update ${filePath}:`, e)
             failedPaths.push(filePath)
@@ -6430,6 +6437,10 @@ Respond with the code files first, then a brief summary of what was created.`
   const openPreviewModal = async () => {
     let previewHtml = ''
 
+    // Open modal immediately so first click always shows it
+    setPreviewContent('')
+    setShowPreviewModal(true)
+
     if (codeEditorMode === 'local') {
       if (!activeLocalProject) return
       const projectData = localProjectFiles[activeLocalProject.id]
@@ -6485,7 +6496,10 @@ Respond with the code files first, then a brief summary of what was created.`
       }
     }
 
-    if (!previewHtml) return
+    if (!previewHtml) {
+      showToast('No preview content available')
+      return
+    }
 
     const consoleCapture = `
       <script>
@@ -6516,7 +6530,6 @@ Respond with the code files first, then a brief summary of what was created.`
 
     setPreviewContent(previewHtml)
     setShowPreviewPanel(false)
-    setShowPreviewModal(true)
     setConsoleOutput([{ level: 'info', message: 'Preview started...' }])
   }
 
