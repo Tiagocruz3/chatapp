@@ -1384,6 +1384,9 @@ function App() {
   const [selectedFile, setSelectedFile] = useState(null) // Currently selected file
   const [fileContent, setFileContent] = useState('') // Content of selected file
   const [fileContentLoading, setFileContentLoading] = useState(false)
+  const [githubOpenTabs, setGithubOpenTabs] = useState([]) // Array of { id, path, name, file }
+  const [githubActiveTabId, setGithubActiveTabId] = useState(null)
+  const [githubTabContents, setGithubTabContents] = useState({}) // path -> content
   const [codeInput, setCodeInput] = useState('') // Chat input for code page
   const [codeMessages, setCodeMessages] = useState([]) // Chat history for code page
   const [codeGenerating, setCodeGenerating] = useState(false)
@@ -1414,6 +1417,7 @@ function App() {
   const [showRenameModal, setShowRenameModal] = useState(false)
   const [renameValue, setRenameValue] = useState('')
   const [showPreviewPanel, setShowPreviewPanel] = useState(false)
+  const [showPreviewModal, setShowPreviewModal] = useState(false)
   const [previewContent, setPreviewContent] = useState('')
   const [consoleOutput, setConsoleOutput] = useState([])
   const [showConsole, setShowConsole] = useState(false)
@@ -1424,7 +1428,9 @@ function App() {
   const [newLocalProjectType, setNewLocalProjectType] = useState('html') // 'html' | 'react' | 'node' | 'python' | 'blank'
   const editorRef = useRef(null)
   const editorLineNumbersRef = useRef(null)
+  const editorHighlightRef = useRef(null)
   const githubEditorLineNumbersRef = useRef(null)
+  const githubEditorHighlightRef = useRef(null)
   const previewIframeRef = useRef(null)
 
   // GitHub file editing
@@ -2979,6 +2985,45 @@ Respond ONLY with valid JSON, no other text.`
     return highlighted
   }, [activeCanvasCode, canvasActiveTab])
 
+  const getLanguageFromFilename = (filename) => {
+    const ext = filename?.split('.').pop()?.toLowerCase()
+    const map = {
+      js: 'javascript', jsx: 'javascript',
+      ts: 'typescript', tsx: 'typescript',
+      html: 'html', htm: 'html',
+      css: 'css', scss: 'scss', sass: 'scss',
+      json: 'json', md: 'markdown', py: 'python',
+      sh: 'bash', yaml: 'yaml', yml: 'yaml'
+    }
+    return map[ext] || ext || 'text'
+  }
+
+  const activeLocalTab = useMemo(
+    () => openTabs.find(t => t.id === activeTabId) || null,
+    [openTabs, activeTabId]
+  )
+  const activeLocalLang = useMemo(
+    () => getLanguageFromFilename(activeLocalTab?.name),
+    [activeLocalTab]
+  )
+  const highlightedEditorHtml = useMemo(() => {
+    const escaped = escapeHtmlText(editorContent || '')
+    return highlightCode(escaped, activeLocalLang)
+  }, [editorContent, activeLocalLang])
+
+  const activeGithubTab = useMemo(
+    () => githubOpenTabs.find(t => t.id === githubActiveTabId) || null,
+    [githubOpenTabs, githubActiveTabId]
+  )
+  const activeGithubLang = useMemo(
+    () => getLanguageFromFilename(activeGithubTab?.name || selectedFile?.name),
+    [activeGithubTab, selectedFile]
+  )
+  const highlightedGithubEditHtml = useMemo(() => {
+    const escaped = escapeHtmlText(githubEditContent || '')
+    return highlightCode(escaped, activeGithubLang)
+  }, [githubEditContent, activeGithubLang])
+
   const syncCanvasScroll = () => {
     const ta = canvasEditorRef.current
     const pre = canvasHighlightRef.current
@@ -4506,6 +4551,9 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     setRepoFiles([])
     setSelectedFile(null)
     setFileContent('')
+    setGithubOpenTabs([])
+    setGithubActiveTabId(null)
+    setGithubTabContents({})
     setRepoBranches([])
     setRepoBranch('main')
     setExpandedFolders({})
@@ -4519,6 +4567,9 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     setRepoFiles([])
     setSelectedFile(null)
     setFileContent('')
+    setGithubOpenTabs([])
+    setGithubActiveTabId(null)
+    setGithubTabContents({})
     setRepoBranches([])
     setRepoBranch('main')
     setExpandedFolders({})
@@ -4583,12 +4634,14 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
         const content = atob(file.content)
         setFileContent(content)
         setSelectedFile({ ...file, decodedContent: content })
+        return content
       }
     } catch (err) {
       showToast(`Failed to load file: ${err.message}`)
     } finally {
       setFileContentLoading(false)
     }
+    return ''
   }
 
   const createOrUpdateFile = async (owner, repo, path, content, message, sha = null) => {
@@ -4664,6 +4717,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
         setFileContent(githubEditContent)
         setGithubFileEditing(false)
         setGithubEditContent('')
+        setGithubTabContents(prev => ({ ...prev, [selectedFile.path]: githubEditContent }))
         // Reload file to get new SHA
         await loadFileContent(selectedRepo.owner.login, selectedRepo.name, selectedFile.path)
       }
@@ -4722,8 +4776,12 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       )
 
       if (success) {
-        setSelectedFile(null)
-        setFileContent('')
+        if (selectedFile?.path) {
+          closeGithubTab(selectedFile.path)
+        } else {
+          setSelectedFile(null)
+          setFileContent('')
+        }
         setGithubFileEditing(false)
         // Reload files
         await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
@@ -4737,6 +4795,9 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     setSelectedRepo(repo)
     setSelectedFile(null)
     setFileContent('')
+    setGithubOpenTabs([])
+    setGithubActiveTabId(null)
+    setGithubTabContents({})
     setExpandedFolders({})
     setPendingFileChanges({})
     setCodeEditorMode('github') // Auto-switch to GitHub mode when repo selected
@@ -5427,6 +5488,62 @@ Respond with the code files first, then a brief summary of what was created.`
     setEditorContent(projectData?.fileContents?.[file.path] || '')
   }
 
+  // Open a GitHub file in a new tab
+  const openGithubTab = async (file) => {
+    if (!selectedRepo || !file || file.type !== 'file') return
+    const tabId = file.path
+
+    const existingTab = githubOpenTabs.find(t => t.id === tabId)
+    if (!existingTab) {
+      setGithubOpenTabs(prev => [...prev, { id: tabId, path: file.path, name: file.name, file }])
+    }
+    setGithubActiveTabId(tabId)
+    setGithubFileEditing(false)
+    setGithubEditContent('')
+    const content = await loadFileContent(selectedRepo.owner.login, selectedRepo.name, file.path)
+    setGithubTabContents(prev => ({ ...prev, [file.path]: content }))
+  }
+
+  const switchGithubTab = async (tab) => {
+    if (!selectedRepo || !tab) return
+    setGithubActiveTabId(tab.id)
+    setGithubFileEditing(false)
+    setGithubEditContent('')
+    setSelectedFile(tab.file || { path: tab.path, name: tab.name })
+
+    const cached = githubTabContents[tab.path]
+    if (cached != null) {
+      setFileContent(cached)
+      return
+    }
+    const content = await loadFileContent(selectedRepo.owner.login, selectedRepo.name, tab.path)
+    setGithubTabContents(prev => ({ ...prev, [tab.path]: content }))
+  }
+
+  const closeGithubTab = (tabId) => {
+    setGithubOpenTabs(prev => prev.filter(t => t.id !== tabId))
+    setGithubTabContents(prev => {
+      const next = { ...prev }
+      delete next[tabId]
+      return next
+    })
+
+    if (githubActiveTabId === tabId) {
+      const remaining = githubOpenTabs.filter(t => t.id !== tabId)
+      if (remaining.length > 0) {
+        const nextTab = remaining[remaining.length - 1]
+        setGithubActiveTabId(nextTab.id)
+        setSelectedFile(nextTab.file || { path: nextTab.path, name: nextTab.name })
+        const cached = githubTabContents[nextTab.path]
+        setFileContent(cached || '')
+      } else {
+        setGithubActiveTabId(null)
+        setSelectedFile(null)
+        setFileContent('')
+      }
+    }
+  }
+
   // Get or create a project for a chat conversation (for AI-generated code files)
   const getOrCreateChatProject = (conversationId, conversationTitle) => {
     const projectId = `chat-${conversationId}`
@@ -5961,6 +6078,99 @@ Respond with the code files first, then a brief summary of what was created.`
 
     setPreviewContent(previewHtml)
     setShowPreviewPanel(true)
+    setConsoleOutput([{ level: 'info', message: 'Preview started...' }])
+  }
+
+  const openPreviewModal = async () => {
+    let previewHtml = ''
+
+    if (codeEditorMode === 'local') {
+      if (!activeLocalProject) return
+      const projectData = localProjectFiles[activeLocalProject.id]
+      if (!projectData) return
+
+      const htmlContent = projectData.fileContents['index.html'] || ''
+      const cssContent = projectData.fileContents['styles.css'] || projectData.fileContents['style.css'] || ''
+      const jsContent = projectData.fileContents['script.js'] || projectData.fileContents['main.js'] || ''
+
+      previewHtml = htmlContent
+      if (cssContent && !htmlContent.includes('<link') && !htmlContent.includes('<style>')) {
+        previewHtml = previewHtml.replace('</head>', `<style>${cssContent}</style></head>`)
+      } else if (cssContent) {
+        previewHtml = previewHtml.replace(/<link[^>]*href=["']styles?\.css["'][^>]*>/gi, `<style>${cssContent}</style>`)
+      }
+      if (jsContent && !htmlContent.includes('<script src')) {
+        previewHtml = previewHtml.replace('</body>', `<script>${jsContent}</script></body>`)
+      } else if (jsContent) {
+        previewHtml = previewHtml.replace(/<script[^>]*src=["'](script|main)\.js["'][^>]*><\/script>/gi, `<script>${jsContent}</script>`)
+      }
+    } else if (codeEditorMode === 'github' && selectedRepo) {
+      const owner = selectedRepo.owner.login
+      const repo = selectedRepo.name
+
+      const getRepoFileContent = async (path) => {
+        if (pendingFileChanges[path]?.content) return pendingFileChanges[path].content
+        try {
+          const file = await githubApi(`/repos/${owner}/${repo}/contents/${path}?ref=${repoBranch}`)
+          return file.content ? atob(file.content) : ''
+        } catch {
+          return ''
+        }
+      }
+
+      const htmlContent = await getRepoFileContent('index.html')
+      const cssContent = await getRepoFileContent('styles.css') || await getRepoFileContent('style.css')
+      const jsContent = await getRepoFileContent('script.js') || await getRepoFileContent('main.js')
+      if (!htmlContent) {
+        showToast('No index.html found for preview')
+        return
+      }
+
+      previewHtml = htmlContent
+      if (cssContent && !htmlContent.includes('<link') && !htmlContent.includes('<style>')) {
+        previewHtml = previewHtml.replace('</head>', `<style>${cssContent}</style></head>`)
+      } else if (cssContent) {
+        previewHtml = previewHtml.replace(/<link[^>]*href=["']styles?\.css["'][^>]*>/gi, `<style>${cssContent}</style>`)
+      }
+      if (jsContent && !htmlContent.includes('<script src')) {
+        previewHtml = previewHtml.replace('</body>', `<script>${jsContent}</script></body>`)
+      } else if (jsContent) {
+        previewHtml = previewHtml.replace(/<script[^>]*src=["'](script|main)\.js["'][^>]*><\/script>/gi, `<script>${jsContent}</script>`)
+      }
+    }
+
+    if (!previewHtml) return
+
+    const consoleCapture = `
+      <script>
+        (function() {
+          const originalLog = console.log;
+          const originalError = console.error;
+          const originalWarn = console.warn;
+
+          function sendToParent(type, args) {
+            window.parent.postMessage({
+              type: 'console',
+              level: type,
+              message: Array.from(args).map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')
+            }, '*');
+          }
+
+          console.log = function() { sendToParent('log', arguments); originalLog.apply(console, arguments); };
+          console.error = function() { sendToParent('error', arguments); originalError.apply(console, arguments); };
+          console.warn = function() { sendToParent('warn', arguments); originalWarn.apply(console, arguments); };
+
+          window.onerror = function(msg, url, line) {
+            sendToParent('error', ['Error: ' + msg + ' (line ' + line + ')']);
+          };
+        })();
+      </script>
+    `
+    previewHtml = previewHtml.replace('<head>', '<head>' + consoleCapture)
+
+    setPreviewContent(previewHtml)
+    setShowPreviewPanel(false)
+    setShowPreviewModal(true)
     setConsoleOutput([{ level: 'info', message: 'Preview started...' }])
   }
 
@@ -11954,7 +12164,7 @@ else console.log('Deleted successfully')`
                             onToggleFolder={toggleFolder}
                             onSelectFile={(file) => {
                               if (file.type === 'file') {
-                                loadFileContent(selectedRepo.owner.login, selectedRepo.name, file.path)
+                                openGithubTab(file)
                               }
                             }}
                             pendingChanges={pendingFileChanges}
@@ -12370,7 +12580,35 @@ else console.log('Deleted successfully')`
                         </svg>
                         Run
                       </button>
+                      <button
+                        className="code-toolbar-btn"
+                        onClick={openPreviewModal}
+                        title="Fullscreen Preview"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M15 3h6v6"/>
+                          <path d="M9 21H3v-6"/>
+                          <path d="M21 3l-7 7"/>
+                          <path d="M3 21l7-7"/>
+                        </svg>
+                        Fullscreen
+                      </button>
                     </>
+                  )}
+                  {codeEditorMode === 'github' && selectedRepo && (
+                    <button
+                      className="code-toolbar-btn"
+                      onClick={openPreviewModal}
+                      title="Fullscreen Preview"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M15 3h6v6"/>
+                        <path d="M9 21H3v-6"/>
+                        <path d="M21 3l-7 7"/>
+                        <path d="M3 21l7-7"/>
+                      </svg>
+                      Preview
+                    </button>
                   )}
                 </div>
                 <div className="code-toolbar-right">
@@ -12510,6 +12748,32 @@ else console.log('Deleted successfully')`
                   ))}
                 </div>
               )}
+              {codeEditorMode === 'github' && githubOpenTabs.length > 0 && (
+                <div className="code-tabs-bar">
+                  {githubOpenTabs.map(tab => (
+                    <div
+                      key={tab.id}
+                      className={`code-tab ${githubActiveTabId === tab.id ? 'active' : ''}`}
+                      onClick={() => switchGithubTab(tab)}
+                    >
+                      <span className="code-tab-name">{tab.name}</span>
+                      <button
+                        className="code-tab-close"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          closeGithubTab(tab.id)
+                        }}
+                        title="Close"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="18" y1="6" x2="6" y2="18"/>
+                          <line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Editor + Preview Container */}
               <div className="code-editor-preview-container">
@@ -12524,6 +12788,9 @@ else console.log('Deleted successfully')`
                             <div key={i} className="line-number">{i + 1}</div>
                           ))}
                         </div>
+                        <pre className="code-editor-highlight" ref={editorHighlightRef}>
+                          <code dangerouslySetInnerHTML={{ __html: highlightedEditorHtml || '&nbsp;' }} />
+                        </pre>
                         <textarea
                           ref={editorRef}
                           className="code-editor-textarea"
@@ -12532,6 +12799,10 @@ else console.log('Deleted successfully')`
                           onScroll={(e) => {
                             if (editorLineNumbersRef.current) {
                               editorLineNumbersRef.current.scrollTop = e.target.scrollTop
+                            }
+                            if (editorHighlightRef.current) {
+                              editorHighlightRef.current.scrollTop = e.target.scrollTop
+                              editorHighlightRef.current.scrollLeft = e.target.scrollLeft
                             }
                           }}
                           spellCheck="false"
@@ -12631,6 +12902,9 @@ else console.log('Deleted successfully')`
                                   <div key={i} className="line-number">{i + 1}</div>
                                 ))}
                               </div>
+                              <pre className="code-editor-highlight" ref={githubEditorHighlightRef}>
+                                <code dangerouslySetInnerHTML={{ __html: highlightedGithubEditHtml || '&nbsp;' }} />
+                              </pre>
                               <textarea
                                 className="code-editor-textarea"
                                 value={githubEditContent}
@@ -12638,6 +12912,10 @@ else console.log('Deleted successfully')`
                                 onScroll={(e) => {
                                   if (githubEditorLineNumbersRef.current) {
                                     githubEditorLineNumbersRef.current.scrollTop = e.target.scrollTop
+                                  }
+                                  if (githubEditorHighlightRef.current) {
+                                    githubEditorHighlightRef.current.scrollTop = e.target.scrollTop
+                                    githubEditorHighlightRef.current.scrollLeft = e.target.scrollLeft
                                   }
                                 }}
                                 spellCheck="false"
@@ -13596,6 +13874,51 @@ else console.log('Deleted successfully')`
               ref={canvasIframeRef}
               title="Code Preview"
               sandbox="allow-scripts allow-same-origin"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Code Editor Preview Modal - Full Screen */}
+      {showPreviewModal && (
+        <div className="preview-modal-overlay">
+          <div className="preview-modal">
+            <div className="preview-modal-header">
+              <div className="preview-modal-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <span>Preview</span>
+                <span className="preview-modal-lang">app</span>
+              </div>
+              <div className="preview-modal-actions">
+                <button
+                  className="preview-modal-refresh"
+                  onClick={openPreviewModal}
+                  title="Refresh Preview"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M23 4v6h-6"/>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                  </svg>
+                </button>
+                <button
+                  className="preview-modal-close"
+                  onClick={() => setShowPreviewModal(false)}
+                  title="Close Preview"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <iframe
+              ref={previewIframeRef}
+              title="Preview"
+              srcDoc={previewContent}
+              sandbox="allow-scripts allow-modals"
             />
           </div>
         </div>

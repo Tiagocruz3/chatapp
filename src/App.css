@@ -11517,6 +11517,7 @@ button,
   overflow: auto;
   background: #0d1117;
   min-height: 0;
+  position: relative;
 }
 
 .code-editor-line-numbers {
@@ -11545,8 +11546,11 @@ button,
   flex: 1;
   padding: 16px;
   border: none;
-  background: #0d1117;
-  color: #c9d1d9;
+  background: transparent;
+  color: transparent;
+  caret-color: #c9d1d9;
+  position: relative;
+  z-index: 2;
   font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
   font-size: 13px;
   line-height: 1.6;
@@ -11560,8 +11564,36 @@ button,
   tab-size: 2;
 }
 
+.code-editor-highlight {
+  position: absolute;
+  top: 0;
+  left: 40px;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  pointer-events: none;
+  z-index: 1;
+  font-family: 'SF Mono', 'Fira Code', Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre;
+  color: #c9d1d9;
+}
+
+.code-editor-highlight code {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
 .code-editor-textarea::placeholder {
   color: #484f58;
+}
+
+.code-editor-textarea::selection {
+  background: rgba(139, 92, 246, 0.25);
 }
 
 /* Preview Panel */
