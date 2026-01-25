@@ -1559,6 +1559,8 @@ function App() {
   const [searchUrl, setSearchUrl] = useState(() => {
     return localStorage.getItem('searchUrl') || 'https://search.brainstormnodes.org/'
   })
+  const [searchConnection, setSearchConnection] = useState({ state: 'idle', message: '' })
+  const [checkingSearch, setCheckingSearch] = useState(false)
 
   // Settings tabs
   const [settingsTab, setSettingsTab] = useState(() => {
@@ -3059,6 +3061,31 @@ Respond ONLY with valid JSON, no other text.`
     // Ensure it ends with /v1 for OpenAI-compatible servers (LM Studio, etc.)
     if (/\/v1\/?$/.test(v)) return v.replace(/\/+$/, '')
     return v.replace(/\/+$/, '') + '/v1'
+  }
+
+  const normalizeSearchBaseUrl = (raw) => {
+    const v = String(raw || '').trim()
+    if (!v) return ''
+    try {
+      const url = new URL(v)
+      url.hash = ''
+      url.search = ''
+      if (/\/search\/?$/.test(url.pathname)) {
+        url.pathname = url.pathname.replace(/\/search\/?$/, '')
+      }
+      return url.toString().replace(/\/$/, '')
+    } catch {
+      return v.replace(/\/search\/?$/, '').replace(/\/+$/, '')
+    }
+  }
+
+  const buildSearchApiUrl = (rawBase, query) => {
+    const base = normalizeSearchBaseUrl(rawBase)
+    if (!base) return ''
+    const url = new URL(`${base}/search`)
+    url.searchParams.set('q', query)
+    url.searchParams.set('format', 'json')
+    return url.toString()
   }
 
   const filteredLmStudioModels = useMemo(() => {
@@ -7557,7 +7584,7 @@ else console.log('Deleted successfully')`
         // Search tool configuration
         search_enabled: !!searchUrl,
         search_url: searchUrl || null,
-        search_api: searchUrl ? `${searchUrl.endsWith('/') ? searchUrl : searchUrl + '/'}search?q=` : null
+        search_api: searchUrl ? `${normalizeSearchBaseUrl(searchUrl)}/search?q=` : null
       }
       
       console.log('Request payload:', payload)
@@ -8330,16 +8357,21 @@ else console.log('Deleted successfully')`
     return data || []
   }
 
-  // Execute web search via SearXNG (uses Vite proxy to avoid CORS)
-  const executeWebSearch = async (query) => {
+  const fetchSearchResults = async (query, { trackStatus = true } = {}) => {
     if (!searchUrl || !query.trim()) {
       return { error: 'Search not configured' }
     }
-    setTypingStatus('searching')
+    if (trackStatus) setTypingStatus('searching')
     try {
-      // Use proxy to avoid CORS issues
-      const apiUrl = `/api/search?q=${encodeURIComponent(query)}&format=json`
-      const resp = await fetch(apiUrl)
+      const directUrl = buildSearchApiUrl(searchUrl, query)
+      const useProxy = import.meta.env.DEV
+      const proxyUrl = `/api/search?q=${encodeURIComponent(query)}&format=json`
+      const apiUrl = useProxy ? proxyUrl : directUrl
+      let resp = await fetch(apiUrl)
+      if (!resp.ok && useProxy && directUrl) {
+        // Fallback to direct URL when proxy isn't available
+        resp = await fetch(directUrl)
+      }
       if (!resp.ok) throw new Error(`Search failed: ${resp.status}`)
       const data = await resp.json()
       const results = (data.results || []).slice(0, 5).map(r => ({
@@ -8347,13 +8379,52 @@ else console.log('Deleted successfully')`
         url: r.url,
         snippet: r.content || ''
       }))
-      setTypingStatus('generating') // Back to generating after search
+      if (trackStatus) setTypingStatus('generating') // Back to generating after search
       return { results }
     } catch (e) {
       console.error('Web search error:', e)
-      setTypingStatus('generating')
+      if (trackStatus) setTypingStatus('generating')
       return { error: e.message }
     }
+  }
+
+  // Execute web search via SearXNG (uses Vite proxy to avoid CORS)
+  const executeWebSearch = async (query) => {
+    return fetchSearchResults(query, { trackStatus: true })
+  }
+
+  const handleSearch = async (query) => {
+    const trimmed = (query || '').trim()
+    if (!trimmed) {
+      showToast('Enter a search query to test')
+      return
+    }
+    const result = await executeWebSearch(trimmed)
+    if (result?.error) {
+      showToast(`Search failed: ${result.error}`)
+      return
+    }
+    showToast(`Search ok: ${result.results?.length || 0} results`)
+  }
+
+  const handleSearchConnectionCheck = async () => {
+    if (!searchUrl || !searchUrl.trim()) {
+      setSearchConnection({ state: 'error', message: 'Search URL is empty' })
+      return
+    }
+    setCheckingSearch(true)
+    setSearchConnection({ state: 'checking', message: 'Checking connection...' })
+    const result = await fetchSearchResults('connectivity check', { trackStatus: false })
+    if (result?.error) {
+      setSearchConnection({ state: 'error', message: result.error })
+      setCheckingSearch(false)
+      return
+    }
+    setSearchConnection({
+      state: 'ok',
+      message: `Reachable (${result.results?.length || 0} results)`
+    })
+    setCheckingSearch(false)
   }
 
   const sendMessageToOpenRouter = async (message, extraContext = '', signal) => {
@@ -9679,6 +9750,17 @@ else console.log('Deleted successfully')`
                    placeholder="https://search.brainstormnodes.org/"
                  />
                  <div className="settings-button-row">
+                  <button 
+                    className="settings-test-btn"
+                    onClick={handleSearchConnectionCheck}
+                    disabled={checkingSearch}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                      <polyline points="22 4 12 14.01 9 11.01"/>
+                    </svg>
+                    {checkingSearch ? 'Checking...' : 'Check Connection'}
+                  </button>
                    <button 
                      className="settings-test-btn"
                      onClick={() => handleSearch('test query')}
@@ -9706,8 +9788,21 @@ else console.log('Deleted successfully')`
                  <div className="settings-help-text">
                    <strong>SearXNG Search:</strong><br/>
                    Your private, self-hosted metasearch engine. Click the search button in chat
-                   to search the web using your SearXNG instance.
+                  to search the web using your SearXNG instance.
+                  {searchUrl && (
+                    <>
+                      <br/>
+                      <span className="settings-muted">
+                        Example endpoint: {buildSearchApiUrl(searchUrl, 'hello world')}
+                      </span>
+                    </>
+                  )}
                  </div>
+                {searchConnection.state !== 'idle' && (
+                  <div className="settings-help-text">
+                    <strong>Connection status:</strong> {searchConnection.message}
+                  </div>
+                )}
                </div>
              </section>
 
