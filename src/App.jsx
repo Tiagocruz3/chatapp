@@ -4792,7 +4792,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     setDeleteFileError('')
 
     const targetPath = deleteFileTarget.path
-    const targetSha = deleteFileTarget.sha
+    let targetSha = deleteFileTarget.sha
 
     // Optimistic UI update
     setRepoFiles(prev => removeRepoFileFromTree(prev, targetPath))
@@ -4803,6 +4803,14 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     setGithubFileEditing(false)
 
     try {
+      if (!targetSha) {
+        try {
+          const fileData = await githubApi(`/repos/${selectedRepo.owner.login}/${selectedRepo.name}/contents/${targetPath}?ref=${repoBranch}`)
+          targetSha = fileData.sha
+        } catch {
+          // keep null, delete will fail and be handled below
+        }
+      }
       const success = await deleteFile(
         selectedRepo.owner.login,
         selectedRepo.name,
@@ -11259,21 +11267,14 @@ else console.log('Deleted successfully')`
                                       </button>
                                       <button
                                         className="coder-file-mini-btn danger"
-                                        onClick={async (e) => {
+                                        onClick={(e) => {
                                           e.stopPropagation()
-                                          if (confirm(`Delete ${file.name}?`)) {
-                                            try {
-                                              const fileData = await githubApi(`/repos/${selectedRepo.owner.login}/${selectedRepo.name}/contents/${file.path}?ref=${repoBranch}`)
-                                              await deleteFile(selectedRepo.owner.login, selectedRepo.name, file.path, fileData.sha, `Delete ${file.name}`)
-                                              await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
-                                              if (selectedFile?.path === file.path) {
-                                                setSelectedFile(null)
-                                                setFileContent('')
-                                              }
-                                            } catch (err) {
-                                              showToast(`Failed to delete: ${err.message}`)
-                                            }
-                                          }
+                                          setDeleteFileTarget({
+                                            path: file.path,
+                                            name: file.name
+                                          })
+                                          setDeleteFileError('')
+                                          setShowDeleteFileModal(true)
                                         }}
                                         title="Delete file"
                                       >
@@ -12687,6 +12688,29 @@ else console.log('Deleted successfully')`
                   )}
                 </div>
                 <div className="code-toolbar-right">
+                  <button
+                    className="code-toolbar-btn"
+                    onClick={() => {
+                      if (codeEditorMode === 'local' && !activeLocalProject) {
+                        showToast('Select a project to preview')
+                        return
+                      }
+                      if (codeEditorMode === 'github' && !selectedRepo) {
+                        showToast('Select a repository to preview')
+                        return
+                      }
+                      openPreviewModal()
+                    }}
+                    title="Fullscreen Preview"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M15 3h6v6"/>
+                      <path d="M9 21H3v-6"/>
+                      <path d="M21 3l-7 7"/>
+                      <path d="M3 21l7-7"/>
+                    </svg>
+                    Preview
+                  </button>
                   <button
                     className={`code-toolbar-btn ${showCodeChat ? 'active' : ''}`}
                     onClick={() => setShowCodeChat(!showCodeChat)}
