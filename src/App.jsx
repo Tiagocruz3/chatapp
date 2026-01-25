@@ -1534,6 +1534,7 @@ function App() {
   const [agents, setAgents] = useState([])
   const [selectedAgent, setSelectedAgent] = useState(null)
   const [showAgentSelector, setShowAgentSelector] = useState(false)
+  const [showCoderAgentSelector, setShowCoderAgentSelector] = useState(false)
   const [webhookError, setWebhookError] = useState('')
   const [testingWebhook, setTestingWebhook] = useState(false)
   const [showAddAgentForm, setShowAddAgentForm] = useState(false)
@@ -6006,6 +6007,15 @@ Be concise but thorough. When showing code, always include the full file or the 
       return () => document.removeEventListener('click', handleClick)
     }
   }, [moveToChatId])
+
+  // Close coder agent selector on click outside
+  useEffect(() => {
+    const handleClick = () => setShowCoderAgentSelector(false)
+    if (showCoderAgentSelector) {
+      document.addEventListener('click', handleClick)
+      return () => document.removeEventListener('click', handleClick)
+    }
+  }, [showCoderAgentSelector])
 
   // =============== END LOCAL CODE EDITOR FUNCTIONS ===============
 
@@ -11194,15 +11204,15 @@ else console.log('Deleted successfully')`
                 <div className="coder-chat-model">
                   <button 
                     className="coder-model-selector"
-                    onClick={() => setShowAgentSelector(!showAgentSelector)}
+                    onClick={() => setShowCoderAgentSelector(!showCoderAgentSelector)}
                   >
                     <span>{selectedAgent?.name || 'Select Agent'}</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                       <polyline points="6 9 12 15 18 9"/>
                     </svg>
                   </button>
-                  {showAgentSelector && (
-                    <div className="coder-model-dropdown">
+                  {showCoderAgentSelector && (
+                    <div className="coder-model-dropdown" onClick={(e) => e.stopPropagation()}>
                       {allAgents.length === 0 ? (
                         <div className="coder-model-empty">No agents configured</div>
                       ) : (
@@ -11212,7 +11222,7 @@ else console.log('Deleted successfully')`
                             className={`coder-model-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
                             onClick={() => {
                               setSelectedAgent(agent)
-                              setShowAgentSelector(false)
+                              setShowCoderAgentSelector(false)
                             }}
                           >
                             <span className="coder-model-option-name">{agent.name}</span>
@@ -11390,27 +11400,6 @@ else console.log('Deleted successfully')`
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-
-          {/* Agent Selector Dropdown */}
-          {showAgentSelector && (
-            <div className="coder-agent-dropdown">
-              {allAgents.map(agent => (
-                <button
-                  key={agent.id}
-                  className={`coder-agent-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
-                  onClick={() => {
-                    setSelectedAgent(agent)
-                    setShowAgentSelector(false)
-                  }}
-                >
-                  <span>{agent.name}</span>
-                  <span className="coder-agent-badge">
-                    {agent.provider === 'openrouter' ? 'OR' : agent.provider === 'lmstudio' ? 'LM' : 'n8n'}
-                  </span>
-                </button>
-              ))}
             </div>
           )}
 
