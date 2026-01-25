@@ -10,6 +10,7 @@ alter table public.user_memories enable row level security;
 alter table public.documents enable row level security;
 alter table public.document_chunks enable row level security;
 alter table public.generated_images enable row level security;
+alter table public.user_agents enable row level security;
 
 -- Helper: org membership check
 create or replace function public.is_org_member(p_org_id uuid)
@@ -170,6 +171,23 @@ for update using (owner_user_id = auth.uid()) with check (owner_user_id = auth.u
 
 drop policy if exists "projects_delete_owner" on public.projects;
 create policy "projects_delete_owner" on public.projects
+for delete using (owner_user_id = auth.uid());
+
+-- USER AGENTS
+drop policy if exists "user_agents_select_owner" on public.user_agents;
+create policy "user_agents_select_owner" on public.user_agents
+for select using (owner_user_id = auth.uid());
+
+drop policy if exists "user_agents_insert_owner" on public.user_agents;
+create policy "user_agents_insert_owner" on public.user_agents
+for insert with check (owner_user_id = auth.uid());
+
+drop policy if exists "user_agents_update_owner" on public.user_agents;
+create policy "user_agents_update_owner" on public.user_agents
+for update using (owner_user_id = auth.uid()) with check (owner_user_id = auth.uid());
+
+drop policy if exists "user_agents_delete_owner" on public.user_agents;
+create policy "user_agents_delete_owner" on public.user_agents
 for delete using (owner_user_id = auth.uid());
 
 -- GENERATED IMAGES

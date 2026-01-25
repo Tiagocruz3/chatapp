@@ -215,6 +215,25 @@ for each row execute function public.set_updated_at();
 
 create index if not exists idx_projects_owner on public.projects(owner_user_id, updated_at desc);
 
+-- USER AGENTS (persisted per account)
+create table if not exists public.user_agents (
+  agent_id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  provider text not null check (provider in ('n8n','openrouter','lmstudio')),
+  name text not null,
+  model text,
+  config jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_user_agents_updated_at on public.user_agents;
+create trigger trg_user_agents_updated_at
+before update on public.user_agents
+for each row execute function public.set_updated_at();
+
+create index if not exists idx_user_agents_owner on public.user_agents(owner_user_id, updated_at desc);
+
 -- GENERATED IMAGES
 create table if not exists public.generated_images (
   image_id uuid primary key default gen_random_uuid(),

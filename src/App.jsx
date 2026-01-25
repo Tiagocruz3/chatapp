@@ -1649,6 +1649,8 @@ function App() {
     systemPrompt: 'You are a helpful assistant.',
     temperature: 0.7,
   })
+  const agentsLoadedRef = useRef(false)
+  const agentsSyncTimeoutRef = useRef(null)
 
   // Embeddings / RAG config
   const OPENAI_EMBEDDINGS_MODEL = 'text-embedding-3-small'
@@ -2696,31 +2698,203 @@ Respond ONLY with valid JSON, no other text.`
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authUser?.id, dbEnabled])
 
-  // Load agents when user changes (user-scoped storage)
+  const loadAgentsFromDb = async () => {
+    if (!dbEnabled || !authUser?.id) return
+    try {
+      const { data, error } = await supabase
+        .from('user_agents')
+        .select('agent_id,provider,name,model,config')
+        .eq('owner_user_id', authUser.id)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+
+      const n8n = []
+      const or = []
+      const lm = []
+      ;(data || []).forEach((row) => {
+        const config = row.config && typeof row.config === 'object' ? row.config : {}
+        if (row.provider === 'n8n') {
+          n8n.push({
+            id: row.agent_id,
+            name: row.name,
+            description: config.description || 'No description',
+            tags: Array.isArray(config.tags) ? config.tags : [],
+            webhookUrl: config.webhookUrl || '',
+            systemPrompt: config.systemPrompt || ''
+          })
+        } else if (row.provider === 'openrouter') {
+          or.push({
+            id: row.agent_id,
+            provider: 'openrouter',
+            name: row.name,
+            model: row.model || '',
+            systemPrompt: config.systemPrompt || 'You are a helpful assistant.',
+            temperature: Number(config.temperature ?? 0.7),
+          })
+        } else if (row.provider === 'lmstudio') {
+          lm.push({
+            id: row.agent_id,
+            provider: 'lmstudio',
+            name: row.name,
+            model: row.model || '',
+            baseUrl: config.baseUrl || '',
+            apiKey: config.apiKey || '',
+            systemPrompt: config.systemPrompt || 'You are a helpful assistant.',
+            temperature: Number(config.temperature ?? 0.7),
+          })
+        }
+      })
+
+      // If no rows and localStorage exists, migrate once
+      if ((data || []).length === 0) {
+        const userAgentsKey = `agents_${authUser.id}`
+        const userSelectedKey = `selectedAgent_${authUser.id}`
+        const localAgents = localStorage.getItem(userAgentsKey)
+        const localSelected = localStorage.getItem(userSelectedKey)
+        const localOpenRouter = localStorage.getItem(`openRouterAgents_${authUser.id}`)
+        const localLmStudio = localStorage.getItem(`lmStudioAgents_${authUser.id}`)
+
+        if (localAgents || localOpenRouter || localLmStudio) {
+          const migratedAgents = localAgents ? JSON.parse(localAgents) : []
+          const migratedOR = localOpenRouter ? JSON.parse(localOpenRouter) : []
+          const migratedLM = localLmStudio ? JSON.parse(localLmStudio) : []
+          setAgents(migratedAgents)
+          setOpenRouterAgents(migratedOR)
+          setLmStudioAgents(migratedLM)
+          if (localSelected) setSelectedAgent(JSON.parse(localSelected))
+          agentsLoadedRef.current = true
+          await syncAgentsToDb(migratedAgents, migratedOR, migratedLM)
+          return
+        }
+      }
+
+      setAgents(n8n)
+      setOpenRouterAgents(or)
+      setLmStudioAgents(lm)
+      agentsLoadedRef.current = true
+    } catch (e) {
+      console.error('Failed to load agents:', e)
+      showToast('Failed to load agents')
+    }
+  }
+
+  const syncAgentsToDb = async (n8nAgents, openRouterList, lmStudioList) => {
+    if (!dbEnabled || !authUser?.id) return
+    const rows = []
+    ;(n8nAgents || []).forEach((a) => {
+      rows.push({
+        agent_id: a.id || crypto.randomUUID(),
+        owner_user_id: authUser.id,
+        provider: 'n8n',
+        name: a.name || 'Agent',
+        model: null,
+        config: {
+          description: a.description || '',
+          tags: Array.isArray(a.tags) ? a.tags : [],
+          webhookUrl: a.webhookUrl || '',
+          systemPrompt: a.systemPrompt || ''
+        }
+      })
+    })
+    ;(openRouterList || []).forEach((a) => {
+      rows.push({
+        agent_id: a.id || crypto.randomUUID(),
+        owner_user_id: authUser.id,
+        provider: 'openrouter',
+        name: a.name || 'OpenRouter Agent',
+        model: a.model || '',
+        config: {
+          systemPrompt: a.systemPrompt || '',
+          temperature: Number(a.temperature ?? 0.7)
+        }
+      })
+    })
+    ;(lmStudioList || []).forEach((a) => {
+      rows.push({
+        agent_id: a.id || crypto.randomUUID(),
+        owner_user_id: authUser.id,
+        provider: 'lmstudio',
+        name: a.name || 'LM Studio Agent',
+        model: a.model || '',
+        config: {
+          baseUrl: a.baseUrl || '',
+          apiKey: a.apiKey || '',
+          systemPrompt: a.systemPrompt || '',
+          temperature: Number(a.temperature ?? 0.7)
+        }
+      })
+    })
+
+    await supabase.from('user_agents').delete().eq('owner_user_id', authUser.id)
+    if (rows.length > 0) {
+      const { error } = await supabase.from('user_agents').insert(rows)
+      if (error) throw error
+    }
+  }
+
+  // Load agents when user changes (Supabase-backed)
   useEffect(() => {
     if (!authUser?.id) {
       setAgents([])
+      setOpenRouterAgents([])
+      setLmStudioAgents([])
       setSelectedAgent(null)
+      agentsLoadedRef.current = false
       return
     }
-    const userAgentsKey = `agents_${authUser.id}`
-    const userSelectedKey = `selectedAgent_${authUser.id}`
-    const savedAgents = localStorage.getItem(userAgentsKey)
-    const savedSelected = localStorage.getItem(userSelectedKey)
-    setAgents(savedAgents ? JSON.parse(savedAgents) : [])
-    setSelectedAgent(savedSelected ? JSON.parse(savedSelected) : null)
-  }, [authUser?.id])
+    if (dbEnabled) {
+      loadAgentsFromDb()
+    } else {
+      const userAgentsKey = `agents_${authUser.id}`
+      const userSelectedKey = `selectedAgent_${authUser.id}`
+      const savedAgents = localStorage.getItem(userAgentsKey)
+      const savedSelected = localStorage.getItem(userSelectedKey)
+      setAgents(savedAgents ? JSON.parse(savedAgents) : [])
+      setSelectedAgent(savedSelected ? JSON.parse(savedSelected) : null)
+      const savedOR = localStorage.getItem(`openRouterAgents_${authUser.id}`)
+      const savedLM = localStorage.getItem(`lmStudioAgents_${authUser.id}`)
+      setOpenRouterAgents(savedOR ? JSON.parse(savedOR) : [])
+      setLmStudioAgents(savedLM ? JSON.parse(savedLM) : [])
+      agentsLoadedRef.current = true
+    }
+  }, [authUser?.id, dbEnabled])
 
-  // Save agents with user-scoped key
+  // Persist agents to Supabase
   useEffect(() => {
-    if (!authUser?.id) return
-    localStorage.setItem(`agents_${authUser.id}`, JSON.stringify(agents))
-  }, [agents, authUser?.id])
+    if (!dbEnabled || !authUser?.id) return
+    if (!agentsLoadedRef.current) return
+    if (agentsSyncTimeoutRef.current) clearTimeout(agentsSyncTimeoutRef.current)
+    agentsSyncTimeoutRef.current = setTimeout(() => {
+      syncAgentsToDb(agents, openRouterAgents, lmStudioAgents).catch((e) => {
+        console.error('Failed to sync agents:', e)
+      })
+    }, 500)
+    return () => {
+      if (agentsSyncTimeoutRef.current) clearTimeout(agentsSyncTimeoutRef.current)
+    }
+  }, [agents, openRouterAgents, lmStudioAgents, dbEnabled, authUser?.id])
 
+  // Save selected agent to profile settings (Supabase)
   useEffect(() => {
-    if (!authUser?.id) return
-    localStorage.setItem(`selectedAgent_${authUser.id}`, JSON.stringify(selectedAgent))
-  }, [selectedAgent, authUser?.id])
+    if (!dbEnabled || !authUser?.id || !profileRow) return
+    const current = profileRow.settings?.selected_agent_id || null
+    const next = selectedAgent?.id || null
+    if (current === next) return
+    const nextSettings = {
+      ...(profileRow.settings && typeof profileRow.settings === 'object' ? profileRow.settings : {}),
+      selected_agent_id: next
+    }
+    supabase
+      .from('profiles')
+      .update({ settings: nextSettings })
+      .eq('user_id', authUser.id)
+      .select('user_id,display_name,avatar_url,settings')
+      .single()
+      .then(({ data }) => {
+        if (data) setProfileRow(data)
+      })
+      .catch((e) => console.error('Failed to save selected agent:', e))
+  }, [selectedAgent?.id, dbEnabled, authUser?.id, profileRow])
 
 
   useEffect(() => {
@@ -2732,8 +2906,9 @@ Respond ONLY with valid JSON, no other text.`
     localStorage.setItem('openRouterApiKey', openRouterApiKey)
   }, [openRouterApiKey])
 
-  // Load openRouterAgents when user changes
+  // Load openRouterAgents from localStorage only when DB disabled
   useEffect(() => {
+    if (dbEnabled) return
     if (!authUser?.id) {
       setOpenRouterAgents([])
       return
@@ -2741,13 +2916,14 @@ Respond ONLY with valid JSON, no other text.`
     const key = `openRouterAgents_${authUser.id}`
     const saved = localStorage.getItem(key)
     setOpenRouterAgents(saved ? JSON.parse(saved) : [])
-  }, [authUser?.id])
+  }, [authUser?.id, dbEnabled])
 
-  // Save openRouterAgents with user-scoped key
+  // Save openRouterAgents to localStorage only when DB disabled
   useEffect(() => {
+    if (dbEnabled) return
     if (!authUser?.id) return
     localStorage.setItem(`openRouterAgents_${authUser.id}`, JSON.stringify(openRouterAgents))
-  }, [openRouterAgents, authUser?.id])
+  }, [openRouterAgents, authUser?.id, dbEnabled])
 
   // Persist LM Studio settings to localStorage
   useEffect(() => {
@@ -2766,8 +2942,9 @@ Respond ONLY with valid JSON, no other text.`
     localStorage.setItem('lmStudioModels', JSON.stringify(lmStudioModels))
   }, [lmStudioModels])
 
-  // Load lmStudioAgents when user changes
+  // Load lmStudioAgents from localStorage only when DB disabled
   useEffect(() => {
+    if (dbEnabled) return
     if (!authUser?.id) {
       setLmStudioAgents([])
       return
@@ -2775,13 +2952,14 @@ Respond ONLY with valid JSON, no other text.`
     const key = `lmStudioAgents_${authUser.id}`
     const saved = localStorage.getItem(key)
     setLmStudioAgents(saved ? JSON.parse(saved) : [])
-  }, [authUser?.id])
+  }, [authUser?.id, dbEnabled])
 
-  // Save lmStudioAgents with user-scoped key
+  // Save lmStudioAgents to localStorage only when DB disabled
   useEffect(() => {
+    if (dbEnabled) return
     if (!authUser?.id) return
     localStorage.setItem(`lmStudioAgents_${authUser.id}`, JSON.stringify(lmStudioAgents))
-  }, [lmStudioAgents, authUser?.id])
+  }, [lmStudioAgents, authUser?.id, dbEnabled])
 
   useEffect(() => {
     localStorage.setItem('openRouterModels', JSON.stringify(openRouterModels))
@@ -2870,6 +3048,15 @@ Respond ONLY with valid JSON, no other text.`
     const lmAgents = (lmStudioAgents || []).map(a => ({ ...a, provider: 'lmstudio' }))
     return [...orAgents, ...lmAgents, ...n8nAgents]
   }, [agents, openRouterAgents, lmStudioAgents])
+
+  useEffect(() => {
+    if (!dbEnabled || !profileRow?.settings) return
+    const selectedId = profileRow.settings.selected_agent_id
+    if (!selectedId) return
+    if (selectedAgent?.id === selectedId) return
+    const match = allAgents.find(a => a.id === selectedId)
+    if (match) setSelectedAgent(match)
+  }, [dbEnabled, profileRow?.settings, allAgents, selectedAgent?.id])
 
   // Function to handle opening file in code editor - called by event handler
   const openFileInCodeEditor = useRef((filename, code, language, conversationId, conversationTitle) => {
