@@ -2639,6 +2639,11 @@ Respond ONLY with valid JSON, no other text.`
     return () => cancelAnimationFrame(raf)
   }, [codeMessages, codeGenerating, showCodeChat, codeChatAutoScroll])
 
+  // Always follow new messages and typing indicator in coder chat
+  useEffect(() => {
+    setCodeChatAutoScroll(true)
+  }, [codeMessages.length, codeGenerating])
+
   // DB mode: load chats once authenticated
   useEffect(() => {
     if (!dbEnabled) return
@@ -11775,6 +11780,7 @@ else console.log('Deleted successfully')`
                 <div className="coder-chat-model">
                   <button 
                     className="coder-model-selector"
+                    onMouseDown={(e) => e.stopPropagation()}
                     onClick={(e) => {
                       e.stopPropagation()
                       setShowCoderAgentSelector(!showCoderAgentSelector)
@@ -11786,7 +11792,11 @@ else console.log('Deleted successfully')`
                     </svg>
                   </button>
                   {showCoderAgentSelector && (
-                    <div className="coder-model-dropdown" onClick={(e) => e.stopPropagation()}>
+                    <div
+                      className="coder-model-dropdown"
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {allAgents.length === 0 ? (
                         <div className="coder-model-empty">No agents configured</div>
                       ) : (
@@ -11794,6 +11804,7 @@ else console.log('Deleted successfully')`
                           <button
                             key={agent.id}
                             className={`coder-model-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={() => {
                               setSelectedAgent(agent)
                               setShowCoderAgentSelector(false)
