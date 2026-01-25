@@ -5153,9 +5153,46 @@ Respond with the code files first, then a brief summary of what was created.`
         }
       }
       
-      // For GitHub mode, files are added to pending changes (already done above)
-      if (didChangePending) {
+      // For GitHub mode, auto-apply the changes to create files in the repo
+      if (codeEditorMode === 'github' && selectedRepo && didChangePending) {
         setPendingFileChanges(newPendingChanges)
+        
+        // Auto-apply all pending changes to GitHub
+        const filePaths = Object.keys(newPendingChanges)
+        for (const filePath of filePaths) {
+          try {
+            const change = newPendingChanges[filePath]
+            const owner = selectedRepo.owner.login
+            const repo = selectedRepo.name
+            
+            // Check if file exists to get SHA
+            let sha = null
+            try {
+              const existing = await githubApi(`/repos/${owner}/${repo}/contents/${filePath}?ref=${repoBranch}`)
+              sha = existing.sha
+            } catch (e) {
+              // File doesn't exist, that's fine
+            }
+            
+            // Create or update file
+            await githubApi(`/repos/${owner}/${repo}/contents/${filePath}`, {
+              method: 'PUT',
+              body: JSON.stringify({
+                message: sha ? `Update ${filePath}` : `Create ${filePath}`,
+                content: btoa(unescape(encodeURIComponent(change.content))),
+                branch: repoBranch,
+                ...(sha && { sha })
+              })
+            })
+          } catch (e) {
+            console.error(`Failed to create/update ${filePath}:`, e)
+          }
+        }
+        
+        // Clear pending changes and refresh file tree
+        setPendingFileChanges({})
+        await loadRepoFiles(selectedRepo.owner.login, selectedRepo.name)
+        showToast(`Created ${filePaths.length} file(s) in ${selectedRepo.name}`)
       }
 
       // Extract explanation text (remove code blocks) for chat display
