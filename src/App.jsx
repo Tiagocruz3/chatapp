@@ -11204,7 +11204,10 @@ else console.log('Deleted successfully')`
                 <div className="coder-chat-model">
                   <button 
                     className="coder-model-selector"
-                    onClick={() => setShowCoderAgentSelector(!showCoderAgentSelector)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setShowCoderAgentSelector(!showCoderAgentSelector)
+                    }}
                   >
                     <span>{selectedAgent?.name || 'Select Agent'}</span>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
