@@ -5234,6 +5234,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
 
     const userMessage = draftMessage.trim()
     setCodeInput('')
+    setCodeChatAutoScroll(true)
     setCodeMessages(prev => [...prev, { role: 'user', content: userMessage }])
     setCodeGenerating(true)
 
