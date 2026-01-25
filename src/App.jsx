@@ -1598,6 +1598,7 @@ function App() {
   const [openRouterModelFilter, setOpenRouterModelFilter] = useState('')
   // OpenRouter agents are also user-scoped (loaded in useEffect below)
   const [openRouterAgents, setOpenRouterAgents] = useState([])
+  const [editingOpenRouterAgent, setEditingOpenRouterAgent] = useState(null)
   const [newOpenRouterAgent, setNewOpenRouterAgent] = useState({
     name: '',
     model: 'openai/gpt-4o-mini',
@@ -4121,6 +4122,60 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     setOpenRouterAgents(prev => prev.filter(a => a.id !== agentId))
     if (selectedAgent?.id === agentId) setSelectedAgent(null)
     showToast('Agent deleted')
+  }
+
+  const handleEditOpenRouterAgent = (agent) => {
+    setEditingOpenRouterAgent(agent)
+    setNewOpenRouterAgent({
+      name: agent.name,
+      model: agent.model,
+      systemPrompt: agent.systemPrompt || '',
+      temperature: agent.temperature ?? 0.7,
+    })
+  }
+
+  const handleUpdateOpenRouterAgent = () => {
+    if (!editingOpenRouterAgent) return
+    if (!newOpenRouterAgent.name.trim()) {
+      showToast('Please enter an agent name')
+      return
+    }
+    
+    const updatedAgent = {
+      ...editingOpenRouterAgent,
+      name: newOpenRouterAgent.name.trim(),
+      model: newOpenRouterAgent.model,
+      systemPrompt: newOpenRouterAgent.systemPrompt,
+      temperature: newOpenRouterAgent.temperature,
+    }
+    
+    setOpenRouterAgents(prev => prev.map(a => 
+      a.id === editingOpenRouterAgent.id ? updatedAgent : a
+    ))
+    
+    // Update selected agent if it's the one being edited
+    if (selectedAgent?.id === editingOpenRouterAgent.id) {
+      setSelectedAgent(updatedAgent)
+    }
+    
+    setEditingOpenRouterAgent(null)
+    setNewOpenRouterAgent({
+      name: '',
+      model: 'openai/gpt-4o-mini',
+      systemPrompt: 'You are a helpful assistant.',
+      temperature: 0.7,
+    })
+    showToast(`Agent "${updatedAgent.name}" updated`)
+  }
+
+  const handleCancelEditOpenRouterAgent = () => {
+    setEditingOpenRouterAgent(null)
+    setNewOpenRouterAgent({
+      name: '',
+      model: 'openai/gpt-4o-mini',
+      systemPrompt: 'You are a helpful assistant.',
+      temperature: 0.7,
+    })
   }
 
   const handleDeleteLmStudioAgent = (agentId) => {
@@ -9310,13 +9365,23 @@ else console.log('Deleted successfully')`
                         onChange={(e) => setNewOpenRouterAgent({ ...newOpenRouterAgent, temperature: e.target.value })}
                       />
                     </div>
-                    <button
-                      className="settings-add-agent-btn"
-                      onClick={handleAddOpenRouterAgent}
-                      disabled={!newOpenRouterAgent.name.trim() || !newOpenRouterAgent.model.trim()}
-                    >
-                      Add OpenRouter Agent
-                    </button>
+                    <div className="settings-form-actions">
+                      {editingOpenRouterAgent && (
+                        <button
+                          className="settings-cancel-btn"
+                          onClick={handleCancelEditOpenRouterAgent}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      <button
+                        className="settings-add-agent-btn"
+                        onClick={editingOpenRouterAgent ? handleUpdateOpenRouterAgent : handleAddOpenRouterAgent}
+                        disabled={!newOpenRouterAgent.name.trim() || !newOpenRouterAgent.model.trim()}
+                      >
+                        {editingOpenRouterAgent ? 'Update Agent' : 'Add OpenRouter Agent'}
+                      </button>
+                    </div>
                   </div>
                 </section>
 
@@ -9353,6 +9418,16 @@ else console.log('Deleted successfully')`
                             >
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                              </svg>
+                            </button>
+                            <button
+                              className="agent-action-btn"
+                              onClick={() => handleEditOpenRouterAgent(agent)}
+                              title="Edit Agent"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                               </svg>
                             </button>
                             <button
