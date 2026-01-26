@@ -3088,6 +3088,15 @@ Respond ONLY with valid JSON, no other text.`
     return url.toString()
   }
 
+  const buildSearchProxyUrl = (rawBase, query) => {
+    const base = normalizeSearchBaseUrl(rawBase)
+    const url = new URL('/api/search', window.location.origin)
+    if (base) url.searchParams.set('base', base)
+    url.searchParams.set('q', query)
+    url.searchParams.set('format', 'json')
+    return url.toString()
+  }
+
   const filteredLmStudioModels = useMemo(() => {
     const q = (lmStudioModelFilter || '').trim().toLowerCase()
     const sorted = [...(lmStudioModels || [])].sort((a, b) => {
@@ -8364,8 +8373,11 @@ else console.log('Deleted successfully')`
     if (trackStatus) setTypingStatus('searching')
     try {
       const directUrl = buildSearchApiUrl(searchUrl, query)
-      const useProxy = import.meta.env.DEV
-      const proxyUrl = `/api/search?q=${encodeURIComponent(query)}&format=json`
+      const proxyUrl = buildSearchProxyUrl(searchUrl, query)
+      const normalizedBase = normalizeSearchBaseUrl(searchUrl)
+      const useProxy =
+        !import.meta.env.DEV ||
+        normalizedBase === 'https://search.brainstormnodes.org'
       const apiUrl = useProxy ? proxyUrl : directUrl
       let resp = await fetch(apiUrl)
       if (!resp.ok && useProxy && directUrl) {
