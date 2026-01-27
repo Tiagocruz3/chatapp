@@ -261,90 +261,6 @@ const formatMarkdown = (text) => {
   return html
 }
 
-// File Tree Component for Code Page
-function FileTree({ files, expandedFolders, selectedFile, onToggleFolder, onSelectFile, pendingChanges, depth = 0 }) {
-  const getFileIcon = (file) => {
-    if (file.type === 'dir') {
-      return expandedFolders[file.path] ? (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          <line x1="9" y1="14" x2="15" y2="14"/>
-        </svg>
-      ) : (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-        </svg>
-      )
-    }
-    // File type icons
-    const ext = file.name.split('.').pop()?.toLowerCase()
-    if (['js', 'jsx', 'ts', 'tsx'].includes(ext)) {
-      return <span className="file-icon-text js">JS</span>
-    }
-    if (['py'].includes(ext)) {
-      return <span className="file-icon-text py">PY</span>
-    }
-    if (['html', 'htm'].includes(ext)) {
-      return <span className="file-icon-text html">{'<>'}</span>
-    }
-    if (['css', 'scss', 'sass'].includes(ext)) {
-      return <span className="file-icon-text css">#</span>
-    }
-    if (['json'].includes(ext)) {
-      return <span className="file-icon-text json">{'{}'}</span>
-    }
-    if (['md', 'mdx'].includes(ext)) {
-      return <span className="file-icon-text md">MD</span>
-    }
-    if (['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'].includes(ext)) {
-      return (
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-          <circle cx="8.5" cy="8.5" r="1.5"/>
-          <polyline points="21 15 16 10 5 21"/>
-        </svg>
-      )
-    }
-    return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-        <polyline points="14 2 14 8 20 8"/>
-      </svg>
-    )
-  }
-
-  return (
-    <div className="file-tree-level">
-      {files.map(file => (
-        <div key={file.path} className="file-tree-item-wrapper">
-          <div
-            className={`file-tree-item ${selectedFile?.path === file.path ? 'active' : ''} ${pendingChanges[file.path] ? 'has-changes' : ''}`}
-            style={{ paddingLeft: `${12 + depth * 16}px` }}
-            onClick={() => file.type === 'dir' ? onToggleFolder(file.path) : onSelectFile(file)}
-          >
-            <span className="file-tree-icon">{getFileIcon(file)}</span>
-            <span className="file-tree-name">{file.name}</span>
-            {pendingChanges[file.path] && (
-              <span className="file-tree-modified">M</span>
-            )}
-          </div>
-          {file.type === 'dir' && expandedFolders[file.path] && (
-            <FileTree
-              files={expandedFolders[file.path]}
-              expandedFolders={expandedFolders}
-              selectedFile={selectedFile}
-              onToggleFolder={onToggleFolder}
-              onSelectFile={onSelectFile}
-              pendingChanges={pendingChanges}
-              depth={depth + 1}
-            />
-          )}
-        </div>
-      ))}
-    </div>
-  )
-}
-
 // Knowledge Graph Component - Enhanced for large datasets with clustering, filtering, and search
 function KnowledgeGraph({ memories = [], documents = [], isLoading }) {
   const svgRef = useRef(null)
@@ -1373,8 +1289,8 @@ function App() {
   const [showGalleryPage, setShowGalleryPage] = useState(false)
   const [showKnowledgeBasePage, setShowKnowledgeBasePage] = useState(false)
   const [knowledgeBaseTab, setKnowledgeBaseTab] = useState('memory') // memory | rag | graph
-  
-  // Code Page - Local Projects & GitHub integration
+
+  // Code Page - Local Projects & GitHub integration (feature disabled, kept for future use)
   const [showCodePage, setShowCodePage] = useState(false)
   const [githubToken, setGithubToken] = useState(() => localStorage.getItem('githubToken') || '')
   const [githubConnected, setGithubConnected] = useState(false)
@@ -1476,7 +1392,7 @@ function App() {
 
   // Sidebar Tab Navigation
   const [sidebarTab, setSidebarTab] = useState('code') // 'code' | 'supabase' | 'git' | 'vercel'
-
+  
   // Supabase Integration
   const [supabaseUrl, setSupabaseUrl] = useState(() => localStorage.getItem('supabaseUrl') || '')
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(() => localStorage.getItem('supabaseAnonKey') || '')
@@ -3896,7 +3812,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
           filesToCreate.push({ filename: filename.trim(), code: code.trim(), lang: lang || '' })
         }
       }
-      if (filesToCreate.length > 0) {
+      if (false && filesToCreate.length > 0) {
         // Create project and files
         const convTitle = currentConversation?.title || 'AI Code'
         const project = getOrCreateChatProject(chatIdForThisTurn || activeConversation, convTitle)
@@ -8698,7 +8614,7 @@ else console.log('Deleted successfully')`
   const appBody = (
     <div className="app">
       {/* Sidebar */}
-      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showCodePage) ? 'hidden' : ''}`}>
+      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage) ? 'hidden' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-top-actions">
             {/* Sidebar toggle (close) */}
@@ -8791,7 +8707,7 @@ else console.log('Deleted successfully')`
             <button
               className="sidebar-nav-btn"
               type="button"
-              onClick={() => setShowCodePage(true)}
+              onClick={() => showToast('Code IDE coming soon')}
             >
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -9092,7 +9008,7 @@ else console.log('Deleted successfully')`
       {/* Main Chat Area */}
       <main className="chat-main">
         {/* Chat View */}
-        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showCodePage) ? 'slide-out' : 'slide-in'}`}>
+        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage) ? 'slide-out' : 'slide-in'}`}>
           {!sidebarOpen && (
           <button className="open-sidebar" onClick={() => setSidebarOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -11339,6 +11255,8 @@ else console.log('Deleted successfully')`
           </div>
         </div>
 
+        {false && (
+        <>
         {/* Code Page (Enhanced IDE) */}
         {/* ============================================
             CLAUDE CODE-STYLE CODER - 3 Pane Layout
@@ -14316,167 +14234,9 @@ else console.log('Deleted successfully')`
             )}
           </div>
         </div>
+        </>
+        )}
       </main>
-
-      {/* Code Canvas Panel - Only visible when code is added */}
-      <div className={`code-canvas ${canvasOpen ? 'open' : ''}`}>
-        <div className="code-canvas-header">
-          <div className="code-canvas-title">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="16 18 22 12 16 6"/>
-              <polyline points="8 6 2 12 8 18"/>
-            </svg>
-            <span>Code Canvas</span>
-            <span className="code-canvas-lang">{canvasActiveTab}</span>
-          </div>
-          <div className="code-canvas-actions">
-            <button 
-              className="canvas-action-btn canvas-run-btn"
-              onClick={runCanvasCode}
-              title="Run & Preview"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
-              Run
-            </button>
-            <button 
-              className="canvas-action-btn canvas-clear-btn"
-              onClick={clearCanvas}
-              title="Clear & Close"
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div className="code-canvas-tabs">
-          {['html', 'css', 'js'].map((t) => (
-            <button
-              key={t}
-              type="button"
-              className={`code-canvas-tab ${canvasActiveTab === t ? 'active' : ''}`}
-              onClick={() => setCanvasActiveTab(t)}
-            >
-              {t.toUpperCase()}
-            </button>
-          ))}
-        </div>
-        <div className="code-canvas-editor">
-          <div className="code-canvas-editor-wrap">
-            <pre className="code-canvas-highlight" ref={canvasHighlightRef}>
-              <code dangerouslySetInnerHTML={{ __html: highlightedCanvasHtml || '&nbsp;' }} />
-            </pre>
-            <textarea
-              ref={canvasEditorRef}
-              value={activeCanvasCode}
-              onChange={(e) => {
-                setCanvasFiles((prev) => ({ ...prev, [canvasActiveTab]: e.target.value }))
-              }}
-              onScroll={syncCanvasScroll}
-              placeholder={
-                canvasActiveTab === 'html'
-                  ? "Add HTML here (or click '+' on an HTML block)..."
-                  : canvasActiveTab === 'css'
-                    ? "Add CSS here (or click '+' on a CSS block)..."
-                    : "Add JS here (or click '+' on a JS block)..."
-              }
-              spellCheck={false}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Preview Modal - Full Screen */}
-      {previewOpen && (
-        <div className="preview-modal-overlay">
-          <div className="preview-modal">
-            <div className="preview-modal-header">
-              <div className="preview-modal-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-                <span>Preview</span>
-                <span className="preview-modal-lang">combined</span>
-              </div>
-              <div className="preview-modal-actions">
-                <button 
-                  className="preview-modal-refresh"
-                  onClick={runCanvasCode}
-                  title="Refresh Preview"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M23 4v6h-6"/>
-                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                  </svg>
-                </button>
-                <button 
-                  className="preview-modal-close"
-                  onClick={() => setPreviewOpen(false)}
-                  title="Close Preview"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <iframe
-              ref={canvasIframeRef}
-              title="Code Preview"
-              sandbox="allow-scripts allow-same-origin"
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Code Editor Preview Modal - Full Screen */}
-      {showPreviewModal && (
-        <div className="preview-modal-overlay">
-          <div className="preview-modal">
-            <div className="preview-modal-header">
-              <div className="preview-modal-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-                <span>Preview</span>
-                <span className="preview-modal-lang">app</span>
-              </div>
-              <div className="preview-modal-actions">
-                <button
-                  className="preview-modal-refresh"
-                  onClick={openPreviewModal}
-                  title="Refresh Preview"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M23 4v6h-6"/>
-                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                  </svg>
-                </button>
-                <button
-                  className="preview-modal-close"
-                  onClick={() => setShowPreviewModal(false)}
-                  title="Close Preview"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="18" y1="6" x2="6" y2="18"/>
-                    <line x1="6" y1="6" x2="18" y2="18"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <iframe
-              ref={previewIframeRef}
-              title="Preview"
-              srcDoc={previewContent}
-              sandbox="allow-scripts allow-modals"
-            />
-          </div>
-        </div>
-      )}
 
       {/* Toast Notification */}
       {toast && (
@@ -14833,264 +14593,7 @@ else console.log('Deleted successfully')`
         </div>
       )}
 
-      {/* Create Repo Modal - Outside coder-page for proper z-index */}
-      {showCreateRepoModal && (
-        <div
-          className="code-modal-overlay"
-          onClick={() => !creatingRepo && setShowCreateRepoModal(false)}
-          role="presentation"
-        >
-          <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <div className="code-modal-header">
-              <h3>Create repository</h3>
-              <button
-                className="code-modal-close"
-                type="button"
-                onClick={() => setShowCreateRepoModal(false)}
-                disabled={creatingRepo}
-                title="Close"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-
-            <div className="code-modal-body">
-              <label className="code-modal-label">Name *</label>
-              <input
-                className="code-modal-input"
-                value={createRepoForm.name}
-                onChange={(e) => setCreateRepoForm((p) => ({ ...p, name: e.target.value }))}
-                placeholder="my-new-repo"
-                autoFocus
-              />
-              <label className="code-modal-label">Description</label>
-              <input
-                className="code-modal-input"
-                value={createRepoForm.description}
-                onChange={(e) => setCreateRepoForm((p) => ({ ...p, description: e.target.value }))}
-                placeholder="Optional"
-              />
-              <label className="code-modal-checkbox">
-                <input
-                  type="checkbox"
-                  checked={!!createRepoForm.private}
-                  onChange={(e) => setCreateRepoForm((p) => ({ ...p, private: e.target.checked }))}
-                />
-                Private repository
-              </label>
-              {createRepoError && <div className="code-modal-error">{createRepoError}</div>}
-            </div>
-
-            <div className="code-modal-actions">
-              <button
-                className="code-modal-btn"
-                type="button"
-                onClick={() => setShowCreateRepoModal(false)}
-                disabled={creatingRepo}
-              >
-                Cancel
-              </button>
-              <button
-                className="code-modal-btn primary"
-                type="button"
-                onClick={createRepo}
-                disabled={creatingRepo || !String(createRepoForm.name || '').trim()}
-              >
-                {creatingRepo ? 'Creating…' : 'Create'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* GitHub New File Modal - Outside coder-page for proper z-index */}
-      {showGithubNewFileModal && (
-        <div className="code-modal-overlay" onClick={() => setShowGithubNewFileModal(false)}>
-          <div className="code-modal" onClick={e => e.stopPropagation()}>
-            <div className="code-modal-header">
-              <h3>New File in {selectedRepo?.name}</h3>
-              <button className="code-modal-close" onClick={() => setShowGithubNewFileModal(false)}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"/>
-                  <line x1="6" y1="6" x2="18" y2="18"/>
-                </svg>
-              </button>
-            </div>
-            <div className="code-modal-body">
-              <label className="code-modal-label">File Path</label>
-              <input
-                className="code-modal-input"
-                value={githubNewFileName}
-                onChange={(e) => setGithubNewFileName(e.target.value)}
-                placeholder="src/example.js"
-                autoFocus
-              />
-              <label className="code-modal-label">Initial Content (optional)</label>
-              <textarea
-                className="code-modal-textarea"
-                value={githubNewFileContent}
-                onChange={(e) => setGithubNewFileContent(e.target.value)}
-                placeholder="// Your code here"
-                rows={6}
-              />
-            </div>
-            <div className="code-modal-actions">
-              <button className="code-modal-btn" onClick={() => setShowGithubNewFileModal(false)}>Cancel</button>
-              <button
-                className="code-modal-btn primary"
-                onClick={createGithubFile}
-                disabled={!githubNewFileName.trim() || creatingGithubFile}
-              >
-                {creatingGithubFile ? 'Creating...' : 'Create & Commit'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Repo Modal - Outside coder-page for proper z-index */}
-      {showDeleteRepoModal && selectedRepo && (
-        <div
-          className="code-modal-overlay"
-          onClick={() => !deletingRepo && setShowDeleteRepoModal(false)}
-          role="presentation"
-        >
-          <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <div className="code-modal-header">
-              <h3>Delete repository</h3>
-              <button
-                className="code-modal-close"
-                type="button"
-                onClick={() => setShowDeleteRepoModal(false)}
-                disabled={deletingRepo}
-                title="Close"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-
-            <div className="code-modal-body">
-              <div className="code-modal-warning">
-                This permanently deletes <strong>{selectedRepo.full_name}</strong>. This cannot be undone.
-              </div>
-              <label className="code-modal-label">
-                Type{' '}
-                <code 
-                  className="code-modal-copy-text"
-                  onClick={() => {
-                    navigator.clipboard.writeText(selectedRepo.full_name)
-                    setDeleteRepoConfirm(selectedRepo.full_name)
-                    showToast('Copied & filled!')
-                  }}
-                  title="Click to copy & fill"
-                >
-                  {selectedRepo.full_name}
-                </code>
-                {' '}to confirm
-              </label>
-              <div className="code-modal-input-row">
-                <input
-                  className="code-modal-input"
-                  value={deleteRepoConfirm}
-                  onChange={(e) => setDeleteRepoConfirm(e.target.value)}
-                  placeholder={selectedRepo.full_name}
-                  autoFocus
-                />
-                <button 
-                  type="button"
-                  className="code-modal-copy-btn"
-                  onClick={() => {
-                    setDeleteRepoConfirm(selectedRepo.full_name)
-                  }}
-                  title="Fill with repo name"
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                  </svg>
-                </button>
-              </div>
-              {deleteRepoError && <div className="code-modal-error">{deleteRepoError}</div>}
-            </div>
-
-            <div className="code-modal-actions">
-              <button
-                className="code-modal-btn"
-                type="button"
-                onClick={() => setShowDeleteRepoModal(false)}
-                disabled={deletingRepo}
-              >
-                Cancel
-              </button>
-              <button
-                className="code-modal-btn danger"
-                type="button"
-                onClick={deleteSelectedRepo}
-                disabled={deletingRepo || deleteRepoConfirm !== selectedRepo.full_name}
-              >
-                {deletingRepo ? 'Deleting…' : 'Delete repo'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete File Modal - Outside coder-page for proper z-index */}
-      {showDeleteFileModal && deleteFileTarget && (
-        <div
-          className="code-modal-overlay"
-          onClick={() => !deletingFile && setShowDeleteFileModal(false)}
-          role="presentation"
-        >
-          <div className="code-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-            <div className="code-modal-header">
-              <h3>Delete file</h3>
-              <button
-                className="code-modal-close"
-                type="button"
-                onClick={() => setShowDeleteFileModal(false)}
-                disabled={deletingFile}
-                title="Close"
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
-              </button>
-            </div>
-            <div className="code-modal-body">
-              <div className="code-modal-warning">
-                This permanently deletes <strong>{deleteFileTarget.path}</strong>. This cannot be undone.
-              </div>
-              {deleteFileError && <div className="code-modal-error">{deleteFileError}</div>}
-            </div>
-            <div className="code-modal-actions">
-              <button
-                className="code-modal-btn"
-                type="button"
-                onClick={() => setShowDeleteFileModal(false)}
-                disabled={deletingFile}
-              >
-                Cancel
-              </button>
-              <button
-                className="code-modal-btn danger"
-                type="button"
-                onClick={deleteGithubFile}
-                disabled={deletingFile}
-              >
-                {deletingFile ? 'Deleting…' : 'Delete file'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      
     </div>
   )
 
