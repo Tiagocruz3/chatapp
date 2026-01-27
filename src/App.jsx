@@ -14238,6 +14238,121 @@ else console.log('Deleted successfully')`
         )}
       </main>
 
+      {/* Code Canvas Panel - Only visible when code is added */}
+      <div className={`code-canvas ${canvasOpen ? 'open' : ''}`}>
+        <div className="code-canvas-header">
+          <div className="code-canvas-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="16 18 22 12 16 6"/>
+              <polyline points="8 6 2 12 8 18"/>
+            </svg>
+            <span>Code Canvas</span>
+            <span className="code-canvas-lang">{canvasActiveTab}</span>
+          </div>
+          <div className="code-canvas-actions">
+            <button
+              className="canvas-action-btn canvas-run-btn"
+              onClick={runCanvasCode}
+              title="Run & Preview"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              Run
+            </button>
+            <button
+              className="canvas-action-btn canvas-clear-btn"
+              onClick={clearCanvas}
+              title="Clear & Close"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="code-canvas-tabs">
+          {['html', 'css', 'js'].map((t) => (
+            <button
+              key={t}
+              type="button"
+              className={`code-canvas-tab ${canvasActiveTab === t ? 'active' : ''}`}
+              onClick={() => setCanvasActiveTab(t)}
+            >
+              {t.toUpperCase()}
+            </button>
+          ))}
+        </div>
+        <div className="code-canvas-editor">
+          <div className="code-canvas-editor-wrap">
+            <pre className="code-canvas-highlight" ref={canvasHighlightRef}>
+              <code dangerouslySetInnerHTML={{ __html: highlightedCanvasHtml || '&nbsp;' }} />
+            </pre>
+            <textarea
+              ref={canvasEditorRef}
+              value={activeCanvasCode}
+              onChange={(e) => {
+                setCanvasFiles((prev) => ({ ...prev, [canvasActiveTab]: e.target.value }))
+              }}
+              onScroll={syncCanvasScroll}
+              placeholder={
+                canvasActiveTab === 'html'
+                  ? "Add HTML here (or click '+' on an HTML block)..."
+                  : canvasActiveTab === 'css'
+                    ? "Add CSS here (or click '+' on a CSS block)..."
+                    : "Add JS here (or click '+' on a JS block)..."
+              }
+              spellCheck={false}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Preview Modal - Full Screen */}
+      {previewOpen && (
+        <div className="preview-modal-overlay">
+          <div className="preview-modal">
+            <div className="preview-modal-header">
+              <div className="preview-modal-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <span>Preview</span>
+                <span className="preview-modal-lang">combined</span>
+              </div>
+              <div className="preview-modal-actions">
+                <button
+                  className="preview-modal-refresh"
+                  onClick={runCanvasCode}
+                  title="Refresh Preview"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M23 4v6h-6"/>
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                  </svg>
+                </button>
+                <button
+                  className="preview-modal-close"
+                  onClick={() => setPreviewOpen(false)}
+                  title="Close Preview"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <iframe
+              ref={canvasIframeRef}
+              title="Code Preview"
+              sandbox="allow-scripts allow-same-origin"
+            />
+          </div>
+        </div>
+      )}
+
       {/* Toast Notification */}
       {toast && (
         <div className="toast">
