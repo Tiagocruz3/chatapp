@@ -1278,6 +1278,7 @@ function App() {
   const [toast, setToast] = useState(null)
   const [showAttachMenu, setShowAttachMenu] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
+  const [uploadModalTarget, setUploadModalTarget] = useState('chat') // 'chat' | 'deepResearch'
   const [showSettingsPage, setShowSettingsPage] = useState(() => {
     try {
       return sessionStorage.getItem('ui_showSettingsPage') === 'true'
@@ -1285,10 +1286,53 @@ function App() {
       return false
     }
   })
+  const [showDeepResearchPage, setShowDeepResearchPage] = useState(() => {
+    try {
+      return sessionStorage.getItem('showDeepResearchPage') === 'true'
+    } catch { return false }
+  })
   const [showProfilePage, setShowProfilePage] = useState(false)
   const [showGalleryPage, setShowGalleryPage] = useState(false)
   const [showKnowledgeBasePage, setShowKnowledgeBasePage] = useState(false)
   const [knowledgeBaseTab, setKnowledgeBaseTab] = useState('memory') // memory | rag | graph
+  const [deepResearchConversations, setDeepResearchConversations] = useState(() => {
+    try {
+      const saved = localStorage.getItem('deepResearchConversations')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+  const [activeDeepResearchId, setActiveDeepResearchId] = useState(() => {
+    try {
+      return sessionStorage.getItem('activeDeepResearchId') || null
+    } catch { return null }
+  })
+  const [deepResearchMessages, setDeepResearchMessages] = useState(() => {
+    try {
+      const savedId = sessionStorage.getItem('activeDeepResearchId')
+      if (savedId) {
+        const convs = JSON.parse(localStorage.getItem('deepResearchConversations') || '[]')
+        const conv = convs.find(c => c.id === savedId)
+        return conv?.messages || []
+      }
+      return []
+    } catch { return [] }
+  })
+  const deepResearchRenderedMessages = useMemo(() => {
+    return deepResearchMessages.map((message) => {
+      if (message.role !== 'assistant') return message
+      return {
+        ...message,
+        html: formatMarkdown(message.content),
+      }
+    })
+  }, [deepResearchMessages])
+  const [deepResearchInput, setDeepResearchInput] = useState('')
+  const [deepResearchTyping, setDeepResearchTyping] = useState(false)
+  const deepResearchEndRef = useRef(null)
+  const deepResearchAbortRef = useRef(null)
+  const deepResearchFileInputRef = useRef(null)
+  const [deepResearchFiles, setDeepResearchFiles] = useState([])
+  const [deepResearchProcessingFiles, setDeepResearchProcessingFiles] = useState(false)
 
   // Code Page - Local Projects & GitHub integration (feature disabled, kept for future use)
   const [showCodePage, setShowCodePage] = useState(false)
@@ -2853,6 +2897,25 @@ Respond ONLY with valid JSON, no other text.`
     localStorage.setItem('searchUrl', searchUrl)
   }, [searchUrl])
 
+  useEffect(() => {
+    if (!showDeepResearchPage) return
+    deepResearchEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [deepResearchMessages, deepResearchTyping, showDeepResearchPage])
+
+  // Persist deep research conversations
+  useEffect(() => {
+    localStorage.setItem('deepResearchConversations', JSON.stringify(deepResearchConversations))
+  }, [deepResearchConversations])
+
+  // Persist deep research page state for refresh
+  useEffect(() => {
+    sessionStorage.setItem('showDeepResearchPage', showDeepResearchPage ? 'true' : 'false')
+  }, [showDeepResearchPage])
+
+  useEffect(() => {
+    sessionStorage.setItem('activeDeepResearchId', activeDeepResearchId || '')
+  }, [activeDeepResearchId])
+
 
   useEffect(() => {
     localStorage.setItem('openRouterApiKey', openRouterApiKey)
@@ -3301,6 +3364,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
   }
 
   const createNewChat = () => {
+    setShowDeepResearchPage(false)
     if (dbEnabled) {
       ;(async () => {
         try {
@@ -3939,7 +4003,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     if (files.length === 0) return
 
     console.log('Files selected:', files.map(f => ({ name: f.name, type: f.type, size: f.size })))
-    console.log('Selected agent:', selectedAgent?.name)
+    console.log('Upload target:', uploadModalTarget)
  
     const newFiles = files.map(file => ({
       id: Date.now() + Math.random(),
@@ -3950,14 +4014,19 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       preview: file.type.startsWith('image/') ? URL.createObjectURL(file) : null
     }))
 
-    setAttachedFiles(prev => {
-      const updated = [...prev, ...newFiles]
-      // Trigger OCR processing immediately with all files
-      processFilesForOcr(updated)
-      return updated
-    })
+    if (uploadModalTarget === 'deepResearch') {
+      setDeepResearchFiles(prev => [...prev, ...newFiles])
+      showToast(`${files.length} file${files.length > 1 ? 's' : ''} attached to research`)
+    } else {
+      setAttachedFiles(prev => {
+        const updated = [...prev, ...newFiles]
+        // Trigger OCR processing immediately with all files
+        processFilesForOcr(updated)
+        return updated
+      })
+      showToast(`${files.length} file${files.length > 1 ? 's' : ''} attached`)
+    }
     setShowAttachMenu(false)
-    showToast(`${files.length} file${files.length > 1 ? 's' : ''} attached`)
     
     // Reset file input
     if (fileInputRef.current) {
@@ -8611,6 +8680,214 @@ else console.log('Deleted successfully')`
     return out
   }
 
+  const sendDeepResearchMessage = async (message, signal) => {
+    const key = (openRouterApiKey || '').trim()
+    if (!key) {
+      throw new Error('OpenRouter API key not set (Settings → OpenRouter)')
+    }
+
+    // Fetch memories and RAG context
+    const memories = await fetchRelevantMemories(message).catch(() => [])
+    const docChunks = await fetchRelevantDocChunks(message).catch(() => [])
+
+    const memoryBlock = memories.length
+      ? `Known user info (memory):\n${memories
+          .slice(0, 10)
+          .map(m => `- (${m.memory_type}) ${m.content}`)
+          .join('\n')}`
+      : ''
+
+    const ragBlock = docChunks.length
+      ? `Relevant docs (RAG):\n${docChunks
+          .slice(0, 5)
+          .map((c, i) => `--- Chunk ${i + 1} ---\n${c.content}`)
+          .join('\n\n')}`
+      : ''
+
+    const profileBlock = buildUserProfileBlock()
+    const systemParts = [
+      'You are a helpful research assistant. Answer clearly and concisely.',
+      'When answering from the provided user context (memories or documents), respond naturally without mentioning "search results", "the search results", or explaining where you found the information. Just answer directly using the context provided.',
+      'Only use web search for questions about current events or information not in the provided context.',
+      profileBlock,
+      memoryBlock,
+      ragBlock,
+    ].filter(Boolean)
+    const system = systemParts.join('\n\n')
+
+    const history = deepResearchMessages
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-10)
+      .map(m => ({ role: m.role, content: m.content }))
+    const messages = [
+      { role: 'system', content: system },
+      ...history,
+      { role: 'user', content: message }
+    ]
+    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${key}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': window.location.origin,
+        'X-Title': 'Brain Mate AI',
+      },
+      signal,
+      body: JSON.stringify({
+        model: 'perplexity/sonar',
+        messages,
+        temperature: 0.2,
+      }),
+    })
+    const text = await resp.text()
+    if (!resp.ok) {
+      throw new Error(`OpenRouter error: ${resp.status} ${text}`)
+    }
+    let data
+    try {
+      data = JSON.parse(text)
+    } catch {
+      throw new Error(`OpenRouter returned invalid JSON: ${text.slice(0, 200)}`)
+    }
+    const out = data?.choices?.[0]?.message?.content
+    if (!out) throw new Error('OpenRouter returned no content')
+    return out
+  }
+
+  const handleDeepResearchSubmit = async (messageOverride) => {
+    const draftMessage = typeof messageOverride === 'string' ? messageOverride : deepResearchInput
+    const userMessage = (draftMessage || '').trim()
+    if (!userMessage || deepResearchTyping) return
+    
+    // Cancel any previous request
+    if (deepResearchAbortRef.current) {
+      try { deepResearchAbortRef.current.abort() } catch {}
+    }
+    const controller = new AbortController()
+    deepResearchAbortRef.current = controller
+
+    // Create new conversation if none active
+    let convId = activeDeepResearchId
+    if (!convId) {
+      convId = crypto.randomUUID()
+      setActiveDeepResearchId(convId)
+      const title = userMessage.slice(0, 30) + (userMessage.length > 30 ? '...' : '')
+      setDeepResearchConversations(prev => [
+        { id: convId, title, messages: [], createdAt: Date.now() },
+        ...prev
+      ])
+    }
+
+    // Process any attached files through OCR using the same infrastructure as main chat
+    let fileContext = ''
+    if (deepResearchFiles.length > 0) {
+      setDeepResearchProcessingFiles(true)
+      try {
+        const ocrRes = await processChatUploadsForOcrAndRag(deepResearchFiles)
+        fileContext = ocrRes.ocrContext || ''
+      } catch (e) {
+        console.error('File processing error:', e)
+      } finally {
+        setDeepResearchProcessingFiles(false)
+      }
+    }
+
+    const fullMessage = fileContext ? `[Document Context]\n${fileContext}\n\n[Question]\n${userMessage}` : userMessage
+    
+    setDeepResearchInput('')
+    setDeepResearchFiles([])
+    setDeepResearchTyping(true)
+    
+    const userMsg = { id: Date.now(), role: 'user', content: userMessage }
+    setDeepResearchMessages(prev => [...prev, userMsg])
+    
+    // Update conversation with user message
+    setDeepResearchConversations(prev => prev.map(c => 
+      c.id === convId ? { ...c, messages: [...c.messages, userMsg] } : c
+    ))
+    
+    try {
+      const response = await sendDeepResearchMessage(fullMessage, controller.signal)
+      const assistantMsg = { id: Date.now() + 1, role: 'assistant', content: response }
+      setDeepResearchMessages(prev => [...prev, assistantMsg])
+      
+      // Update conversation with assistant message
+      setDeepResearchConversations(prev => prev.map(c => 
+        c.id === convId ? { ...c, messages: [...c.messages, assistantMsg] } : c
+      ))
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        showToast('Stopped')
+        return
+      }
+      showToast(e.message || 'Deep research failed')
+      const errorMsg = { id: Date.now() + 1, role: 'assistant', content: `Error: ${e.message || 'Deep research failed'}` }
+      setDeepResearchMessages(prev => [...prev, errorMsg])
+      setDeepResearchConversations(prev => prev.map(c => 
+        c.id === convId ? { ...c, messages: [...c.messages, errorMsg] } : c
+      ))
+    } finally {
+      setDeepResearchTyping(false)
+      deepResearchAbortRef.current = null
+    }
+  }
+
+  const stopDeepResearch = () => {
+    if (deepResearchAbortRef.current) {
+      try { deepResearchAbortRef.current.abort() } catch {}
+      deepResearchAbortRef.current = null
+    }
+    setDeepResearchTyping(false)
+    showToast('Stopped')
+  }
+
+  const createNewDeepResearch = () => {
+    setActiveDeepResearchId(null)
+    setDeepResearchMessages([])
+    setShowDeepResearchPage(true)
+  }
+
+  const loadDeepResearchConversation = (convId) => {
+    const conv = deepResearchConversations.find(c => c.id === convId)
+    if (conv) {
+      setActiveDeepResearchId(convId)
+      setDeepResearchMessages(conv.messages || [])
+      setShowDeepResearchPage(true)
+    }
+  }
+
+  const deleteDeepResearchConversation = (convId) => {
+    setDeepResearchConversations(prev => prev.filter(c => c.id !== convId))
+    if (activeDeepResearchId === convId) {
+      setActiveDeepResearchId(null)
+      setDeepResearchMessages([])
+    }
+    showToast('Research deleted')
+  }
+
+  const handleDeepResearchFileSelect = (e) => {
+    const files = Array.from(e.target.files)
+    if (files.length === 0) return
+    const newFiles = files.map(file => ({
+      id: Date.now() + Math.random(),
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      file: file,
+      preview: file.type?.startsWith('image/') ? URL.createObjectURL(file) : null
+    }))
+    setDeepResearchFiles(prev => [...prev, ...newFiles])
+    e.target.value = ''
+  }
+
+  const removeDeepResearchFile = (fileId) => {
+    setDeepResearchFiles(prev => {
+      const file = prev.find(f => f.id === fileId)
+      if (file?.preview) URL.revokeObjectURL(file.preview)
+      return prev.filter(f => f.id !== fileId)
+    })
+  }
+
   const appBody = (
     <div className="app">
       {/* Sidebar */}
@@ -8702,6 +8979,21 @@ else console.log('Deleted successfully')`
                 </svg>
               </span>
               <span className="sidebar-nav-label">Knowledge Base</span>
+            </button>
+
+            <button
+              className="sidebar-nav-btn"
+              type="button"
+              onClick={createNewDeepResearch}
+            >
+              <span className="sidebar-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  <path d="M11 7v4l3 2"/>
+                </svg>
+              </span>
+              <span className="sidebar-nav-label">Deep Research</span>
             </button>
 
             <button
@@ -8801,7 +9093,7 @@ else console.log('Deleted successfully')`
                         <div
                           key={chat.id}
                           className={`project-chat-item ${chat.id === activeConversation ? 'active' : ''}`}
-                          onClick={() => setActiveConversation(chat.id)}
+                          onClick={() => { setActiveConversation(chat.id); setShowDeepResearchPage(false) }}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -8839,7 +9131,7 @@ else console.log('Deleted successfully')`
             <div
               key={conv.id}
                 className={`conversation-item ${conv.id === activeConversation ? 'active' : ''} ${chatProject ? 'in-project' : ''} ${moveToChatId === conv.id ? 'dropdown-open' : ''}`}
-              onClick={() => setActiveConversation(conv.id)}
+              onClick={() => { setActiveConversation(conv.id); setShowDeepResearchPage(false) }}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -8977,6 +9269,70 @@ else console.log('Deleted successfully')`
           })}
         </div>
 
+        {/* Deep Research Section */}
+        <div
+          className="chats-section-header deep-research-section-header"
+          onClick={() => {}}
+        >
+          <span className="chats-section-chevron expanded">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          </span>
+          <span className="chats-section-title deep-research-title">Deep Research</span>
+          <span className="chats-section-count deep-research-count">{deepResearchConversations.length}</span>
+          <button
+            className="new-deep-research-btn"
+            onClick={(e) => {
+              e.stopPropagation()
+              createNewDeepResearch()
+            }}
+            title="New research"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>
+          </button>
+        </div>
+
+        <div className="conversation-list deep-research-list">
+          {deepResearchConversations.map(conv => (
+            <div
+              key={conv.id}
+              className={`conversation-item deep-research-item ${conv.id === activeDeepResearchId && showDeepResearchPage ? 'active' : ''}`}
+              onClick={() => loadDeepResearchConversation(conv.id)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                <path d="M11 7v4l3 2"/>
+              </svg>
+              <span className="conversation-title">{conv.title}</span>
+              <div className="conversation-actions">
+                <button
+                  className="conversation-action-btn"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteDeepResearchConversation(conv.id)
+                  }}
+                  title="Delete"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          ))}
+          {deepResearchConversations.length === 0 && (
+            <div className="conversation-empty deep-research-empty">
+              No research yet
+            </div>
+          )}
+        </div>
+
         {/* Sidebar Footer */}
         <div className="sidebar-footer">
           <div className="sidebar-footer-row">
@@ -9008,7 +9364,7 @@ else console.log('Deleted successfully')`
       {/* Main Chat Area */}
       <main className="chat-main">
         {/* Chat View */}
-        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage) ? 'slide-out' : 'slide-in'}`}>
+        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showDeepResearchPage) ? 'slide-out' : 'slide-in'}`}>
           {!sidebarOpen && (
           <button className="open-sidebar" onClick={() => setSidebarOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -9369,7 +9725,10 @@ else console.log('Deleted successfully')`
                     <button 
                       type="button" 
                       className="action-btn"
-                      onClick={() => setShowUploadModal(true)}
+                      onClick={() => {
+                        setUploadModalTarget('chat')
+                        setShowUploadModal(true)
+                      }}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                         <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -9531,6 +9890,12 @@ else console.log('Deleted successfully')`
                 onClick={() => setSettingsTab('mcp')}
               >
                 MCP Servers
+              </button>
+              <button
+                className={`settings-tab ${settingsTab === 'deepsearch' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('deepsearch')}
+              >
+                Deep Search
               </button>
             </div>
 
@@ -10747,6 +11112,33 @@ else console.log('Deleted successfully')`
                       ))}
                     </div>
                   )}
+                </section>
+              </div>
+            )}
+
+            {settingsTab === 'deepsearch' && (
+              <div className="settings-tab-panel">
+                <section className="settings-page-section">
+                  <h2>Deep Research</h2>
+                  <p className="settings-page-description">
+                    Deep Research uses Perplexity Sonar via OpenRouter.
+                  </p>
+                  <div className="settings-input-group">
+                    <div className="settings-status-row">
+                      <span className="settings-status-label">Provider</span>
+                      <span className="settings-status-value">OpenRouter</span>
+                    </div>
+                    <div className="settings-status-row">
+                      <span className="settings-status-label">Model</span>
+                      <span className="settings-status-value">perplexity/sonar</span>
+                    </div>
+                    <div className="settings-status-row">
+                      <span className="settings-status-label">Status</span>
+                      <span className={`status-pill ${openRouterConnectState}`}>
+                        {openRouterConnectState}
+                      </span>
+                    </div>
+                  </div>
                 </section>
               </div>
             )}
@@ -14236,6 +14628,249 @@ else console.log('Deleted successfully')`
         </div>
         </>
         )}
+
+        {/* Deep Research Page */}
+        <div className={`chat-view ${showDeepResearchPage && !showSettingsPage && !showGalleryPage && !showKnowledgeBasePage ? 'slide-in' : 'slide-out'}`}>
+          {showDeepResearchPage && !showSettingsPage && !showGalleryPage && !showKnowledgeBasePage && (
+            <div className="deep-research-header">
+              <button className="deep-research-back-btn" onClick={() => setShowDeepResearchPage(false)} title="Back to Chat">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M19 12H5"/>
+                  <path d="M12 19l-7-7 7-7"/>
+                </svg>
+              </button>
+              <span className="deep-research-title">Deep Research</span>
+            </div>
+          )}
+          {showDeepResearchPage && !showSettingsPage && !showGalleryPage && !showKnowledgeBasePage && !sidebarOpen && (
+            <button className="open-sidebar" onClick={() => setSidebarOpen(true)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                <line x1="9" y1="3" x2="9" y2="21"></line>
+              </svg>
+            </button>
+          )}
+
+          <div className="chat-container">
+            {deepResearchMessages.length === 0 ? (
+              <div className="welcome-screen">
+                <div className="logo">
+                  <svg viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.8956zm16.0993 3.8558L12.6 8.3829l2.02-1.1638a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997z"/>
+                  </svg>
+                </div>
+                <h1>Deep Research</h1>
+              </div>
+            ) : (
+              <div className="messages">
+                {deepResearchRenderedMessages.map(message => (
+                  <div key={message.id} className={`message ${message.role}`}>
+                    {message.role === 'assistant' && (
+                      <div className="message-avatar">
+                        <svg viewBox="0 0 24 24" fill="currentColor" className="assistant-avatar">
+                          <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729z"/>
+                        </svg>
+                      </div>
+                    )}
+                    <div className="message-content">
+                      {message.role === 'user' ? (
+                        <div className="user-message-wrapper">
+                          <div className="user-message-bubble">
+                            <span className="user-message-text">{message.content}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="message-role">Deep Research</div>
+                          <div
+                            className="message-text formatted-response"
+                            dangerouslySetInnerHTML={{ __html: message.html || formatMarkdown(message.content) }}
+                          />
+                          <div className="message-actions">
+                            <button 
+                              className={`message-action-btn ${copiedMessageId === message.id ? 'active' : ''}`}
+                              title="Copy"
+                              onClick={() => handleCopy(message.content, message.id)}
+                            >
+                              {copiedMessageId === message.id ? (
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <polyline points="20 6 9 17 4 12"></polyline>
+                                </svg>
+                              ) : (
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                              )}
+                            </button>
+                            <button 
+                              type="button"
+                              className={`message-action-btn ${reactions[message.id] === 'liked' ? 'active liked' : ''}`}
+                              title="Good response"
+                              onPointerDown={(e) => {
+                                e.preventDefault()
+                                handleReaction(message.id, 'liked')
+                              }}
+                            >
+                              <svg viewBox="0 0 24 24" fill={reactions[message.id] === 'liked' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+                                <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                              </svg>
+                            </button>
+                            <button 
+                              type="button"
+                              className={`message-action-btn ${reactions[message.id] === 'disliked' ? 'active disliked' : ''}`}
+                              title="Bad response"
+                              onPointerDown={(e) => {
+                                e.preventDefault()
+                                handleReaction(message.id, 'disliked')
+                              }}
+                            >
+                              <svg viewBox="0 0 24 24" fill={reactions[message.id] === 'disliked' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
+                                <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h2.67A2.31 2.31 0 0 1 22 4v7a2.31 2.31 0 0 1-2.33 2H17"></path>
+                              </svg>
+                            </button>
+                            <button 
+                              className="message-action-btn" 
+                              title="Share"
+                              onClick={() => handleShare(message.content)}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                              </svg>
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {deepResearchTyping && (
+                  <div className="message assistant">
+                    <div className="message-avatar">
+                      <svg viewBox="0 0 24 24" fill="currentColor" className="assistant-avatar">
+                        <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729z"/>
+                      </svg>
+                    </div>
+                    <div className="message-content">
+                      <div className="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                <div ref={deepResearchEndRef} />
+              </div>
+            )}
+
+            <div className="input-area">
+              <form
+                className="input-form"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  handleDeepResearchSubmit()
+                }}
+              >
+                <div className="input-wrapper">
+                  {/* Attached Files Preview */}
+                  {deepResearchFiles.length > 0 && (
+                    <div className={`attached-files ${deepResearchProcessingFiles ? 'uploading' : ''}`}>
+                      {deepResearchProcessingFiles && (
+                        <div className="attached-files-uploading">
+                          <div className="upload-spinner"></div>
+                          <span>Processing files...</span>
+                        </div>
+                      )}
+                      {deepResearchFiles.map(file => (
+                        <div key={file.id} className="attached-file">
+                          {file.preview ? (
+                            <img src={file.preview} alt={file.name} className="file-preview-image" />
+                          ) : (
+                            <div className="file-icon">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                <polyline points="14 2 14 8 20 8"/>
+                              </svg>
+                            </div>
+                          )}
+                          <div className="file-info">
+                            <span className="file-name">{file.name}</span>
+                            <span className="file-size">{(file.size / 1024).toFixed(1)} KB</span>
+                          </div>
+                          <button 
+                            type="button" 
+                            className="remove-file-btn"
+                            onClick={() => removeDeepResearchFile(file.id)}
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <line x1="18" y1="6" x2="6" y2="18"/>
+                              <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <ChatTextarea
+                    externalValue={deepResearchInput}
+                    onValueChange={setDeepResearchInput}
+                    onSubmit={handleDeepResearchSubmit}
+                    placeholder={deepResearchProcessingFiles ? "Processing files..." : "Ask a research question..."}
+                    disabled={deepResearchTyping || deepResearchProcessingFiles}
+                  />
+                  <div className="input-bottom-bar">
+                    <div className="input-actions-left">
+                      <button
+                        type="button"
+                        className="action-btn"
+                        onClick={() => {
+                          setUploadModalTarget('deepResearch')
+                          setShowUploadModal(true)
+                        }}
+                        title="Attach files"
+                        disabled={deepResearchTyping}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="12" y1="5" x2="12" y2="19"></line>
+                          <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="input-actions-right">
+                      {deepResearchTyping ? (
+                        <button
+                          type="button"
+                          className="send-btn stop"
+                          onClick={stopDeepResearch}
+                          title="Stop generating"
+                        >
+                          <svg viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="6" y="6" width="12" height="12" rx="2"/>
+                          </svg>
+                        </button>
+                      ) : (
+                        <button
+                          type="submit"
+                          className="send-btn"
+                          disabled={(!deepResearchInput.trim() && deepResearchFiles.length === 0) || deepResearchProcessingFiles}
+                          title="Send message"
+                        >
+                          <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </form>
+              <p className="disclaimer">AI can make mistakes. Please double-check responses.</p>
+            </div>
+          </div>
+        </div>
       </main>
 
       {/* Code Canvas Panel - Only visible when code is added */}
@@ -14361,11 +14996,15 @@ else console.log('Deleted successfully')`
       )}
 
       {/* Upload Modal */}
-      {showUploadModal && (
+      {showUploadModal && (() => {
+        const modalFiles = uploadModalTarget === 'deepResearch' ? deepResearchFiles : attachedFiles
+        const setModalFiles = uploadModalTarget === 'deepResearch' ? setDeepResearchFiles : setAttachedFiles
+        const removeModalFile = uploadModalTarget === 'deepResearch' ? removeDeepResearchFile : removeAttachedFile
+        return (
         <div className="upload-modal-overlay" onClick={() => setShowUploadModal(false)}>
           <div className="upload-modal" onClick={(e) => e.stopPropagation()}>
             <div className="upload-modal-header">
-              <h2>Upload Documents</h2>
+              <h2>{uploadModalTarget === 'deepResearch' ? 'Upload to Research' : 'Upload Documents'}</h2>
               <button 
                 className="upload-modal-close"
                 onClick={() => setShowUploadModal(false)}
@@ -14417,25 +15056,27 @@ else console.log('Deleted successfully')`
               </div>
 
               {/* Attached Files List */}
-              {attachedFiles.length > 0 && (
+              {modalFiles.length > 0 && (
                 <div className="upload-files-list">
                   <div className="upload-files-header">
                     <span className="upload-files-count">
-                      {attachedFiles.length} file{attachedFiles.length > 1 ? 's' : ''} selected
+                      {modalFiles.length} file{modalFiles.length > 1 ? 's' : ''} selected
                     </span>
                     <button 
                       className="upload-clear-all"
                       onClick={() => {
-                        attachedFiles.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview) })
-                        setAttachedFiles([])
-                        setPreProcessedOcr({ ocrContext: '', postedMessage: '' })
+                        modalFiles.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview) })
+                        setModalFiles([])
+                        if (uploadModalTarget !== 'deepResearch') {
+                          setPreProcessedOcr({ ocrContext: '', postedMessage: '' })
+                        }
                       }}
                     >
                       Clear All
                     </button>
                   </div>
                   <div className="upload-files-grid">
-                    {attachedFiles.map(file => (
+                    {modalFiles.map(file => (
                       <div key={file.id} className="upload-file-item">
                         <div className="upload-file-preview">
                           {file.preview ? (
@@ -14455,7 +15096,7 @@ else console.log('Deleted successfully')`
                         </div>
                         <button 
                           className="upload-file-remove"
-                          onClick={() => removeAttachedFile(file.id)}
+                          onClick={() => removeModalFile(file.id)}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <line x1="18" y1="6" x2="6" y2="18"/>
@@ -14469,7 +15110,7 @@ else console.log('Deleted successfully')`
               )}
 
               {/* Upload Actions */}
-              {attachedFiles.length > 0 && (
+              {modalFiles.length > 0 && (
                 <div className="upload-modal-actions">
                   <button 
                     className="upload-cancel-btn"
@@ -14488,7 +15129,7 @@ else console.log('Deleted successfully')`
             </div>
           </div>
         </div>
-      )}
+      )})()}
 
       {/* Create Project Modal */}
       {showCreateProjectModal && (
