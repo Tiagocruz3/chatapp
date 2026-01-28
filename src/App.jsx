@@ -78,6 +78,147 @@ const decodeBasicEntities = (s) =>
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&')
 
+const safeJsonParse = (raw) => {
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+const getDomainFromUrl = (url) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+const buildSearchResultsHtml = ({ query = '', results = [] }) => {
+  const safeQuery = escapeHtmlText(query || '')
+  const normalizedResults = (Array.isArray(results) ? results : [])
+    .filter((r) => r && (r.url || r.link))
+    .slice(0, 6)
+    .map((r) => {
+      const url = String(r.url || r.link || '').trim()
+      const title = String(r.title || r.name || url)
+      const snippet = String(r.snippet || r.content || r.description || '')
+      const image =
+        r.image || r.thumbnail || r.image_url || r.img || r.thumbnail_url || ''
+      const domain = getDomainFromUrl(url)
+      const favicon = domain
+        ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=64`
+        : ''
+      return {
+        url,
+        title,
+        snippet,
+        image,
+        domain,
+        favicon,
+      }
+    })
+
+  const header = `
+    <div class="search-results-header">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"></circle>
+        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+      </svg>
+      <span>Search results for <strong>${safeQuery || 'your query'}</strong></span>
+      <span class="search-results-count">${normalizedResults.length} results</span>
+    </div>
+  `
+
+  if (normalizedResults.length === 0) {
+    return `
+      <div class="search-results-container">
+        ${header}
+        <div class="search-no-results">No results found.</div>
+      </div>
+    `
+  }
+
+  const list = normalizedResults
+    .map((r) => {
+      const safeTitle = escapeHtmlText(r.title)
+      const safeSnippet = escapeHtmlText(r.snippet)
+      const safeUrl = escapeHtmlAttr(r.url)
+      const safeDomain = escapeHtmlText(r.domain)
+      const safeFavicon = escapeHtmlAttr(r.favicon)
+      const safeImage = escapeHtmlAttr(r.image || '')
+      const imageHtml = r.image
+        ? `<div class="search-result-image"><img src="${safeImage}" alt="${safeTitle}" loading="lazy" /></div>`
+        : ''
+      const sourceHtml = r.domain
+        ? `<div class="search-result-source">
+             ${r.favicon ? `<img class="search-result-favicon" src="${safeFavicon}" alt="" loading="lazy" />` : ''}
+             <span class="search-result-domain">${safeDomain}</span>
+           </div>`
+        : ''
+      return `
+        <a class="search-result-card" href="${safeUrl}" target="_blank" rel="noopener noreferrer">
+          ${imageHtml}
+          <div class="search-result-content">
+            ${sourceHtml}
+            <h4 class="search-result-title">${safeTitle}</h4>
+            ${safeSnippet ? `<p class="search-result-snippet">${safeSnippet}</p>` : ''}
+          </div>
+        </a>
+      `
+    })
+    .join('')
+
+  return `
+    <div class="search-results-container">
+      ${header}
+      <div class="search-results-list">
+        ${list}
+      </div>
+      <div class="search-results-more">Open a result to read more</div>
+    </div>
+  `
+}
+
+const buildSearchMessageHtml = (content) => {
+  if (!content) return ''
+  if (content.results && Array.isArray(content.results)) {
+    return buildSearchResultsHtml({ query: content.query, results: content.results })
+  }
+
+  const rawHtml = String(content.html || '').trim()
+  if (!rawHtml) {
+    return buildSearchResultsHtml({ query: content.query, results: [] })
+  }
+
+  if (rawHtml.includes('search-results-container')) {
+    return rawHtml
+  }
+
+  const parsed = safeJsonParse(rawHtml)
+  if (parsed) {
+    const results = parsed.results || parsed.data || (Array.isArray(parsed) ? parsed : [])
+    if (Array.isArray(results)) {
+      return buildSearchResultsHtml({ query: parsed.query || content.query, results })
+    }
+  }
+
+  return `
+    <div class="search-results-container">
+      <div class="search-results-header">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"></circle>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+        </svg>
+        <span>Search results for <strong>${escapeHtmlText(content.query || 'your query')}</strong></span>
+      </div>
+      <div class="search-results-list">
+        ${rawHtml}
+      </div>
+    </div>
+  `
+}
+
 const safeBtoa = (str) => {
   try {
     return btoa(unescape(encodeURIComponent(str)))
@@ -9816,7 +9957,7 @@ else console.log('Deleted successfully')`
                         {message.content?.type === 'search' ? (
                           <div 
                             className="message-text search-message"
-                            dangerouslySetInnerHTML={{ __html: message.content.html }}
+                            dangerouslySetInnerHTML={{ __html: buildSearchMessageHtml(message.content) }}
                           />
                         ) : (
                           <div 
