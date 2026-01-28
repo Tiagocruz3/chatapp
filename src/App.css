@@ -80,7 +80,15 @@
   color: #22c55e;
 }
 
+.sidebar-nav-btn.coder-nav-btn .sidebar-nav-label {
+  color: #22c55e;
+}
+
 .sidebar-nav-btn.coder-nav-btn .sidebar-nav-icon {
+  color: #22c55e;
+}
+
+.sidebar-nav-btn.coder-nav-btn svg {
   color: #22c55e;
 }
 
