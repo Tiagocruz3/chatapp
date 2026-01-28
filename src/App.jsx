@@ -5,6 +5,7 @@ import { AuthGate } from './components/AuthGate'
 import * as pdfjsLib from 'pdfjs-dist/build/pdf'
 import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import mammoth from 'mammoth/mammoth.browser'
+import { WebContainer } from '@webcontainer/api'
 
 // pdf.js worker config (Vite)
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
@@ -1384,6 +1385,16 @@ function App() {
   const [previewContent, setPreviewContent] = useState('')
   const [consoleOutput, setConsoleOutput] = useState([])
   const [showConsole, setShowConsole] = useState(false)
+  const [consoleTab, setConsoleTab] = useState('preview') // 'preview' | 'terminal'
+  const [terminalOutput, setTerminalOutput] = useState([])
+  const [terminalInput, setTerminalInput] = useState('')
+  const [terminalStatus, setTerminalStatus] = useState('idle') // 'idle' | 'booting' | 'mounting' | 'running'
+  const [terminalCwd, setTerminalCwd] = useState('/')
+  const [terminalHistoryIndex, setTerminalHistoryIndex] = useState(-1)
+  const [terminalError, setTerminalError] = useState('')
+  const terminalOutputRef = useRef(null)
+  const webcontainerRef = useRef(null)
+  const webcontainerProjectIdRef = useRef(null)
   const [showDeployMenu, setShowDeployMenu] = useState(false)
   const [showCodeChat, setShowCodeChat] = useState(true) // Show/hide chat panel
   const [showNewProjectModal, setShowNewProjectModal] = useState(false)
@@ -4481,6 +4492,26 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     showToast('Agent deleted')
   }
 
+  const normalizeOpenRouterModel = (model) => {
+    const rawId = String(model?.id || '')
+    const rawName = String(model?.name || rawId)
+    if (!rawId) return null
+
+    let id = rawId
+    let name = rawName
+    if (id.includes('glm-4.5')) id = id.replace(/glm-4\.5/g, 'glm-4.7')
+    if (name.includes('glm-4.5')) name = name.replace(/glm-4\.5/g, 'glm-4.7')
+    if (name.includes('GLM 4.5')) name = name.replace(/GLM 4\.5/g, 'GLM 4.7')
+
+    return {
+      id,
+      name,
+      description: model?.description || '',
+      context_length: model?.context_length,
+      pricing: model?.pricing,
+    }
+  }
+
   const connectOpenRouter = async () => {
     if (!openRouterApiKey.trim()) {
       showToast('Add your OpenRouter API key first')
@@ -4511,14 +4542,11 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
         const prevById = new Map(prevList.map((m) => [m?.id, m]))
 
         for (const m of models) {
-          if (!m?.id) continue
-          prevById.set(m.id, {
-            id: m.id,
-            name: m.name || m.id,
-            description: m.description || '',
-            context_length: m.context_length,
-            pricing: m.pricing,
-          })
+          const normalized = normalizeOpenRouterModel(m)
+          if (!normalized?.id) continue
+          const isLegacyGlm = String(m?.id || '').includes('glm-4.5')
+          if (isLegacyGlm && prevById.has(normalized.id)) continue
+          prevById.set(normalized.id, normalized)
         }
 
         return Array.from(prevById.values()).filter((m) => m?.id)
@@ -6099,6 +6127,8 @@ Respond with the code files first, then a brief summary of what was created.`
     setLocalProjects(prev => prev.map(p =>
       p.id === projectId ? { ...p, updatedAt: new Date().toISOString() } : p
     ))
+
+    syncWebContainerFile(projectId, path, content)
   }
 
   // Save current file (Cmd+S handler)
@@ -6151,6 +6181,8 @@ Respond with the code files first, then a brief summary of what was created.`
     setNewItemParent('')
     showToast(`Created ${fileName}`)
 
+    syncWebContainerFile(activeLocalProject.id, filePath, '')
+
     // Open the new file
     openFileInTab({ name: fileName, path: filePath, type: 'file' }, activeLocalProject.id)
   }
@@ -6193,6 +6225,8 @@ Respond with the code files first, then a brief summary of what was created.`
     setNewItemName('')
     setNewItemParent('')
     showToast(`Created folder ${folderName}`)
+
+    syncWebContainerFolder(activeLocalProject.id, folderPath)
   }
 
   // Delete file or folder
@@ -6565,6 +6599,289 @@ Respond with the code files first, then a brief summary of what was created.`
     window.addEventListener('message', handleMessage)
     return () => window.removeEventListener('message', handleMessage)
   }, [])
+
+  const supportsWebContainer = () =>
+    typeof window !== 'undefined' &&
+    window.crossOriginIsolated &&
+    typeof SharedArrayBuffer !== 'undefined'
+
+  const appendTerminalOutput = useCallback((text, kind = 'output') => {
+    if (!text) return
+    setTerminalOutput(prev => {
+      const next = [...prev]
+      const last = next[next.length - 1]
+      if (last && last.kind === kind && kind === 'output') {
+        last.text += text
+        return [...next]
+      }
+      next.push({ kind, text })
+      return next
+    })
+  }, [])
+
+  const normalizeTerminalPath = (path) => {
+    const parts = path.split('/').filter(Boolean)
+    const stack = []
+    parts.forEach((part) => {
+      if (part === '.' || part === '') return
+      if (part === '..') {
+        stack.pop()
+        return
+      }
+      stack.push(part)
+    })
+    return `/${stack.join('/')}`
+  }
+
+  const resolveTerminalPath = (path) => {
+    if (!path || path === '/') return '/'
+    const base = path.startsWith('/') ? path : `${terminalCwd}/${path}`
+    return normalizeTerminalPath(base)
+  }
+
+  const buildWebContainerTree = (projectData) => {
+    const tree = {}
+    const fileContents = projectData?.fileContents || {}
+    const files = projectData?.files || []
+
+    const ensureDir = (segments) => {
+      let current = tree
+      segments.forEach((segment) => {
+        if (!current[segment]) {
+          current[segment] = { directory: {} }
+        }
+        current = current[segment].directory
+      })
+    }
+
+    const addFile = (filePath, content = '') => {
+      const segments = filePath.split('/').filter(Boolean)
+      if (segments.length === 0) return
+      const dirs = segments.slice(0, -1)
+      const filename = segments[segments.length - 1]
+      if (dirs.length > 0) ensureDir(dirs)
+      let current = tree
+      dirs.forEach((dir) => {
+        current = current[dir].directory
+      })
+      current[filename] = { file: { contents: content } }
+    }
+
+    files.filter(f => f.type === 'dir').forEach((dir) => {
+      const segments = dir.path.split('/').filter(Boolean)
+      if (segments.length > 0) ensureDir(segments)
+    })
+
+    Object.entries(fileContents).forEach(([path, content]) => {
+      addFile(path, content)
+    })
+
+    return tree
+  }
+
+  const ensureWebContainerDir = async (container, filePath) => {
+    const segments = filePath.split('/').filter(Boolean)
+    if (segments.length <= 1) return
+    let current = ''
+    for (let i = 0; i < segments.length - 1; i += 1) {
+      current += `/${segments[i]}`
+      try {
+        await container.fs.mkdir(current)
+      } catch {
+        // ignore if folder already exists
+      }
+    }
+  }
+
+  const ensureWebContainer = async () => {
+    if (!activeLocalProject) {
+      setTerminalError('Select or create a local project to use the terminal.')
+      return null
+    }
+    if (!supportsWebContainer()) {
+      setTerminalError('Terminal requires cross-origin isolation (COOP/COEP headers).')
+      return null
+    }
+    setTerminalError('')
+
+    let container = webcontainerRef.current
+    if (!container) {
+      setTerminalStatus('booting')
+      container = await WebContainer.boot()
+      webcontainerRef.current = container
+    }
+
+    if (webcontainerProjectIdRef.current !== activeLocalProject.id) {
+      setTerminalStatus('mounting')
+      const projectData = localProjectFiles[activeLocalProject.id]
+      const tree = buildWebContainerTree(projectData)
+      await container.mount(tree)
+      webcontainerProjectIdRef.current = activeLocalProject.id
+      setTerminalCwd('/')
+      setTerminalOutput([
+        { kind: 'info', text: `Mounted project: ${activeLocalProject.name}\n` }
+      ])
+    }
+
+    setTerminalStatus('idle')
+    return container
+  }
+
+  const syncWebContainerFile = async (projectId, path, content) => {
+    const container = webcontainerRef.current
+    if (!container || webcontainerProjectIdRef.current !== projectId) return
+    try {
+      await ensureWebContainerDir(container, path)
+      await container.fs.writeFile(path, content ?? '')
+    } catch (err) {
+      console.error('Failed to sync file to terminal:', err)
+    }
+  }
+
+  const syncWebContainerFolder = async (projectId, folderPath) => {
+    const container = webcontainerRef.current
+    if (!container || webcontainerProjectIdRef.current !== projectId) return
+    const segments = folderPath.split('/').filter(Boolean)
+    if (segments.length === 0) return
+    let current = ''
+    try {
+      for (let i = 0; i < segments.length; i += 1) {
+        current += `/${segments[i]}`
+        try {
+          await container.fs.mkdir(current)
+        } catch {
+          // ignore if folder already exists
+        }
+      }
+    } catch (err) {
+      console.error('Failed to sync folder to terminal:', err)
+    }
+  }
+
+  const parseTerminalCommand = (input) => {
+    const args = []
+    let current = ''
+    let quote = null
+    for (let i = 0; i < input.length; i += 1) {
+      const char = input[i]
+      if (quote) {
+        if (char === quote) {
+          quote = null
+        } else if (char === '\\' && i + 1 < input.length) {
+          current += input[i + 1]
+          i += 1
+        } else {
+          current += char
+        }
+      } else if (char === '"' || char === "'") {
+        quote = char
+      } else if (char === ' ') {
+        if (current) {
+          args.push(current)
+          current = ''
+        }
+      } else {
+        current += char
+      }
+    }
+    if (current) args.push(current)
+    return { command: args[0], args: args.slice(1) }
+  }
+
+  const handleTerminalCommand = async (rawInput) => {
+    const trimmed = rawInput.trim()
+    if (!trimmed) return
+
+    setConsoleTab('terminal')
+    setTerminalInput('')
+    setCommandHistory(prev => [...prev, trimmed])
+    setTerminalHistoryIndex(-1)
+    appendTerminalOutput(`$ ${trimmed}\n`, 'command')
+
+    if (trimmed === 'clear') {
+      setTerminalOutput([])
+      return
+    }
+
+    const container = await ensureWebContainer()
+    if (!container) return
+
+    const { command, args } = parseTerminalCommand(trimmed)
+    if (!command) return
+
+    if (command === 'cd') {
+      const target = args[0] || '/'
+      const nextPath = resolveTerminalPath(target)
+      try {
+        await container.fs.readdir(nextPath)
+        setTerminalCwd(nextPath)
+      } catch {
+        appendTerminalOutput(`cd: no such directory: ${target}\n`, 'error')
+      }
+      return
+    }
+
+    if (command === 'pwd') {
+      appendTerminalOutput(`${terminalCwd}\n`, 'output')
+      return
+    }
+
+    setTerminalStatus('running')
+    try {
+      const process = await container.spawn(command, args, { cwd: terminalCwd })
+      const decoder = new TextDecoder()
+      process.output.pipeTo(new WritableStream({
+        write(data) {
+          appendTerminalOutput(decoder.decode(data), 'output')
+        }
+      }))
+      const exitCode = await process.exit
+      appendTerminalOutput(`\n[exit code ${exitCode}]\n`, exitCode === 0 ? 'info' : 'error')
+    } catch (err) {
+      appendTerminalOutput(`${err.message || 'Command failed'}\n`, 'error')
+    } finally {
+      setTerminalStatus('idle')
+    }
+  }
+
+  const handleTerminalKeyDown = (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      handleTerminalCommand(terminalInput)
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (commandHistory.length === 0) return
+      const nextIndex = terminalHistoryIndex < 0 ? commandHistory.length - 1 : Math.max(0, terminalHistoryIndex - 1)
+      setTerminalHistoryIndex(nextIndex)
+      setTerminalInput(commandHistory[nextIndex] || '')
+      return
+    }
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      if (commandHistory.length === 0) return
+      const nextIndex = terminalHistoryIndex >= commandHistory.length - 1 ? -1 : terminalHistoryIndex + 1
+      setTerminalHistoryIndex(nextIndex)
+      setTerminalInput(nextIndex === -1 ? '' : (commandHistory[nextIndex] || ''))
+    }
+  }
+
+  useEffect(() => {
+    if (!terminalOutputRef.current) return
+    terminalOutputRef.current.scrollTop = terminalOutputRef.current.scrollHeight
+  }, [terminalOutput, consoleTab, showConsole])
+
+  useEffect(() => {
+    webcontainerProjectIdRef.current = null
+    setTerminalOutput([])
+    setTerminalInput('')
+    setTerminalError('')
+    setTerminalStatus('idle')
+    setTerminalCwd('/')
+  }, [activeLocalProject?.id])
 
   // Export project as ZIP
   const exportProjectAsZip = async () => {
@@ -8997,7 +9314,7 @@ else console.log('Deleted successfully')`
             </button>
 
             <button
-              className="sidebar-nav-btn"
+              className="sidebar-nav-btn coder-nav-btn"
               type="button"
               onClick={() => showToast('Code IDE coming soon')}
             >
@@ -9393,7 +9710,16 @@ else console.log('Deleted successfully')`
                   </div>
                   <div className="active-agent-info">
                     <span className="active-agent-name">{selectedAgent.name}</span>
-                    <span className="active-agent-label">Connected via n8n</span>
+                    <span className="active-agent-label">
+                      Connected via{' '}
+                      {selectedAgent.provider === 'openrouter'
+                        ? 'openrouter'
+                        : selectedAgent.provider === 'lmstudio'
+                          ? 'lmstudio'
+                          : selectedAgent.provider === 'mcp'
+                            ? 'mcp'
+                            : 'n8n'}
+                    </span>
                   </div>
                 </div>
               )}
@@ -13836,9 +14162,39 @@ else console.log('Deleted successfully')`
               {showConsole && (
                 <div className="code-console-panel">
                   <div className="code-console-header">
-                    <span>Console</span>
+                    <div className="code-console-title">
+                      <span>Console</span>
+                      <div className="code-console-tabs">
+                        <button
+                          type="button"
+                          className={consoleTab === 'preview' ? 'active' : ''}
+                          onClick={() => setConsoleTab('preview')}
+                        >
+                          Preview
+                        </button>
+                        <button
+                          type="button"
+                          className={consoleTab === 'terminal' ? 'active' : ''}
+                          onClick={() => setConsoleTab('terminal')}
+                        >
+                          Terminal
+                        </button>
+                      </div>
+                    </div>
                     <div className="code-console-actions">
-                      <button onClick={() => setConsoleOutput([])} title="Clear Console">
+                      {consoleTab === 'terminal' && terminalStatus !== 'idle' && (
+                        <span className="code-console-status">{terminalStatus}</span>
+                      )}
+                      <button
+                        onClick={() => {
+                          if (consoleTab === 'terminal') {
+                            setTerminalOutput([])
+                          } else {
+                            setConsoleOutput([])
+                          }
+                        }}
+                        title="Clear Console"
+                      >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                           <path d="M3 6h18"/>
                           <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
@@ -13852,20 +14208,55 @@ else console.log('Deleted successfully')`
                       </button>
                     </div>
                   </div>
-                  <div className="code-console-output">
-                    {consoleOutput.length === 0 ? (
-                      <div className="code-console-empty">No output yet. Run your code to see results.</div>
-                    ) : (
-                      consoleOutput.map((entry, i) => (
-                        <div key={i} className={`code-console-entry ${entry.level}`}>
-                          <span className="console-prefix">
-                            {entry.level === 'error' ? '✕' : entry.level === 'warn' ? '⚠' : '›'}
-                          </span>
-                          {entry.message}
-                        </div>
-                      ))
-                    )}
-                  </div>
+                  {consoleTab === 'preview' ? (
+                    <div className="code-console-output">
+                      {consoleOutput.length === 0 ? (
+                        <div className="code-console-empty">No output yet. Run your code to see results.</div>
+                      ) : (
+                        consoleOutput.map((entry, i) => (
+                          <div key={i} className={`code-console-entry ${entry.level}`}>
+                            <span className="console-prefix">
+                              {entry.level === 'error' ? '✕' : entry.level === 'warn' ? '⚠' : '›'}
+                            </span>
+                            {entry.message}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  ) : (
+                    <div className="code-terminal-panel">
+                      <div className="code-console-output code-terminal-output" ref={terminalOutputRef}>
+                        {terminalOutput.length === 0 ? (
+                          <div className="code-console-empty">Type a command to run in the project container.</div>
+                        ) : (
+                          terminalOutput.map((entry, i) => (
+                            <div key={i} className={`code-console-entry ${entry.kind}`}>
+                              <span className="console-prefix">
+                                {entry.kind === 'error' ? '✕' : entry.kind === 'info' ? '•' : entry.kind === 'command' ? '$' : '›'}
+                              </span>
+                              <pre>{entry.text}</pre>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      {terminalError && (
+                        <div className="code-terminal-error">{terminalError}</div>
+                      )}
+                      <div className="code-terminal-input-row">
+                        <span className="code-terminal-prompt">{terminalCwd} $</span>
+                        <input
+                          type="text"
+                          value={terminalInput}
+                          onChange={(e) => setTerminalInput(e.target.value)}
+                          onKeyDown={handleTerminalKeyDown}
+                          placeholder="npm install"
+                        />
+                        <button type="button" onClick={() => handleTerminalCommand(terminalInput)}>
+                          Run
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
