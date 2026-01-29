@@ -2788,6 +2788,12 @@ Respond ONLY with valid JSON, no other text.`
     }
   }
 
+  const getUserRateValue = (userId, field) => {
+    const value = adminUserRates[userId]?.[field]
+    if (value == null) return ''
+    return String(value)
+  }
+
   const loadAdminData = async () => {
     if (!dbEnabled || !isAdmin) return
     setAdminLoading(true)
@@ -12155,11 +12161,10 @@ else console.log('Deleted successfully')`
                         </div>
                         <div className="admin-rate-inputs">
                           <input
-                            type="number"
-                            min="0"
-                            step="0.0001"
+                            type="text"
+                            inputMode="decimal"
                             placeholder={`Input (${adminRates.inputCost})`}
-                            value={adminUserRates[row.user_id]?.inputCost ?? ''}
+                            value={getUserRateValue(row.user_id, 'inputCost')}
                             onChange={(e) =>
                               setAdminUserRates((prev) => ({
                                 ...prev,
@@ -12171,11 +12176,10 @@ else console.log('Deleted successfully')`
                             }
                           />
                           <input
-                            type="number"
-                            min="0"
-                            step="0.0001"
+                            type="text"
+                            inputMode="decimal"
                             placeholder={`Output (${adminRates.outputCost})`}
-                            value={adminUserRates[row.user_id]?.outputCost ?? ''}
+                            value={getUserRateValue(row.user_id, 'outputCost')}
                             onChange={(e) =>
                               setAdminUserRates((prev) => ({
                                 ...prev,
