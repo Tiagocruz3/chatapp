@@ -54,6 +54,7 @@ const languageNames = {
 }
 
 const CODE_NL_SENTINEL = '__CODE_NL__'
+const ADMIN_EMAIL = 'tiagocruz3@gmail.com'
 
 const escapeHtmlAttr = (s) =>
   String(s)
@@ -77,6 +78,71 @@ const decodeBasicEntities = (s) =>
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&')
+
+const stripMarkdown = (input) => {
+  const text = String(input || '')
+  if (!text) return ''
+  let out = text
+    // Code blocks
+    .replace(/```[\s\S]*?\n([\s\S]*?)```/g, (_, code) => code.trim())
+    // Inline code
+    .replace(/`([^`]+)`/g, '$1')
+    // Images
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
+    // Links
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Headings
+    .replace(/^#{1,6}\s+/gm, '')
+    // Bold/italic
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    // Blockquotes
+    .replace(/^>\s?/gm, '')
+    // List markers
+    .replace(/^[\s]*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    // HTML tags (in case content already has HTML)
+    .replace(/<[^>]+>/g, '')
+
+  return out.trim()
+}
+
+const normalizeAssistantResult = (result) => {
+  if (typeof result === 'string') {
+    return { text: result, usage: null }
+  }
+  if (result && typeof result === 'object') {
+    const text = typeof result.text === 'string'
+      ? result.text
+      : typeof result.content === 'string'
+        ? result.content
+        : ''
+    return { text, usage: result.usage || null }
+  }
+  return { text: String(result ?? ''), usage: null }
+}
+
+const normalizeTokenUsage = (usage) => {
+  if (!usage || typeof usage !== 'object') return { inputTokens: 0, outputTokens: 0 }
+  const inputTokens =
+    usage.prompt_tokens ??
+    usage.input_tokens ??
+    usage.inputTokens ??
+    usage.promptTokens ??
+    0
+  const outputTokens =
+    usage.completion_tokens ??
+    usage.output_tokens ??
+    usage.outputTokens ??
+    usage.completionTokens ??
+    0
+  return {
+    inputTokens: Number(inputTokens || 0),
+    outputTokens: Number(outputTokens || 0),
+  }
+}
 
 const safeJsonParse = (raw) => {
   try {
@@ -1428,6 +1494,7 @@ function App() {
       return false
     }
   })
+  const [showAdminPage, setShowAdminPage] = useState(false)
   const [showDeepResearchPage, setShowDeepResearchPage] = useState(() => {
     try {
       return sessionStorage.getItem('showDeepResearchPage') === 'true'
@@ -1437,6 +1504,12 @@ function App() {
   const [showGalleryPage, setShowGalleryPage] = useState(false)
   const [showKnowledgeBasePage, setShowKnowledgeBasePage] = useState(false)
   const [knowledgeBaseTab, setKnowledgeBaseTab] = useState('memory') // memory | rag | graph
+  const [adminUsers, setAdminUsers] = useState([])
+  const [adminUsage, setAdminUsage] = useState([])
+  const [adminRates, setAdminRates] = useState({ inputCost: 0, outputCost: 0 })
+  const [adminLoading, setAdminLoading] = useState(false)
+  const [adminError, setAdminError] = useState('')
+  const [adminSavingRates, setAdminSavingRates] = useState(false)
   const [deepResearchConversations, setDeepResearchConversations] = useState(() => {
     try {
       const saved = localStorage.getItem('deepResearchConversations')
@@ -1893,12 +1966,18 @@ function App() {
   }, [showSettingsPage])
 
   useEffect(() => {
+    if (!showAdminPage || !isAdmin) return
+    loadAdminData()
+  }, [showAdminPage, isAdmin, dbEnabled])
+
+  useEffect(() => {
     try {
       sessionStorage.setItem('ui_settingsTab', settingsTab || 'n8n')
     } catch {}
   }, [settingsTab])
 
   const dbEnabled = Boolean(isSupabaseConfigured && supabase && authUser)
+  const isAdmin = (authUser?.email || '').toLowerCase() === ADMIN_EMAIL
 
   const loadGeneratedImages = async () => {
     if (!dbEnabled) return
@@ -2675,6 +2754,99 @@ Respond ONLY with valid JSON, no other text.`
     if (profileDraft.timezone?.trim()) parts.push(`- timezone: ${profileDraft.timezone.trim()}`)
     if (profileDraft.about?.trim()) parts.push(`- about: ${profileDraft.about.trim()}`)
     return parts.length ? `User profile:\n${parts.join('\n')}` : ''
+  }
+
+  const formatNumber = (value) => {
+    if (value == null || Number.isNaN(value)) return '0'
+    return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
+  }
+
+  const calculateCost = (inputTokens, outputTokens) => {
+    const inputCost = (Number(inputTokens || 0) / 1_000_000) * Number(adminRates.inputCost || 0)
+    const outputCost = (Number(outputTokens || 0) / 1_000_000) * Number(adminRates.outputCost || 0)
+    return {
+      inputCost,
+      outputCost,
+      totalCost: inputCost + outputCost,
+    }
+  }
+
+  const loadAdminData = async () => {
+    if (!dbEnabled || !isAdmin) return
+    setAdminLoading(true)
+    setAdminError('')
+    try {
+      const [{ data: profilesData, error: profilesError }, { data: usageData, error: usageError }, { data: settingsData, error: settingsError }] = await Promise.all([
+        supabase
+          .from('profiles')
+          .select('user_id,display_name,email,created_at')
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('user_usage')
+          .select('user_id,input_tokens,output_tokens,updated_at'),
+        supabase
+          .from('admin_settings')
+          .select('input_cost_per_million,output_cost_per_million')
+          .eq('id', 1)
+          .maybeSingle()
+      ])
+
+      if (profilesError) throw profilesError
+      if (usageError) throw usageError
+      if (settingsError) throw settingsError
+
+      setAdminUsers(profilesData || [])
+      setAdminUsage(usageData || [])
+      if (settingsData) {
+        setAdminRates({
+          inputCost: Number(settingsData.input_cost_per_million || 0),
+          outputCost: Number(settingsData.output_cost_per_million || 0),
+        })
+      }
+    } catch (err) {
+      console.error('Admin load failed:', err)
+      setAdminError(err.message || 'Failed to load admin data')
+    } finally {
+      setAdminLoading(false)
+    }
+  }
+
+  const saveAdminRates = async () => {
+    if (!dbEnabled || !isAdmin) return
+    setAdminSavingRates(true)
+    setAdminError('')
+    try {
+      const payload = {
+        id: 1,
+        input_cost_per_million: Number(adminRates.inputCost || 0),
+        output_cost_per_million: Number(adminRates.outputCost || 0),
+      }
+      const { error } = await supabase.from('admin_settings').upsert(payload)
+      if (error) throw error
+      showToast('Rates updated')
+      await loadAdminData()
+    } catch (err) {
+      console.error('Failed to save rates:', err)
+      setAdminError(err.message || 'Failed to save rates')
+    } finally {
+      setAdminSavingRates(false)
+    }
+  }
+
+  const recordUsage = async (usage) => {
+    if (!dbEnabled || !authUser?.id) return
+    const { inputTokens, outputTokens } = normalizeTokenUsage(usage)
+    if (!inputTokens && !outputTokens) return
+    try {
+      const { error } = await supabase.rpc('increment_user_usage', {
+        p_user_id: authUser.id,
+        p_input_tokens: inputTokens,
+        p_output_tokens: outputTokens,
+      })
+      if (error) throw error
+    } catch (err) {
+      console.error('Failed to record usage:', err)
+    }
   }
 
   const loadChatsFromDb = async () => {
@@ -3661,7 +3833,8 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
   // Copy message to clipboard
   const handleCopy = async (content, messageId) => {
     try {
-      await navigator.clipboard.writeText(content)
+      const text = typeof content === 'string' ? stripMarkdown(content) : String(content ?? '')
+      await navigator.clipboard.writeText(text)
       setCopiedMessageId(messageId)
       showToast('Copied to clipboard!')
       setTimeout(() => setCopiedMessageId(null), 2000)
@@ -3982,7 +4155,12 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
             `![Generated image](${url})`
         } else if (selectedAgent) {
         setTypingStatus('generating')
-        responseContent = await sendMessageToAgent(userMessage.content, attachments, ocrContextForThisTurn, abortController.signal)
+        const agentResult = await sendMessageToAgent(userMessage.content, attachments, ocrContextForThisTurn, abortController.signal)
+        const normalized = normalizeAssistantResult(agentResult)
+        responseContent = normalized.text
+        if (normalized.usage) {
+          await recordUsage(normalized.usage)
+        }
         } else {
         setTypingStatus('generating')
           await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000))
@@ -4106,6 +4284,29 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       ?.filter(Boolean)
       ?.reverse() || []
   }, [codeMessages])
+
+  const adminUsageMap = useMemo(() => {
+    const map = new Map()
+    adminUsage.forEach((row) => {
+      if (row?.user_id) map.set(row.user_id, row)
+    })
+    return map
+  }, [adminUsage])
+
+  const adminRows = useMemo(() => {
+    return adminUsers.map((user) => {
+      const usage = adminUsageMap.get(user.user_id) || {}
+      const inputTokens = Number(usage.input_tokens || 0)
+      const outputTokens = Number(usage.output_tokens || 0)
+      const costs = calculateCost(inputTokens, outputTokens)
+      return {
+        ...user,
+        inputTokens,
+        outputTokens,
+        ...costs,
+      }
+    })
+  }, [adminUsers, adminUsageMap, adminRates])
 
   // Close attach menu when clicking outside
   useEffect(() => {
@@ -5583,7 +5784,9 @@ Respond with the code files first, then a brief summary of what was created.`
         response = data.choices?.[0]?.message?.content || ''
       } else {
         // Fall back to the agent router (n8n/mcp)
-        response = await sendMessageToAgent(userMessage, [], systemPrompt, undefined)
+        response = normalizeAssistantResult(
+          await sendMessageToAgent(userMessage, [], systemPrompt, undefined)
+        ).text
       }
 
       // If the agent returned only a summary with no code blocks, retry once with strict output
@@ -5619,7 +5822,9 @@ Respond with the code files first, then a brief summary of what was created.`
             } catch {}
           }
         } else {
-          response = await sendMessageToAgent(userMessage, [], strictSystemPrompt, undefined)
+          response = normalizeAssistantResult(
+            await sendMessageToAgent(userMessage, [], strictSystemPrompt, undefined)
+          ).text
         }
       }
 
@@ -8004,7 +8209,8 @@ else console.log('Deleted successfully')`
     
     // MCP Agent - execute workflow via MCP
     if (selectedAgent?.provider === 'mcp') {
-      return await sendMessageToMcpWorkflow(message, extraContext, signal)
+      const text = await sendMessageToMcpWorkflow(message, extraContext, signal)
+      return { text, usage: null }
     }
 
     // Use agent's own webhook URL if available, otherwise fall back to global webhook
@@ -8086,7 +8292,7 @@ else console.log('Deleted successfully')`
       
       console.log('Agent final response:', responseText)
       
-      return responseText
+      return { text: responseText, usage: null }
     } catch (err) {
       console.error('Send message error:', err)
       throw err
@@ -9050,7 +9256,8 @@ else console.log('Deleted successfully')`
 
     const text = choice?.message?.content
     if (!text) throw new Error('OpenRouter returned no content')
-    return text
+    const usage = data?.usage || choice?.usage || null
+    return { text, usage }
   }
 
   const sendMessageToLmStudio = async (message, extraContext = '', signal) => {
@@ -9135,7 +9342,8 @@ else console.log('Deleted successfully')`
     }
     const out = data?.choices?.[0]?.message?.content
     if (!out) throw new Error('LM Studio returned no content')
-    return out
+    const usage = data?.usage || data?.choices?.[0]?.usage || null
+    return { text: out, usage }
   }
 
   const sendDeepResearchMessage = async (message, signal) => {
@@ -9349,7 +9557,7 @@ else console.log('Deleted successfully')`
   const appBody = (
     <div className="app">
       {/* Sidebar */}
-      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage) ? 'hidden' : ''}`}>
+      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showAdminPage) ? 'hidden' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-top-actions">
             {/* Sidebar toggle (close) */}
@@ -9805,6 +10013,18 @@ else console.log('Deleted successfully')`
               <span className="user-email">{user.email}</span>
             </div>
             </div>
+            {isAdmin && (
+              <button
+                className="sidebar-settings-btn"
+                onClick={() => setShowAdminPage(true)}
+                title="Admin"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/>
+                  <path d="M9 12l2 2 4-4"/>
+                </svg>
+              </button>
+            )}
             <button
               className="sidebar-settings-btn"
               onClick={() => setShowSettingsPage(true)}
@@ -9822,7 +10042,7 @@ else console.log('Deleted successfully')`
       {/* Main Chat Area */}
       <main className="chat-main">
         {/* Chat View */}
-        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showDeepResearchPage) ? 'slide-out' : 'slide-in'}`}>
+        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showDeepResearchPage || showAdminPage) ? 'slide-out' : 'slide-in'}`}>
           {!sidebarOpen && (
           <button className="open-sidebar" onClick={() => setSidebarOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -11732,6 +11952,124 @@ else console.log('Deleted successfully')`
             </section>
           </div>
         </div>
+
+        {/* Admin Page */}
+        {isAdmin && (
+          <div className={`settings-page admin-page ${showAdminPage ? 'slide-in' : 'slide-out'}`}>
+            <div className="settings-page-header">
+              <button
+                className="settings-back-btn"
+                onClick={() => setShowAdminPage(false)}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M19 12H5"/>
+                  <path d="M12 19l-7-7 7-7"/>
+                </svg>
+              </button>
+              <h1>Admin</h1>
+            </div>
+            <div className="settings-page-content">
+              {!dbEnabled && (
+                <div className="settings-help-text">
+                  Supabase is required for admin management.
+                </div>
+              )}
+
+              {adminError && (
+                <div className="settings-error-message" style={{ marginTop: 12 }}>
+                  {adminError}
+                </div>
+              )}
+
+              <section className="settings-page-section">
+                <h2>Usage Rates</h2>
+                <p className="settings-page-description">
+                  Set your input/output cost per 1M tokens for accurate cost reporting.
+                </p>
+                <div className="settings-input-group">
+                  <label htmlFor="admin-input-cost">Input cost (per 1M tokens)</label>
+                  <input
+                    id="admin-input-cost"
+                    type="number"
+                    min="0"
+                    step="0.0001"
+                    value={adminRates.inputCost}
+                    onChange={(e) => setAdminRates((prev) => ({ ...prev, inputCost: e.target.value }))}
+                  />
+                  <label htmlFor="admin-output-cost">Output cost (per 1M tokens)</label>
+                  <input
+                    id="admin-output-cost"
+                    type="number"
+                    min="0"
+                    step="0.0001"
+                    value={adminRates.outputCost}
+                    onChange={(e) => setAdminRates((prev) => ({ ...prev, outputCost: e.target.value }))}
+                  />
+                  <div className="settings-button-row">
+                    <button
+                      className="settings-test-btn"
+                      type="button"
+                      onClick={saveAdminRates}
+                      disabled={adminSavingRates || !dbEnabled}
+                    >
+                      {adminSavingRates ? 'Saving...' : 'Save Rates'}
+                    </button>
+                    <button
+                      className="settings-clear-btn"
+                      type="button"
+                      onClick={loadAdminData}
+                      disabled={adminLoading || !dbEnabled}
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section className="settings-page-section">
+                <div className="settings-page-section-header">
+                  <h2>User Management & Usage</h2>
+                  <span className="agents-count">{adminRows.length} users</span>
+                </div>
+                {adminLoading ? (
+                  <div className="settings-form-hint">Loading users…</div>
+                ) : (
+                  <div className="admin-table">
+                    <div className="admin-table-header">
+                      <span>User</span>
+                      <span>Input Tokens</span>
+                      <span>Output Tokens</span>
+                      <span>Cost</span>
+                    </div>
+                    {adminRows.map((row) => (
+                      <div key={row.user_id} className="admin-table-row">
+                        <div className="admin-user">
+                          <div className="admin-user-name">
+                            {row.display_name || row.email || row.user_id}
+                          </div>
+                          <div className="admin-user-meta">
+                            {row.email || 'No email'}
+                            {row.email?.toLowerCase() === ADMIN_EMAIL && (
+                              <span className="admin-badge">Admin</span>
+                            )}
+                          </div>
+                        </div>
+                        <div>{formatNumber(row.inputTokens)}</div>
+                        <div>{formatNumber(row.outputTokens)}</div>
+                        <div className="admin-cost">
+                          ${formatNumber(row.totalCost)}
+                        </div>
+                      </div>
+                    ))}
+                    {adminRows.length === 0 && (
+                      <div className="settings-form-hint">No users found.</div>
+                    )}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+        )}
 
         {/* Knowledge Base Page */}
         <div className={`kb-page ${showKnowledgeBasePage ? 'slide-in' : 'slide-out'}`}>

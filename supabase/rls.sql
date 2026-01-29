@@ -23,14 +23,46 @@ returns boolean as $$
   );
 $$ language sql stable;
 
+-- Helper: admin check (by email)
+create or replace function public.is_admin()
+returns boolean as $$
+  select (auth.jwt() ->> 'email') = 'tiagocruz3@gmail.com';
+$$ language sql stable;
+
 -- PROFILES
 drop policy if exists "profiles_select_own" on public.profiles;
 create policy "profiles_select_own" on public.profiles
-for select using (user_id = auth.uid());
+for select using (user_id = auth.uid() or public.is_admin());
 
 drop policy if exists "profiles_update_own" on public.profiles;
 create policy "profiles_update_own" on public.profiles
-for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+for update using (user_id = auth.uid() or public.is_admin()) with check (user_id = auth.uid() or public.is_admin());
+
+-- ADMIN SETTINGS
+alter table public.admin_settings enable row level security;
+
+drop policy if exists "admin_settings_select_admin" on public.admin_settings;
+create policy "admin_settings_select_admin" on public.admin_settings
+for select using (public.is_admin());
+
+drop policy if exists "admin_settings_write_admin" on public.admin_settings;
+create policy "admin_settings_write_admin" on public.admin_settings
+for all using (public.is_admin()) with check (public.is_admin());
+
+-- USER USAGE
+alter table public.user_usage enable row level security;
+
+drop policy if exists "user_usage_select_self_or_admin" on public.user_usage;
+create policy "user_usage_select_self_or_admin" on public.user_usage
+for select using (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "user_usage_insert_self_or_admin" on public.user_usage;
+create policy "user_usage_insert_self_or_admin" on public.user_usage
+for insert with check (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "user_usage_update_self_or_admin" on public.user_usage;
+create policy "user_usage_update_self_or_admin" on public.user_usage
+for update using (user_id = auth.uid() or public.is_admin()) with check (user_id = auth.uid() or public.is_admin());
 
 -- ORGS + MEMBERSHIPS
 drop policy if exists "orgs_select_member" on public.orgs;

@@ -12,11 +12,15 @@ create extension if not exists "vector";
 create table if not exists public.profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   display_name text,
+  email text,
   avatar_url text,
   settings jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.profiles
+  add column if not exists email text;
 
 create or replace function public.set_updated_at()
 returns trigger as $$
@@ -35,12 +39,64 @@ for each row execute function public.set_updated_at();
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles(user_id, display_name)
-  values (new.id, coalesce(new.raw_user_meta_data->>'name', new.email))
+  insert into public.profiles(user_id, display_name, email)
+  values (new.id, coalesce(new.raw_user_meta_data->>'name', new.email), new.email)
   on conflict (user_id) do nothing;
   return new;
 end;
 $$ language plpgsql security definer;
+
+-- ADMIN SETTINGS (singleton row)
+create table if not exists public.admin_settings (
+  id int primary key check (id = 1),
+  input_cost_per_million numeric not null default 0,
+  output_cost_per_million numeric not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+insert into public.admin_settings (id, input_cost_per_million, output_cost_per_million)
+values (1, 0, 0)
+on conflict (id) do nothing;
+
+drop trigger if exists trg_admin_settings_updated_at on public.admin_settings;
+create trigger trg_admin_settings_updated_at
+before update on public.admin_settings
+for each row execute function public.set_updated_at();
+
+-- USER USAGE (aggregated tokens per user)
+create table if not exists public.user_usage (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  input_tokens bigint not null default 0,
+  output_tokens bigint not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_user_usage_updated_at on public.user_usage;
+create trigger trg_user_usage_updated_at
+before update on public.user_usage
+for each row execute function public.set_updated_at();
+
+create or replace function public.increment_user_usage(
+  p_user_id uuid,
+  p_input_tokens bigint,
+  p_output_tokens bigint
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.user_usage (user_id, input_tokens, output_tokens)
+  values (p_user_id, greatest(p_input_tokens, 0), greatest(p_output_tokens, 0))
+  on conflict (user_id) do update set
+    input_tokens = public.user_usage.input_tokens + greatest(excluded.input_tokens, 0),
+    output_tokens = public.user_usage.output_tokens + greatest(excluded.output_tokens, 0),
+    updated_at = now();
+end;
+$$;
 
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
