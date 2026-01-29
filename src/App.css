@@ -6379,7 +6379,7 @@ button,
 .admin-table-header,
 .admin-table-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 1fr;
+  grid-template-columns: 2fr 1.4fr 1fr 1fr 1fr 1.3fr;
   gap: 12px;
   padding: 12px 16px;
   align-items: center;
@@ -6443,6 +6443,76 @@ button,
 .admin-cost {
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.admin-models {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.admin-models-empty {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.admin-model-pill {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+  font-size: 11px;
+  align-items: center;
+}
+
+.admin-model-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-model-tokens {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.admin-rate-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.admin-rate-inputs input {
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.admin-rate-save-btn {
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.admin-rate-save-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .settings-page-section h2 {

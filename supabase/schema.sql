@@ -78,6 +78,36 @@ create trigger trg_user_usage_updated_at
 before update on public.user_usage
 for each row execute function public.set_updated_at();
 
+-- USER USAGE BY MODEL
+create table if not exists public.user_usage_models (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  model text not null,
+  input_tokens bigint not null default 0,
+  output_tokens bigint not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, model)
+);
+
+drop trigger if exists trg_user_usage_models_updated_at on public.user_usage_models;
+create trigger trg_user_usage_models_updated_at
+before update on public.user_usage_models
+for each row execute function public.set_updated_at();
+
+-- USER PRICING OVERRIDES
+create table if not exists public.user_pricing (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  input_cost_per_million numeric,
+  output_cost_per_million numeric,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_user_pricing_updated_at on public.user_pricing;
+create trigger trg_user_pricing_updated_at
+before update on public.user_pricing
+for each row execute function public.set_updated_at();
+
 create or replace function public.increment_user_usage(
   p_user_id uuid,
   p_input_tokens bigint,
@@ -94,6 +124,34 @@ begin
   on conflict (user_id) do update set
     input_tokens = public.user_usage.input_tokens + greatest(excluded.input_tokens, 0),
     output_tokens = public.user_usage.output_tokens + greatest(excluded.output_tokens, 0),
+    updated_at = now();
+end;
+$$;
+
+create or replace function public.increment_user_usage_model(
+  p_user_id uuid,
+  p_model text,
+  p_input_tokens bigint,
+  p_output_tokens bigint
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  insert into public.user_usage (user_id, input_tokens, output_tokens)
+  values (p_user_id, greatest(p_input_tokens, 0), greatest(p_output_tokens, 0))
+  on conflict (user_id) do update set
+    input_tokens = public.user_usage.input_tokens + greatest(excluded.input_tokens, 0),
+    output_tokens = public.user_usage.output_tokens + greatest(excluded.output_tokens, 0),
+    updated_at = now();
+
+  insert into public.user_usage_models (user_id, model, input_tokens, output_tokens)
+  values (p_user_id, coalesce(p_model, 'unknown'), greatest(p_input_tokens, 0), greatest(p_output_tokens, 0))
+  on conflict (user_id, model) do update set
+    input_tokens = public.user_usage_models.input_tokens + greatest(excluded.input_tokens, 0),
+    output_tokens = public.user_usage_models.output_tokens + greatest(excluded.output_tokens, 0),
     updated_at = now();
 end;
 $$;

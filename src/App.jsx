@@ -1506,10 +1506,13 @@ function App() {
   const [knowledgeBaseTab, setKnowledgeBaseTab] = useState('memory') // memory | rag | graph
   const [adminUsers, setAdminUsers] = useState([])
   const [adminUsage, setAdminUsage] = useState([])
+  const [adminUsageModels, setAdminUsageModels] = useState([])
   const [adminRates, setAdminRates] = useState({ inputCost: 0, outputCost: 0 })
+  const [adminUserRates, setAdminUserRates] = useState({})
   const [adminLoading, setAdminLoading] = useState(false)
   const [adminError, setAdminError] = useState('')
   const [adminSavingRates, setAdminSavingRates] = useState(false)
+  const [adminSavingUsers, setAdminSavingUsers] = useState({})
   const [deepResearchConversations, setDeepResearchConversations] = useState(() => {
     try {
       const saved = localStorage.getItem('deepResearchConversations')
@@ -2761,9 +2764,23 @@ Respond ONLY with valid JSON, no other text.`
     return new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(value)
   }
 
-  const calculateCost = (inputTokens, outputTokens) => {
-    const inputCost = (Number(inputTokens || 0) / 1_000_000) * Number(adminRates.inputCost || 0)
-    const outputCost = (Number(outputTokens || 0) / 1_000_000) * Number(adminRates.outputCost || 0)
+  const getEffectiveRatesForUser = (userId) => {
+    const userRates = adminUserRates[userId] || {}
+    const inputCost =
+      userRates.inputCost !== '' && userRates.inputCost != null
+        ? Number(userRates.inputCost || 0)
+        : Number(adminRates.inputCost || 0)
+    const outputCost =
+      userRates.outputCost !== '' && userRates.outputCost != null
+        ? Number(userRates.outputCost || 0)
+        : Number(adminRates.outputCost || 0)
+    return { inputCost, outputCost }
+  }
+
+  const calculateCost = (inputTokens, outputTokens, userId) => {
+    const rates = getEffectiveRatesForUser(userId)
+    const inputCost = (Number(inputTokens || 0) / 1_000_000) * Number(rates.inputCost || 0)
+    const outputCost = (Number(outputTokens || 0) / 1_000_000) * Number(rates.outputCost || 0)
     return {
       inputCost,
       outputCost,
@@ -2776,7 +2793,13 @@ Respond ONLY with valid JSON, no other text.`
     setAdminLoading(true)
     setAdminError('')
     try {
-      const [{ data: profilesData, error: profilesError }, { data: usageData, error: usageError }, { data: settingsData, error: settingsError }] = await Promise.all([
+      const [
+        { data: profilesData, error: profilesError },
+        { data: usageData, error: usageError },
+        { data: modelUsageData, error: modelUsageError },
+        { data: pricingData, error: pricingError },
+        { data: settingsData, error: settingsError },
+      ] = await Promise.all([
         supabase
           .from('profiles')
           .select('user_id,display_name,email,created_at')
@@ -2784,6 +2807,12 @@ Respond ONLY with valid JSON, no other text.`
         supabase
           .from('user_usage')
           .select('user_id,input_tokens,output_tokens,updated_at'),
+        supabase
+          .from('user_usage_models')
+          .select('user_id,model,input_tokens,output_tokens,updated_at'),
+        supabase
+          .from('user_pricing')
+          .select('user_id,input_cost_per_million,output_cost_per_million,updated_at'),
         supabase
           .from('admin_settings')
           .select('input_cost_per_million,output_cost_per_million')
@@ -2793,10 +2822,21 @@ Respond ONLY with valid JSON, no other text.`
 
       if (profilesError) throw profilesError
       if (usageError) throw usageError
+      if (modelUsageError) throw modelUsageError
+      if (pricingError) throw pricingError
       if (settingsError) throw settingsError
 
       setAdminUsers(profilesData || [])
       setAdminUsage(usageData || [])
+      setAdminUsageModels(modelUsageData || [])
+      const pricingMap = {}
+      ;(pricingData || []).forEach((row) => {
+        pricingMap[row.user_id] = {
+          inputCost: row.input_cost_per_million ?? '',
+          outputCost: row.output_cost_per_million ?? '',
+        }
+      })
+      setAdminUserRates(pricingMap)
       if (settingsData) {
         setAdminRates({
           inputCost: Number(settingsData.input_cost_per_million || 0),
@@ -2833,13 +2873,37 @@ Respond ONLY with valid JSON, no other text.`
     }
   }
 
-  const recordUsage = async (usage) => {
+  const saveUserRates = async (userId) => {
+    if (!dbEnabled || !isAdmin || !userId) return
+    setAdminSavingUsers((prev) => ({ ...prev, [userId]: true }))
+    setAdminError('')
+    try {
+      const rates = adminUserRates[userId] || {}
+      const payload = {
+        user_id: userId,
+        input_cost_per_million: rates.inputCost === '' ? null : Number(rates.inputCost || 0),
+        output_cost_per_million: rates.outputCost === '' ? null : Number(rates.outputCost || 0),
+      }
+      const { error } = await supabase.from('user_pricing').upsert(payload)
+      if (error) throw error
+      showToast('User rates updated')
+      await loadAdminData()
+    } catch (err) {
+      console.error('Failed to save user rates:', err)
+      setAdminError(err.message || 'Failed to save user rates')
+    } finally {
+      setAdminSavingUsers((prev) => ({ ...prev, [userId]: false }))
+    }
+  }
+
+  const recordUsage = async (usage, modelId) => {
     if (!dbEnabled || !authUser?.id) return
     const { inputTokens, outputTokens } = normalizeTokenUsage(usage)
     if (!inputTokens && !outputTokens) return
     try {
-      const { error } = await supabase.rpc('increment_user_usage', {
+      const { error } = await supabase.rpc('increment_user_usage_model', {
         p_user_id: authUser.id,
+        p_model: String(modelId || 'unknown'),
         p_input_tokens: inputTokens,
         p_output_tokens: outputTokens,
       })
@@ -4159,7 +4223,8 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
         const normalized = normalizeAssistantResult(agentResult)
         responseContent = normalized.text
         if (normalized.usage) {
-          await recordUsage(normalized.usage)
+          const modelId = selectedAgent?.model || selectedAgent?.name || selectedAgent?.provider || 'unknown'
+          await recordUsage(normalized.usage, modelId)
         }
         } else {
         setTypingStatus('generating')
@@ -4298,7 +4363,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       const usage = adminUsageMap.get(user.user_id) || {}
       const inputTokens = Number(usage.input_tokens || 0)
       const outputTokens = Number(usage.output_tokens || 0)
-      const costs = calculateCost(inputTokens, outputTokens)
+      const costs = calculateCost(inputTokens, outputTokens, user.user_id)
       return {
         ...user,
         inputTokens,
@@ -4306,7 +4371,17 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
         ...costs,
       }
     })
-  }, [adminUsers, adminUsageMap, adminRates])
+  }, [adminUsers, adminUsageMap, adminRates, adminUserRates])
+
+  const adminUsageModelsMap = useMemo(() => {
+    const map = new Map()
+    adminUsageModels.forEach((row) => {
+      if (!row?.user_id) return
+      if (!map.has(row.user_id)) map.set(row.user_id, [])
+      map.get(row.user_id).push(row)
+    })
+    return map
+  }, [adminUsageModels])
 
   // Close attach menu when clicking outside
   useEffect(() => {
@@ -12037,9 +12112,11 @@ else console.log('Deleted successfully')`
                   <div className="admin-table">
                     <div className="admin-table-header">
                       <span>User</span>
+                      <span>Models</span>
                       <span>Input Tokens</span>
                       <span>Output Tokens</span>
                       <span>Cost</span>
+                      <span>Rates</span>
                     </div>
                     {adminRows.map((row) => (
                       <div key={row.user_id} className="admin-table-row">
@@ -12054,10 +12131,69 @@ else console.log('Deleted successfully')`
                             )}
                           </div>
                         </div>
+                        <div className="admin-models">
+                          {(adminUsageModelsMap.get(row.user_id) || []).length === 0 ? (
+                            <span className="admin-models-empty">No usage yet</span>
+                          ) : (
+                            (adminUsageModelsMap.get(row.user_id) || [])
+                              .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''))
+                              .slice(0, 4)
+                              .map((m) => (
+                                <div key={`${row.user_id}-${m.model}`} className="admin-model-pill">
+                                  <span className="admin-model-name">{m.model}</span>
+                                  <span className="admin-model-tokens">
+                                    {formatNumber(m.input_tokens || 0)} / {formatNumber(m.output_tokens || 0)}
+                                  </span>
+                                </div>
+                              ))
+                          )}
+                        </div>
                         <div>{formatNumber(row.inputTokens)}</div>
                         <div>{formatNumber(row.outputTokens)}</div>
                         <div className="admin-cost">
                           ${formatNumber(row.totalCost)}
+                        </div>
+                        <div className="admin-rate-inputs">
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            placeholder={`Input (${adminRates.inputCost})`}
+                            value={adminUserRates[row.user_id]?.inputCost ?? ''}
+                            onChange={(e) =>
+                              setAdminUserRates((prev) => ({
+                                ...prev,
+                                [row.user_id]: {
+                                  ...(prev[row.user_id] || {}),
+                                  inputCost: e.target.value,
+                                },
+                              }))
+                            }
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.0001"
+                            placeholder={`Output (${adminRates.outputCost})`}
+                            value={adminUserRates[row.user_id]?.outputCost ?? ''}
+                            onChange={(e) =>
+                              setAdminUserRates((prev) => ({
+                                ...prev,
+                                [row.user_id]: {
+                                  ...(prev[row.user_id] || {}),
+                                  outputCost: e.target.value,
+                                },
+                              }))
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="admin-rate-save-btn"
+                            onClick={() => saveUserRates(row.user_id)}
+                            disabled={adminSavingUsers[row.user_id]}
+                          >
+                            {adminSavingUsers[row.user_id] ? 'Saving...' : 'Save'}
+                          </button>
                         </div>
                       </div>
                     ))}

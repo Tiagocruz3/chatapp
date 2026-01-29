@@ -64,6 +64,32 @@ drop policy if exists "user_usage_update_self_or_admin" on public.user_usage;
 create policy "user_usage_update_self_or_admin" on public.user_usage
 for update using (user_id = auth.uid() or public.is_admin()) with check (user_id = auth.uid() or public.is_admin());
 
+-- USER USAGE MODELS
+alter table public.user_usage_models enable row level security;
+
+drop policy if exists "user_usage_models_select_self_or_admin" on public.user_usage_models;
+create policy "user_usage_models_select_self_or_admin" on public.user_usage_models
+for select using (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "user_usage_models_insert_self_or_admin" on public.user_usage_models;
+create policy "user_usage_models_insert_self_or_admin" on public.user_usage_models
+for insert with check (user_id = auth.uid() or public.is_admin());
+
+drop policy if exists "user_usage_models_update_self_or_admin" on public.user_usage_models;
+create policy "user_usage_models_update_self_or_admin" on public.user_usage_models
+for update using (user_id = auth.uid() or public.is_admin()) with check (user_id = auth.uid() or public.is_admin());
+
+-- USER PRICING
+alter table public.user_pricing enable row level security;
+
+drop policy if exists "user_pricing_select_admin" on public.user_pricing;
+create policy "user_pricing_select_admin" on public.user_pricing
+for select using (public.is_admin());
+
+drop policy if exists "user_pricing_write_admin" on public.user_pricing;
+create policy "user_pricing_write_admin" on public.user_pricing
+for all using (public.is_admin()) with check (public.is_admin());
+
 -- ORGS + MEMBERSHIPS
 drop policy if exists "orgs_select_member" on public.orgs;
 create policy "orgs_select_member" on public.orgs
