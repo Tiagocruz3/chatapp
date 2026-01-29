@@ -1958,6 +1958,9 @@ function App() {
     } catch {}
   }, [activeConversation])
 
+  const dbEnabled = Boolean(isSupabaseConfigured && supabase && authUser)
+  const isAdmin = (authUser?.email || '').toLowerCase() === ADMIN_EMAIL
+
   // Keep Settings open while user is there (prevents unexpected navigation on remount)
   useEffect(() => {
     try {
@@ -1975,9 +1978,6 @@ function App() {
       sessionStorage.setItem('ui_settingsTab', settingsTab || 'n8n')
     } catch {}
   }, [settingsTab])
-
-  const dbEnabled = Boolean(isSupabaseConfigured && supabase && authUser)
-  const isAdmin = (authUser?.email || '').toLowerCase() === ADMIN_EMAIL
 
   const loadGeneratedImages = async () => {
     if (!dbEnabled) return
