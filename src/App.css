@@ -3753,6 +3753,48 @@ button,
   gap: 4px;
 }
 
+.tools-menu-wrapper {
+  position: relative;
+}
+
+.tools-menu {
+  position: absolute;
+  bottom: 40px;
+  left: 0;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 10px;
+  background: var(--main-bg);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 20;
+}
+
+.tools-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.tools-menu button:hover {
+  background: var(--hover-bg);
+}
+
+.tools-menu button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .input-actions-right {
   display: flex;
   align-items: center;

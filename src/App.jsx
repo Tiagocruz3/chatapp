@@ -1485,6 +1485,8 @@ function App() {
   const [reactions, setReactions] = useState({}) // { messageId: 'liked' | 'disliked' | null }
   const [toast, setToast] = useState(null)
   const [showAttachMenu, setShowAttachMenu] = useState(false)
+  const [showToolsMenu, setShowToolsMenu] = useState(false)
+  const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadModalTarget, setUploadModalTarget] = useState('chat') // 'chat' | 'deepResearch'
   const [showSettingsPage, setShowSettingsPage] = useState(() => {
@@ -1934,6 +1936,7 @@ function App() {
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
   const attachMenuRef = useRef(null)
+  const toolsMenuRef = useRef(null)
   const uploadModalRef = useRef(null)
   const sidebarSearchInputRef = useRef(null)
 
@@ -4400,6 +4403,17 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
+  // Close tools menu when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (toolsMenuRef.current && !toolsMenuRef.current.contains(e.target)) {
+        setShowToolsMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
   // Close agent selector when clicking outside
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -4428,6 +4442,46 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       })
     } catch (e) {
       console.error('OCR pre-processing failed:', e)
+    }
+  }
+
+  const captureScreenshotForChat = async () => {
+    if (isCapturingScreenshot) return
+    try {
+      setIsCapturingScreenshot(true)
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true })
+      const track = stream.getVideoTracks()[0]
+      const imageCapture = new ImageCapture(track)
+      const bitmap = await imageCapture.grabFrame()
+      const canvas = document.createElement('canvas')
+      canvas.width = bitmap.width
+      canvas.height = bitmap.height
+      const ctx = canvas.getContext('2d')
+      ctx.drawImage(bitmap, 0, 0)
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+      track.stop()
+      if (!blob) throw new Error('Failed to capture screenshot')
+      const file = new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' })
+      const newFile = {
+        id: Date.now() + Math.random(),
+        file,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        preview: URL.createObjectURL(file),
+      }
+      setAttachedFiles((prev) => {
+        const updated = [...prev, newFile]
+        processFilesForOcr(updated)
+        return updated
+      })
+      showToast('Screenshot attached')
+    } catch (err) {
+      console.error('Screenshot capture failed:', err)
+      showToast(err.message || 'Screenshot capture failed')
+    } finally {
+      setIsCapturingScreenshot(false)
+      setShowToolsMenu(false)
     }
   }
 
@@ -10526,6 +10580,30 @@ else console.log('Deleted successfully')`
                         <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
                       </svg>
                     </button>
+                    <div className="tools-menu-wrapper" ref={toolsMenuRef}>
+                      <button
+                        type="button"
+                        className={`action-btn ${showToolsMenu ? 'active' : ''}`}
+                        onClick={() => setShowToolsMenu((v) => !v)}
+                        title="Tools"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M14.7 6.3a4.5 4.5 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4.5 4.5 0 0 0 5.4-5.4z"/>
+                          <path d="M8 13l3 3"/>
+                        </svg>
+                      </button>
+                      {showToolsMenu && (
+                        <div className="tools-menu">
+                          <button
+                            type="button"
+                            onClick={captureScreenshotForChat}
+                            disabled={isCapturingScreenshot}
+                          >
+                            {isCapturingScreenshot ? 'Capturing...' : 'Capture Screenshot'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   <div className="input-actions-right">
                     <div className="model-selector-container">
