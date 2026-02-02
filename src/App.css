@@ -13216,29 +13216,28 @@ button,
     right: 0;
     bottom: 0;
     width: 100%;
-    display: flex;
-    flex-direction: column;
+    overflow: hidden;
   }
 
-  /* Chat view scroll container */
+  /* Chat view scroll container - absolute within chat-main */
   .chat-view {
-    position: relative;
+    position: absolute;
     top: 0;
     left: 0;
     right: 0;
-    bottom: auto;
-    flex: 1;
+    bottom: 0;
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Chat container full width */
   .chat-container {
     padding: 0 12px;
     padding-top: 12px;
+    padding-bottom: calc(150px + env(safe-area-inset-bottom, 0px));
     max-width: 100%;
+    min-height: 100%;
   }
 
   /* Typing indicator - ensure visible */
@@ -13848,6 +13847,7 @@ button,
   .chat-container {
     padding: 0 8px;
     padding-top: 10px;
+    padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
   }
 
   .welcome-screen h1 {
@@ -14009,8 +14009,8 @@ button,
     padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
   }
 
-  .chat-view {
-    padding-bottom: calc(100px + env(safe-area-inset-bottom));
+  .chat-container {
+    padding-bottom: calc(110px + env(safe-area-inset-bottom));
   }
 
   .input-wrapper textarea {
