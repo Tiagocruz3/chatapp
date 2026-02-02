@@ -435,7 +435,7 @@ const formatMarkdown = (text) => {
 
       // No filename - render as normal code block
       const safeCode = highlightCode(code.trim(), language).replace(/\n/g, CODE_NL_SENTINEL)
-      return `<div class="code-block-wrapper"><div class="code-block-header"><span class="code-block-lang">${escapeHtmlAttr(displayName)}</span><div class="code-block-actions"><button class="code-block-canvas" title="Add to Canvas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button><button class="code-block-copy" title="Copy code"><svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></button></div></div><pre><code data-lang="${escapeHtmlAttr(language)}" data-raw="${rawB64}">${safeCode}</code></pre></div>`
+      return `<div class="code-block-wrapper"><div class="code-block-header"><span class="code-block-lang">${escapeHtmlAttr(displayName)}</span><div class="code-block-actions"><button class="code-block-save" title="Save to Library"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg></button><button class="code-block-canvas" title="Add to Canvas"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg></button><button class="code-block-copy" title="Copy code"><svg class="copy-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg><svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg></button></div></div><pre><code data-lang="${escapeHtmlAttr(language)}" data-raw="${rawB64}">${safeCode}</code></pre></div>`
     })
     // Inline code
     .replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
@@ -1920,6 +1920,12 @@ function App() {
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [galleryError, setGalleryError] = useState('')
 
+  // Code artifacts library
+  const [codeArtifacts, setCodeArtifacts] = useState([]) // [{ id, title, language, code, created_at }]
+  const [artifactsLoading, setArtifactsLoading] = useState(false)
+  const [artifactsError, setArtifactsError] = useState('')
+  const [libraryTab, setLibraryTab] = useState('images') // 'images' | 'artifacts'
+
   const user = authUser
     ? {
         name: profileDraft.display_name?.trim() || profileRow?.display_name || authUser.email?.split('@')?.[0] || 'User',
@@ -2024,6 +2030,83 @@ function App() {
     } finally {
       setGalleryLoading(false)
     }
+  }
+
+  // Code artifacts functions
+  const loadCodeArtifacts = async () => {
+    if (!dbEnabled) return
+    setArtifactsError('')
+    setArtifactsLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('code_artifacts')
+        .select('id,title,language,code,created_at')
+        .eq('owner_user_id', authUser.id)
+        .order('created_at', { ascending: false })
+        .limit(200)
+      if (error) throw error
+      setCodeArtifacts(data || [])
+    } catch (e) {
+      console.error(e)
+      setArtifactsError(e.message || 'Failed to load code artifacts')
+    } finally {
+      setArtifactsLoading(false)
+    }
+  }
+
+  const saveCodeArtifact = async (code, language, displayLang) => {
+    if (!dbEnabled) {
+      showToast('Sign in to save code to Library')
+      return
+    }
+    try {
+      // Generate a title from the first line or language
+      const firstLine = code.split('\n')[0]?.trim().slice(0, 50) || ''
+      const title = firstLine || `${displayLang || language} snippet`
+
+      const { error } = await supabase
+        .from('code_artifacts')
+        .insert({
+          owner_user_id: authUser.id,
+          title,
+          language,
+          code
+        })
+      if (error) throw error
+      showToast('Saved to Library')
+      // Refresh artifacts if on library page
+      if (showGalleryPage && libraryTab === 'artifacts') {
+        loadCodeArtifacts()
+      }
+    } catch (e) {
+      console.error(e)
+      showToast('Failed to save: ' + (e.message || 'Unknown error'))
+    }
+  }
+
+  const deleteCodeArtifact = async (id) => {
+    if (!dbEnabled) return
+    try {
+      const { error } = await supabase
+        .from('code_artifacts')
+        .delete()
+        .eq('id', id)
+        .eq('owner_user_id', authUser.id)
+      if (error) throw error
+      setCodeArtifacts((prev) => prev.filter((a) => a.id !== id))
+      showToast('Artifact deleted')
+    } catch (e) {
+      console.error(e)
+      showToast('Failed to delete: ' + (e.message || 'Unknown error'))
+    }
+  }
+
+  const copyArtifactCode = (code) => {
+    navigator.clipboard.writeText(code).then(() => {
+      showToast('Code copied to clipboard')
+    }).catch(() => {
+      showToast('Failed to copy')
+    })
   }
 
   const loadUserMemories = async (page = 1) => {
@@ -2564,10 +2647,14 @@ Respond ONLY with valid JSON, no other text.`
   // Refresh gallery when opening the gallery page
   useEffect(() => {
     if (showGalleryPage && dbEnabled) {
-      loadGeneratedImages().catch(() => {})
+      if (libraryTab === 'images') {
+        loadGeneratedImages().catch(() => {})
+      } else if (libraryTab === 'artifacts') {
+        loadCodeArtifacts().catch(() => {})
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showGalleryPage])
+  }, [showGalleryPage, libraryTab])
 
   // Load knowledge base data when opening the KB page
   useEffect(() => {
@@ -3549,6 +3636,28 @@ Respond ONLY with valid JSON, no other text.`
             copyBtn.classList.add('copied')
             setTimeout(() => copyBtn.classList.remove('copied'), 2000)
           })
+        }
+        return
+      }
+
+      // Handle save to library button click
+      const saveBtn = e.target.closest('.code-block-save')
+      if (saveBtn) {
+        const wrapper = saveBtn.closest('.code-block-wrapper')
+        const codeElement = wrapper?.querySelector('code')
+        const langElement = wrapper?.querySelector('.code-block-lang')
+        if (codeElement) {
+          const rawB64 = codeElement.dataset.raw
+          const code = rawB64 ? safeAtob(rawB64) : codeElement.textContent
+          const language = codeElement.dataset.lang || 'text'
+          const displayLang = langElement?.textContent || language
+
+          // Trigger save
+          saveCodeArtifact(code, language, displayLang)
+
+          // Visual feedback
+          saveBtn.classList.add('saved')
+          setTimeout(() => saveBtn.classList.remove('saved'), 1500)
         }
         return
       }
@@ -12099,94 +12208,204 @@ else console.log('Deleted successfully')`
               </svg>
               Back to Chat
             </button>
-            <h1>Gallery</h1>
+            <h1>Library</h1>
+          </div>
+
+          {/* Library Tabs */}
+          <div className="settings-tabs" style={{ padding: '0 24px' }}>
+            <button
+              className={`settings-tab ${libraryTab === 'images' ? 'active' : ''}`}
+              onClick={() => setLibraryTab('images')}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                <circle cx="8.5" cy="8.5" r="1.5"/>
+                <polyline points="21 15 16 10 5 21"/>
+              </svg>
+              Images
+            </button>
+            <button
+              className={`settings-tab ${libraryTab === 'artifacts' ? 'active' : ''}`}
+              onClick={() => setLibraryTab('artifacts')}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
+                <polyline points="16 18 22 12 16 6"/>
+                <polyline points="8 6 2 12 8 18"/>
+              </svg>
+              Code Artifacts
+            </button>
           </div>
 
           <div className="settings-page-content">
-            <section className="settings-page-section">
-              <div className="settings-page-section-header">
-                <h2>Generated Images</h2>
-                <button
-                  className="settings-test-btn"
-                  type="button"
-                  onClick={loadGeneratedImages}
-                  disabled={!dbEnabled || galleryLoading}
-                  title={!dbEnabled ? 'Requires Supabase sign-in' : 'Refresh'}
-                >
-                  Refresh
-                </button>
-              </div>
-
-              {!dbEnabled && (
-                <div className="settings-help-text">
-                  <strong>Supabase required:</strong><br />
-                  Sign in to store images permanently and view them here.
+            {/* Images Tab */}
+            {libraryTab === 'images' && (
+              <section className="settings-page-section">
+                <div className="settings-page-section-header">
+                  <h2>Generated Images</h2>
+                  <button
+                    className="settings-test-btn"
+                    type="button"
+                    onClick={loadGeneratedImages}
+                    disabled={!dbEnabled || galleryLoading}
+                    title={!dbEnabled ? 'Requires Supabase sign-in' : 'Refresh'}
+                  >
+                    Refresh
+                  </button>
                 </div>
-              )}
 
-              {galleryError && (
-                <div className="settings-error-message" style={{ marginTop: 12 }}>
-                  {galleryError}
-                </div>
-              )}
+                {!dbEnabled && (
+                  <div className="settings-help-text">
+                    <strong>Supabase required:</strong><br />
+                    Sign in to store images permanently and view them here.
+                  </div>
+                )}
 
-              {galleryLoading && (
-                <div className="settings-form-hint" style={{ marginTop: 12 }}>
-                  Loading…
-                </div>
-              )}
+                {galleryError && (
+                  <div className="settings-error-message" style={{ marginTop: 12 }}>
+                    {galleryError}
+                  </div>
+                )}
 
-              {dbEnabled && !galleryLoading && generatedImages.length === 0 && (
-                <div className="settings-form-hint" style={{ marginTop: 12 }}>
-                  No images yet. Use <code>/image ...</code> in chat to generate one.
-                </div>
-              )}
+                {galleryLoading && (
+                  <div className="settings-form-hint" style={{ marginTop: 12 }}>
+                    Loading…
+                  </div>
+                )}
 
-              {generatedImages.length > 0 && (
-                <div className="gallery-grid" style={{ marginTop: 14 }}>
-                  {generatedImages.map((img) => (
-                    <div key={img.image_id} className="gallery-item">
-                      <div className="gallery-thumb-wrapper">
-                      {img.url ? (
-                        <img src={img.url} alt={img.prompt || 'Generated image'} className="gallery-thumb" loading="lazy" />
-                      ) : (
-                        <div className="gallery-thumb gallery-thumb-missing">No preview</div>
-                      )}
-                        <div className="gallery-actions">
-                          {img.url && (
+                {dbEnabled && !galleryLoading && generatedImages.length === 0 && (
+                  <div className="settings-form-hint" style={{ marginTop: 12 }}>
+                    No images yet. Use <code>/image ...</code> in chat to generate one.
+                  </div>
+                )}
+
+                {generatedImages.length > 0 && (
+                  <div className="gallery-grid" style={{ marginTop: 14 }}>
+                    {generatedImages.map((img) => (
+                      <div key={img.image_id} className="gallery-item">
+                        <div className="gallery-thumb-wrapper">
+                        {img.url ? (
+                          <img src={img.url} alt={img.prompt || 'Generated image'} className="gallery-thumb" loading="lazy" />
+                        ) : (
+                          <div className="gallery-thumb gallery-thumb-missing">No preview</div>
+                        )}
+                          <div className="gallery-actions">
+                            {img.url && (
+                              <button
+                                className="gallery-action-btn gallery-download-btn"
+                                onClick={() => downloadImage(img.url, img.prompt)}
+                                title="Download image"
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                  <polyline points="7 10 12 15 17 10"></polyline>
+                                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                                </svg>
+                              </button>
+                            )}
                             <button
-                              className="gallery-action-btn gallery-download-btn"
-                              onClick={() => downloadImage(img.url, img.prompt)}
-                              title="Download image"
+                              className="gallery-action-btn gallery-delete-btn"
+                              onClick={() => deleteGeneratedImage(img.image_id, img.storage_bucket, img.storage_path)}
+                              title="Delete image"
                             >
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                                <polyline points="7 10 12 15 17 10"></polyline>
-                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                                <path d="M3 6h18"></path>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                               </svg>
                             </button>
-                          )}
-                          <button
-                            className="gallery-action-btn gallery-delete-btn"
-                            onClick={() => deleteGeneratedImage(img.image_id, img.storage_bucket, img.storage_path)}
-                            title="Delete image"
-                          >
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                              <path d="M3 6h18"></path>
-                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
-                          </button>
+                          </div>
+                        </div>
+                        <div className="gallery-meta">
+                          <div className="gallery-prompt">{img.prompt || 'Untitled prompt'}</div>
+                          <div className="gallery-sub">{img.model || ''}</div>
                         </div>
                       </div>
-                      <div className="gallery-meta">
-                        <div className="gallery-prompt">{img.prompt || 'Untitled prompt'}</div>
-                        <div className="gallery-sub">{img.model || ''}</div>
-                      </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {/* Code Artifacts Tab */}
+            {libraryTab === 'artifacts' && (
+              <section className="settings-page-section">
+                <div className="settings-page-section-header">
+                  <h2>Code Artifacts</h2>
+                  <button
+                    className="settings-test-btn"
+                    type="button"
+                    onClick={loadCodeArtifacts}
+                    disabled={!dbEnabled || artifactsLoading}
+                    title={!dbEnabled ? 'Requires Supabase sign-in' : 'Refresh'}
+                  >
+                    Refresh
+                  </button>
                 </div>
-              )}
-            </section>
+
+                {!dbEnabled && (
+                  <div className="settings-help-text">
+                    <strong>Supabase required:</strong><br />
+                    Sign in to save and view code artifacts.
+                  </div>
+                )}
+
+                {artifactsError && (
+                  <div className="settings-error-message" style={{ marginTop: 12 }}>
+                    {artifactsError}
+                  </div>
+                )}
+
+                {artifactsLoading && (
+                  <div className="settings-form-hint" style={{ marginTop: 12 }}>
+                    Loading…
+                  </div>
+                )}
+
+                {dbEnabled && !artifactsLoading && codeArtifacts.length === 0 && (
+                  <div className="settings-form-hint" style={{ marginTop: 12 }}>
+                    No code artifacts yet. Click the save icon on any code block in chat to save it here.
+                  </div>
+                )}
+
+                {codeArtifacts.length > 0 && (
+                  <div className="artifacts-grid" style={{ marginTop: 14 }}>
+                    {codeArtifacts.map((artifact) => (
+                      <div key={artifact.id} className="artifact-card">
+                        <div className="artifact-header">
+                          <span className="artifact-lang">{artifact.language || 'text'}</span>
+                          <div className="artifact-actions">
+                            <button
+                              className="artifact-action-btn"
+                              onClick={() => copyArtifactCode(artifact.code)}
+                              title="Copy code"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                              </svg>
+                            </button>
+                            <button
+                              className="artifact-action-btn artifact-delete-btn"
+                              onClick={() => deleteCodeArtifact(artifact.id)}
+                              title="Delete artifact"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M3 6h18"></path>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+                        <div className="artifact-title">{artifact.title}</div>
+                        <pre className="artifact-preview"><code>{artifact.code?.slice(0, 200)}{artifact.code?.length > 200 ? '...' : ''}</code></pre>
+                        <div className="artifact-date">
+                          {artifact.created_at ? new Date(artifact.created_at).toLocaleDateString() : ''}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
           </div>
         </div>
 

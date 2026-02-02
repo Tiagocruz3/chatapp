@@ -6745,6 +6745,140 @@ button,
   background: rgba(255, 255, 255, 0.08);
 }
 
+/* Code block save button */
+.formatted-response .code-block-save {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: #888;
+  cursor: pointer;
+  transition: color 0.08s, background 0.08s;
+}
+
+.formatted-response .code-block-save svg {
+  width: 15px;
+  height: 15px;
+}
+
+.formatted-response .code-block-save:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.formatted-response .code-block-save.saved {
+  color: #10b981;
+}
+
+/* Code Artifacts Grid */
+.artifacts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.artifact-card {
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.artifact-card:hover {
+  border-color: var(--text-muted);
+}
+
+.artifact-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.artifact-lang {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.artifact-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.artifact-action-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.08s, color 0.08s;
+}
+
+.artifact-action-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.artifact-action-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.artifact-delete-btn:hover {
+  color: #ef4444;
+}
+
+.artifact-title {
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.artifact-preview {
+  margin: 0;
+  padding: 12px;
+  background: #1a1a1a;
+  font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #888;
+  max-height: 100px;
+  overflow: hidden;
+  border-top: 1px solid var(--border-color);
+}
+
+.artifact-preview code {
+  color: inherit;
+}
+
+.artifact-date {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-color);
+}
+
 .formatted-response pre {
   background: #1e1e1e;
   padding: 12px;

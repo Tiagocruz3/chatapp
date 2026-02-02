@@ -260,3 +260,22 @@ drop policy if exists "images_write_owner" on public.generated_images;
 create policy "images_write_owner" on public.generated_images
 for all using (owner_user_id = auth.uid()) with check (owner_user_id = auth.uid());
 
+-- CODE ARTIFACTS
+alter table public.code_artifacts enable row level security;
+
+drop policy if exists "artifacts_select_owner" on public.code_artifacts;
+create policy "artifacts_select_owner" on public.code_artifacts
+for select using (owner_user_id = auth.uid());
+
+drop policy if exists "artifacts_insert_owner" on public.code_artifacts;
+create policy "artifacts_insert_owner" on public.code_artifacts
+for insert with check (owner_user_id = auth.uid());
+
+drop policy if exists "artifacts_update_owner" on public.code_artifacts;
+create policy "artifacts_update_owner" on public.code_artifacts
+for update using (owner_user_id = auth.uid());
+
+drop policy if exists "artifacts_delete_owner" on public.code_artifacts;
+create policy "artifacts_delete_owner" on public.code_artifacts
+for delete using (owner_user_id = auth.uid());
+

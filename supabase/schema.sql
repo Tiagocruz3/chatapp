@@ -364,3 +364,21 @@ create table if not exists public.generated_images (
   created_at timestamptz not null default now()
 );
 
+-- CODE ARTIFACTS (saved code snippets from chat)
+create table if not exists public.code_artifacts (
+  id uuid primary key default gen_random_uuid(),
+  owner_user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null,
+  language text not null default 'text',
+  code text not null,
+  chat_id uuid references public.chats(chat_id) on delete set null,
+  message_id uuid references public.messages(message_id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+drop trigger if exists trg_code_artifacts_updated_at on public.code_artifacts;
+create trigger trg_code_artifacts_updated_at
+before update on public.code_artifacts
+for each row execute function public.set_updated_at();
+
