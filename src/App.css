@@ -1287,22 +1287,23 @@
 }
 
 .open-sidebar {
-  position: absolute;
+  position: fixed;
   top: 12px;
   left: 12px;
-  padding: 6px;
-  background-color: transparent;
-  border: none;
+  padding: 8px;
+  background-color: var(--main-bg);
+  border: 1px solid var(--border-color);
   color: var(--text-secondary);
   cursor: pointer;
-  border-radius: 0;
-  z-index: 10;
-  opacity: 0.5;
-  transition: opacity 0.08s;
+  border-radius: 8px;
+  z-index: 80;
+  opacity: 0.9;
+  transition: opacity 0.08s, background-color 0.08s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .open-sidebar:hover {
-  background-color: transparent;
+  background-color: var(--hover-bg);
   opacity: 1;
 }
 

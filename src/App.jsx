@@ -2054,6 +2054,9 @@ function App() {
     }
   }
 
+  // Ref to always access latest save function from event handler
+  const saveCodeArtifactRef = useRef(null)
+
   const saveCodeArtifact = async (code, language, displayLang) => {
     if (!dbEnabled) {
       showToast('Sign in to save code to Library')
@@ -2083,6 +2086,9 @@ function App() {
       showToast('Failed to save: ' + (e.message || 'Unknown error'))
     }
   }
+
+  // Keep ref updated with latest function
+  saveCodeArtifactRef.current = saveCodeArtifact
 
   const deleteCodeArtifact = async (id) => {
     if (!dbEnabled) return
@@ -3652,8 +3658,10 @@ Respond ONLY with valid JSON, no other text.`
           const language = codeElement.dataset.lang || 'text'
           const displayLang = langElement?.textContent || language
 
-          // Trigger save
-          saveCodeArtifact(code, language, displayLang)
+          // Trigger save via ref to get latest function
+          if (saveCodeArtifactRef.current) {
+            saveCodeArtifactRef.current(code, language, displayLang)
+          }
 
           // Visual feedback
           saveBtn.classList.add('saved')
