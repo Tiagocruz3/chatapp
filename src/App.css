@@ -13210,14 +13210,36 @@ button,
 
   /* Chat main area adjustments */
   .chat-main {
-    padding-top: calc(56px + env(safe-area-inset-top));
+    padding-top: 0;
     width: 100%;
+  }
+
+  /* Chat view needs top offset for mobile header */
+  .chat-view {
+    top: calc(56px + env(safe-area-inset-top));
+    padding-bottom: calc(140px + env(safe-area-inset-bottom));
   }
 
   /* Chat container full width */
   .chat-container {
     padding: 0 12px;
+    padding-top: 12px;
     max-width: 100%;
+  }
+
+  /* Typing indicator visible on mobile */
+  .typing-status {
+    font-size: 12px;
+    padding: 8px 12px;
+  }
+
+  .typing-indicator {
+    padding: 12px 0;
+  }
+
+  .typing-indicator span {
+    width: 10px;
+    height: 10px;
   }
 
   /* Welcome screen adjustments */
@@ -13756,17 +13778,24 @@ button,
     height: 36px;
   }
 
+  /* Keep sidebar at 85% max width even on small screens */
   .sidebar {
-    width: 100%;
-    max-width: 100%;
+    width: 280px;
+    max-width: 85vw;
   }
 
   .chat-main {
-    padding-top: calc(52px + env(safe-area-inset-top));
+    padding-top: 0;
+  }
+
+  /* Smaller header offset for chat view */
+  .chat-view {
+    top: calc(52px + env(safe-area-inset-top));
   }
 
   .chat-container {
     padding: 0 8px;
+    padding-top: 8px;
   }
 
   .welcome-screen h1 {
