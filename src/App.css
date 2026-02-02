@@ -13210,42 +13210,56 @@ button,
 
   /* Chat main area adjustments */
   .chat-main {
-    padding-top: 0;
+    position: fixed;
+    top: calc(56px + env(safe-area-inset-top, 0px));
+    left: 0;
+    right: 0;
+    bottom: 0;
     width: 100%;
-    margin-top: calc(56px + env(safe-area-inset-top, 0px));
+    display: flex;
+    flex-direction: column;
   }
 
-  /* Chat view needs top offset for mobile header */
+  /* Chat view scroll container */
   .chat-view {
     position: relative;
-    top: auto;
-    left: auto;
-    right: auto;
+    top: 0;
+    left: 0;
+    right: 0;
     bottom: auto;
-    min-height: calc(100vh - 56px - env(safe-area-inset-top, 0px));
-    padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Chat container full width */
   .chat-container {
     padding: 0 12px;
-    padding-top: 16px;
+    padding-top: 12px;
     max-width: 100%;
   }
 
-  /* Typing indicator visible on mobile */
+  /* Typing indicator - ensure visible */
   .typing-status {
-    font-size: 12px;
-    padding: 8px 12px;
+    font-size: 13px;
+    padding: 4px 0;
+    color: var(--text-muted);
   }
 
   .typing-indicator {
-    padding: 12px 0;
+    display: flex;
+    gap: 6px;
+    padding: 8px 0;
   }
 
   .typing-indicator span {
     width: 10px;
     height: 10px;
+    background-color: var(--text-muted);
+    border-radius: 50%;
+    animation: bounce 1.4s ease-in-out infinite;
   }
 
   /* Welcome screen adjustments */
@@ -13418,15 +13432,10 @@ button,
     bottom: 0;
     left: 0;
     right: 0;
-    padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
     background: var(--main-bg);
     border-top: 1px solid var(--border-color);
     z-index: 50;
-  }
-
-  /* Adjust chat view to account for fixed input */
-  .chat-view {
-    padding-bottom: calc(130px + env(safe-area-inset-bottom));
   }
 
   .input-wrapper {
@@ -13833,18 +13842,12 @@ button,
   }
 
   .chat-main {
-    padding-top: 0;
-    margin-top: calc(52px + env(safe-area-inset-top, 0px));
-  }
-
-  /* Chat view adjustments for smaller screens */
-  .chat-view {
-    min-height: calc(100vh - 52px - env(safe-area-inset-top, 0px));
+    top: calc(52px + env(safe-area-inset-top, 0px));
   }
 
   .chat-container {
     padding: 0 8px;
-    padding-top: 12px;
+    padding-top: 10px;
   }
 
   .welcome-screen h1 {
