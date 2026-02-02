@@ -9697,6 +9697,49 @@ else console.log('Deleted successfully')`
 
   const appBody = (
     <div className="app">
+      {/* Mobile Header - Only visible on mobile via CSS */}
+      {!showSettingsPage && !showGalleryPage && !showKnowledgeBasePage && !showAdminPage && (
+        <header className="mobile-header">
+          <div className="mobile-header-left">
+            <button
+              className="mobile-menu-btn"
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              aria-label="Open menu"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
+          </div>
+          <span className="mobile-header-title">
+            {currentConversation?.title || selectedAgent?.name || 'Agent Me'}
+          </span>
+          <div className="mobile-header-right">
+            <button
+              className="mobile-new-chat-btn"
+              type="button"
+              onClick={createNewChat}
+              aria-label="New chat"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 20h9"/>
+                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+              </svg>
+            </button>
+          </div>
+        </header>
+      )}
+
+      {/* Sidebar Backdrop - For mobile overlay */}
+      <div
+        className={`sidebar-backdrop ${sidebarOpen ? 'visible' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
+
       {/* Sidebar */}
       <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showAdminPage) ? 'hidden' : ''}`}>
         <div className="sidebar-header">
@@ -9716,7 +9759,7 @@ else console.log('Deleted successfully')`
               </span>
             </button>
 
-            <button className="sidebar-nav-btn" type="button" onClick={createNewChat}>
+            <button className="sidebar-nav-btn" type="button" onClick={() => { createNewChat(); setSidebarOpen(false) }}>
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 20h9"/>
@@ -9759,7 +9802,7 @@ else console.log('Deleted successfully')`
             <button
               className="sidebar-nav-btn"
               type="button"
-              onClick={() => setShowGalleryPage(true)}
+              onClick={() => { setShowGalleryPage(true); setSidebarOpen(false) }}
             >
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -9774,7 +9817,7 @@ else console.log('Deleted successfully')`
             <button
               className="sidebar-nav-btn"
               type="button"
-              onClick={() => setShowKnowledgeBasePage(true)}
+              onClick={() => { setShowKnowledgeBasePage(true); setSidebarOpen(false) }}
             >
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -9900,7 +9943,7 @@ else console.log('Deleted successfully')`
                         <div
                           key={chat.id}
                           className={`project-chat-item ${chat.id === activeConversation ? 'active' : ''}`}
-                          onClick={() => { setActiveConversation(chat.id); setShowDeepResearchPage(false) }}
+                          onClick={() => { setActiveConversation(chat.id); setShowDeepResearchPage(false); setSidebarOpen(false) }}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -9938,7 +9981,7 @@ else console.log('Deleted successfully')`
             <div
               key={conv.id}
                 className={`conversation-item ${conv.id === activeConversation ? 'active' : ''} ${chatProject ? 'in-project' : ''} ${moveToChatId === conv.id ? 'dropdown-open' : ''}`}
-              onClick={() => { setActiveConversation(conv.id); setShowDeepResearchPage(false) }}
+              onClick={() => { setActiveConversation(conv.id); setShowDeepResearchPage(false); setSidebarOpen(false) }}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
@@ -10168,7 +10211,7 @@ else console.log('Deleted successfully')`
             )}
             <button
               className="sidebar-settings-btn"
-              onClick={() => setShowSettingsPage(true)}
+              onClick={() => { setShowSettingsPage(true); setSidebarOpen(false) }}
               title="Settings"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
