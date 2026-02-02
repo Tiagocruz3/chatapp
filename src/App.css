@@ -6775,6 +6775,99 @@ button,
   color: #10b981;
 }
 
+/* Library Tabs */
+.library-tabs {
+  display: flex;
+  gap: 12px;
+  padding: 0 24px;
+  margin-bottom: 8px;
+}
+
+.library-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.03) 0%, rgba(255, 255, 255, 0.01) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.library-tab:hover {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 100%);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+}
+
+.library-tab.active {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.05) 100%);
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.15);
+}
+
+.library-tab-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+}
+
+.library-tab-icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.library-tab:hover .library-tab-icon {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+.library-tab.active .library-tab-icon {
+  background: rgba(16, 185, 129, 0.2);
+  color: #10b981;
+}
+
+.library-tab-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.library-tab-label {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: color 0.2s ease;
+}
+
+.library-tab:hover .library-tab-label {
+  color: var(--text-primary);
+}
+
+.library-tab.active .library-tab-label {
+  color: #10b981;
+}
+
+.library-tab-count {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.library-tab.active .library-tab-count {
+  color: rgba(16, 185, 129, 0.8);
+}
+
 /* Code Artifacts Grid */
 .artifacts-grid {
   display: grid;
@@ -13704,6 +13797,36 @@ button,
     padding: 10px 14px;
     font-size: 13px;
     white-space: nowrap;
+  }
+
+  /* Library tabs mobile */
+  .library-tabs {
+    padding: 0 16px;
+    gap: 10px;
+    flex-direction: column;
+  }
+
+  .library-tab {
+    padding: 14px 16px;
+    gap: 12px;
+  }
+
+  .library-tab-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .library-tab-icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .library-tab-label {
+    font-size: 14px;
+  }
+
+  .library-tab-count {
+    font-size: 12px;
     flex-shrink: 0;
   }
 

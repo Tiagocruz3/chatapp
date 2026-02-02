@@ -12212,27 +12212,37 @@ else console.log('Deleted successfully')`
           </div>
 
           {/* Library Tabs */}
-          <div className="settings-tabs" style={{ padding: '0 24px' }}>
+          <div className="library-tabs">
             <button
-              className={`settings-tab ${libraryTab === 'images' ? 'active' : ''}`}
+              className={`library-tab ${libraryTab === 'images' ? 'active' : ''}`}
               onClick={() => setLibraryTab('images')}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                <circle cx="8.5" cy="8.5" r="1.5"/>
-                <polyline points="21 15 16 10 5 21"/>
-              </svg>
-              Images
+              <div className="library-tab-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                  <circle cx="8.5" cy="8.5" r="1.5"/>
+                  <polyline points="21 15 16 10 5 21"/>
+                </svg>
+              </div>
+              <div className="library-tab-content">
+                <span className="library-tab-label">Images</span>
+                <span className="library-tab-count">{generatedImages.length}</span>
+              </div>
             </button>
             <button
-              className={`settings-tab ${libraryTab === 'artifacts' ? 'active' : ''}`}
+              className={`library-tab ${libraryTab === 'artifacts' ? 'active' : ''}`}
               onClick={() => setLibraryTab('artifacts')}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ width: 16, height: 16 }}>
-                <polyline points="16 18 22 12 16 6"/>
-                <polyline points="8 6 2 12 8 18"/>
-              </svg>
-              Code Artifacts
+              <div className="library-tab-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="16 18 22 12 16 6"/>
+                  <polyline points="8 6 2 12 8 18"/>
+                </svg>
+              </div>
+              <div className="library-tab-content">
+                <span className="library-tab-label">Code Artifacts</span>
+                <span className="library-tab-count">{codeArtifacts.length}</span>
+              </div>
             </button>
           </div>
 
