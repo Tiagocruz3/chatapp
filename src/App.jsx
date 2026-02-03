@@ -1925,6 +1925,8 @@ function App() {
   const [artifactsLoading, setArtifactsLoading] = useState(false)
   const [artifactsError, setArtifactsError] = useState('')
   const [libraryTab, setLibraryTab] = useState('images') // 'images' | 'artifacts'
+  const [editingArtifactId, setEditingArtifactId] = useState(null) // id of artifact being renamed
+  const [editingArtifactTitle, setEditingArtifactTitle] = useState('') // draft title during edit
 
   const user = authUser
     ? {
@@ -2113,6 +2115,68 @@ function App() {
     }).catch(() => {
       showToast('Failed to copy')
     })
+  }
+
+  // Rename artifact
+  const renameCodeArtifact = async (id, newTitle) => {
+    if (!dbEnabled || !newTitle.trim()) return
+    try {
+      const { error } = await supabase
+        .from('code_artifacts')
+        .update({ title: newTitle.trim() })
+        .eq('id', id)
+        .eq('owner_user_id', authUser.id)
+      if (error) throw error
+      setCodeArtifacts((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, title: newTitle.trim() } : a))
+      )
+      showToast('Artifact renamed')
+    } catch (e) {
+      console.error(e)
+      showToast('Failed to rename: ' + (e.message || 'Unknown error'))
+    }
+    setEditingArtifactId(null)
+    setEditingArtifactTitle('')
+  }
+
+  // Open artifact in code canvas and start chat
+  const openArtifactInCanvas = (artifact) => {
+    // Determine which tab based on language
+    const lang = (artifact.language || '').toLowerCase()
+    const target =
+      ['css', 'scss', 'less'].includes(lang) ? 'css'
+        : ['js', 'jsx', 'ts', 'tsx', 'javascript', 'typescript'].includes(lang) ? 'js'
+          : 'html'
+
+    // Set the code in canvas
+    setCanvasFiles((prev) => ({
+      ...prev,
+      [target]: artifact.code || ''
+    }))
+    setCanvasActiveTab(target)
+    setCanvasOpen(true)
+
+    // Close library page and go to chat
+    setShowGalleryPage(false)
+    setSidebarOpen(false)
+
+    // Start a new conversation about this artifact
+    const newId = `conv-${Date.now()}`
+    const newConv = {
+      id: newId,
+      title: artifact.title || 'Code Chat',
+      messages: [{
+        role: 'system',
+        content: `You are helping the user work with their code artifact: "${artifact.title}"\n\nLanguage: ${artifact.language || 'text'}\n\nThe code is now loaded in the code editor on the right. Help the user understand, modify, or improve this code.`
+      }, {
+        role: 'assistant',
+        content: `I've loaded your code artifact **"${artifact.title}"** into the editor. I can see it's written in **${artifact.language || 'text'}**.\n\nHow can I help you with this code? I can:\n- Explain how it works\n- Suggest improvements\n- Help fix bugs\n- Add new features\n- Refactor or optimize it\n\nJust let me know what you'd like to do!`
+      }],
+      createdAt: Date.now(),
+      isNew: false
+    }
+    setConversations((prev) => [newConv, ...prev])
+    setActiveConversationId(newId)
   }
 
   const loadUserMemories = async (page = 1) => {
@@ -12387,13 +12451,38 @@ else console.log('Deleted successfully')`
                 {codeArtifacts.length > 0 && (
                   <div className="artifacts-grid" style={{ marginTop: 14 }}>
                     {codeArtifacts.map((artifact) => (
-                      <div key={artifact.id} className="artifact-card">
+                      <div
+                        key={artifact.id}
+                        className="artifact-card artifact-card-clickable"
+                        onClick={(e) => {
+                          // Don't open if clicking on action buttons or editing
+                          if (e.target.closest('.artifact-actions') || e.target.closest('.artifact-title-edit')) return
+                          openArtifactInCanvas(artifact)
+                        }}
+                      >
                         <div className="artifact-header">
                           <span className="artifact-lang">{artifact.language || 'text'}</span>
                           <div className="artifact-actions">
                             <button
                               className="artifact-action-btn"
-                              onClick={() => copyArtifactCode(artifact.code)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setEditingArtifactId(artifact.id)
+                                setEditingArtifactTitle(artifact.title || '')
+                              }}
+                              title="Rename"
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                              </svg>
+                            </button>
+                            <button
+                              className="artifact-action-btn"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                copyArtifactCode(artifact.code)
+                              }}
                               title="Copy code"
                             >
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -12403,7 +12492,10 @@ else console.log('Deleted successfully')`
                             </button>
                             <button
                               className="artifact-action-btn artifact-delete-btn"
-                              onClick={() => deleteCodeArtifact(artifact.id)}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                deleteCodeArtifact(artifact.id)
+                              }}
                               title="Delete artifact"
                             >
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -12413,10 +12505,53 @@ else console.log('Deleted successfully')`
                             </button>
                           </div>
                         </div>
-                        <div className="artifact-title">{artifact.title}</div>
+                        {editingArtifactId === artifact.id ? (
+                          <div className="artifact-title-edit" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={editingArtifactTitle}
+                              onChange={(e) => setEditingArtifactTitle(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  renameCodeArtifact(artifact.id, editingArtifactTitle)
+                                } else if (e.key === 'Escape') {
+                                  setEditingArtifactId(null)
+                                  setEditingArtifactTitle('')
+                                }
+                              }}
+                              autoFocus
+                              placeholder="Enter name..."
+                            />
+                            <button
+                              className="artifact-title-save"
+                              onClick={() => renameCodeArtifact(artifact.id, editingArtifactTitle)}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <polyline points="20 6 9 17 4 12"></polyline>
+                              </svg>
+                            </button>
+                            <button
+                              className="artifact-title-cancel"
+                              onClick={() => {
+                                setEditingArtifactId(null)
+                                setEditingArtifactTitle('')
+                              }}
+                            >
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <line x1="18" y1="6" x2="6" y2="18"></line>
+                                <line x1="6" y1="6" x2="18" y2="18"></line>
+                              </svg>
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="artifact-title">{artifact.title}</div>
+                        )}
                         <pre className="artifact-preview"><code>{artifact.code?.slice(0, 200)}{artifact.code?.length > 200 ? '...' : ''}</code></pre>
-                        <div className="artifact-date">
-                          {artifact.created_at ? new Date(artifact.created_at).toLocaleDateString() : ''}
+                        <div className="artifact-footer">
+                          <span className="artifact-date">
+                            {artifact.created_at ? new Date(artifact.created_at).toLocaleDateString() : ''}
+                          </span>
+                          <span className="artifact-open-hint">Click to open in editor</span>
                         </div>
                       </div>
                     ))}

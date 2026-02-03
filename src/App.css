@@ -6967,10 +6967,104 @@ button,
 }
 
 .artifact-date {
-  padding: 8px 12px;
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/* Clickable artifact card */
+.artifact-card-clickable {
+  cursor: pointer;
+}
+
+.artifact-card-clickable:hover {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 1px var(--accent-color);
+}
+
+.artifact-card-clickable:active {
+  transform: scale(0.99);
+}
+
+/* Artifact footer */
+.artifact-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
   border-top: 1px solid var(--border-color);
+}
+
+.artifact-open-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.artifact-card-clickable:hover .artifact-open-hint {
+  opacity: 1;
+}
+
+/* Artifact title edit */
+.artifact-title-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.artifact-title-edit input {
+  flex: 1;
+  padding: 6px 10px;
+  background: var(--main-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 500;
+  outline: none;
+}
+
+.artifact-title-edit input:focus {
+  border-color: var(--accent-color);
+}
+
+.artifact-title-save,
+.artifact-title-cancel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.08s, color 0.08s;
+}
+
+.artifact-title-save {
+  color: #22c55e;
+}
+
+.artifact-title-save:hover {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.artifact-title-cancel {
+  color: var(--text-muted);
+}
+
+.artifact-title-cancel:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ef4444;
+}
+
+.artifact-title-save svg,
+.artifact-title-cancel svg {
+  width: 16px;
+  height: 16px;
 }
 
 .formatted-response pre {
