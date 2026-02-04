@@ -9492,6 +9492,365 @@ else console.log('Deleted successfully')`
     return fetchSearchResults(query, { trackStatus: true })
   }
 
+  // ========== GitHub Tool Functions ==========
+  const executeGitHubTool = async (action, params) => {
+    if (!githubToken) {
+      return { error: 'GitHub not connected. Please add your GitHub token in Settings.' }
+    }
+    
+    const headers = {
+      'Authorization': `Bearer ${githubToken}`,
+      'Accept': 'application/vnd.github.v3+json',
+      'Content-Type': 'application/json'
+    }
+
+    try {
+      switch (action) {
+        case 'list_repos': {
+          const resp = await fetch('https://api.github.com/user/repos?sort=updated&per_page=30', { headers })
+          if (!resp.ok) throw new Error(`GitHub API error: ${resp.status}`)
+          const repos = await resp.json()
+          return { 
+            success: true, 
+            repos: repos.map(r => ({ 
+              name: r.full_name, 
+              description: r.description, 
+              private: r.private,
+              url: r.html_url,
+              default_branch: r.default_branch,
+              updated_at: r.updated_at
+            }))
+          }
+        }
+
+        case 'get_repo': {
+          const { owner, repo } = params
+          if (!owner || !repo) return { error: 'owner and repo are required' }
+          const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers })
+          if (!resp.ok) throw new Error(`GitHub API error: ${resp.status}`)
+          const data = await resp.json()
+          return { 
+            success: true, 
+            repo: {
+              name: data.full_name,
+              description: data.description,
+              private: data.private,
+              url: data.html_url,
+              default_branch: data.default_branch,
+              language: data.language,
+              stars: data.stargazers_count,
+              forks: data.forks_count
+            }
+          }
+        }
+
+        case 'create_repo': {
+          const { name, description, isPrivate } = params
+          if (!name) return { error: 'Repository name is required' }
+          const resp = await fetch('https://api.github.com/user/repos', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              name,
+              description: description || '',
+              private: isPrivate !== false,
+              auto_init: true
+            })
+          })
+          if (!resp.ok) {
+            const err = await resp.json()
+            throw new Error(err.message || `GitHub API error: ${resp.status}`)
+          }
+          const data = await resp.json()
+          return { 
+            success: true, 
+            message: `Repository ${data.full_name} created successfully`,
+            repo: { name: data.full_name, url: data.html_url }
+          }
+        }
+
+        case 'list_files': {
+          const { owner, repo, path = '' } = params
+          if (!owner || !repo) return { error: 'owner and repo are required' }
+          const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, { headers })
+          if (!resp.ok) throw new Error(`GitHub API error: ${resp.status}`)
+          const files = await resp.json()
+          return { 
+            success: true, 
+            files: Array.isArray(files) 
+              ? files.map(f => ({ name: f.name, path: f.path, type: f.type, size: f.size }))
+              : [{ name: files.name, path: files.path, type: files.type, size: files.size }]
+          }
+        }
+
+        case 'get_file': {
+          const { owner, repo, path } = params
+          if (!owner || !repo || !path) return { error: 'owner, repo, and path are required' }
+          const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, { headers })
+          if (!resp.ok) throw new Error(`GitHub API error: ${resp.status}`)
+          const file = await resp.json()
+          if (file.type !== 'file') return { error: 'Path is not a file' }
+          const content = atob(file.content)
+          return { 
+            success: true, 
+            file: { name: file.name, path: file.path, sha: file.sha },
+            content: content.length > 10000 ? content.slice(0, 10000) + '\n...[truncated]' : content
+          }
+        }
+
+        case 'create_file':
+        case 'update_file': {
+          const { owner, repo, path, content, message, sha } = params
+          if (!owner || !repo || !path || content === undefined) {
+            return { error: 'owner, repo, path, and content are required' }
+          }
+          // For update, we need the SHA - try to get it if not provided
+          let fileSha = sha
+          if (action === 'update_file' && !fileSha) {
+            try {
+              const getResp = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, { headers })
+              if (getResp.ok) {
+                const existing = await getResp.json()
+                fileSha = existing.sha
+              }
+            } catch (e) { /* ignore */ }
+          }
+          
+          const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({
+              message: message || `${action === 'create_file' ? 'Create' : 'Update'} ${path}`,
+              content: btoa(unescape(encodeURIComponent(content))),
+              ...(fileSha && { sha: fileSha })
+            })
+          })
+          if (!resp.ok) {
+            const err = await resp.json()
+            throw new Error(err.message || `GitHub API error: ${resp.status}`)
+          }
+          const data = await resp.json()
+          return { 
+            success: true, 
+            message: `File ${action === 'create_file' ? 'created' : 'updated'}: ${path}`,
+            file: { path: data.content.path, sha: data.content.sha, url: data.content.html_url }
+          }
+        }
+
+        case 'delete_file': {
+          const { owner, repo, path, message, sha } = params
+          if (!owner || !repo || !path) return { error: 'owner, repo, and path are required' }
+          // Get SHA if not provided
+          let fileSha = sha
+          if (!fileSha) {
+            const getResp = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, { headers })
+            if (getResp.ok) {
+              const existing = await getResp.json()
+              fileSha = existing.sha
+            } else {
+              return { error: 'File not found or could not get SHA' }
+            }
+          }
+          const resp = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`, {
+            method: 'DELETE',
+            headers,
+            body: JSON.stringify({
+              message: message || `Delete ${path}`,
+              sha: fileSha
+            })
+          })
+          if (!resp.ok) throw new Error(`GitHub API error: ${resp.status}`)
+          return { success: true, message: `File deleted: ${path}` }
+        }
+
+        case 'search_code': {
+          const { query, owner, repo } = params
+          if (!query) return { error: 'Search query is required' }
+          let q = query
+          if (owner && repo) q += ` repo:${owner}/${repo}`
+          else if (owner) q += ` user:${owner}`
+          const resp = await fetch(`https://api.github.com/search/code?q=${encodeURIComponent(q)}&per_page=10`, { headers })
+          if (!resp.ok) throw new Error(`GitHub API error: ${resp.status}`)
+          const data = await resp.json()
+          return {
+            success: true,
+            total: data.total_count,
+            results: data.items?.slice(0, 10).map(i => ({
+              name: i.name,
+              path: i.path,
+              repo: i.repository.full_name,
+              url: i.html_url
+            })) || []
+          }
+        }
+
+        default:
+          return { error: `Unknown GitHub action: ${action}` }
+      }
+    } catch (e) {
+      return { error: e.message || 'GitHub operation failed' }
+    }
+  }
+
+  // ========== Vercel Tool Functions ==========
+  const executeVercelTool = async (action, params) => {
+    if (!vercelToken) {
+      return { error: 'Vercel not connected. Please add your Vercel token in Settings.' }
+    }
+
+    const headers = {
+      'Authorization': `Bearer ${vercelToken}`,
+      'Content-Type': 'application/json'
+    }
+
+    try {
+      switch (action) {
+        case 'list_projects': {
+          const resp = await fetch('https://api.vercel.com/v9/projects', { headers })
+          if (!resp.ok) throw new Error(`Vercel API error: ${resp.status}`)
+          const data = await resp.json()
+          return {
+            success: true,
+            projects: data.projects?.map(p => ({
+              name: p.name,
+              id: p.id,
+              framework: p.framework,
+              url: p.link?.productionBranch ? `https://${p.name}.vercel.app` : null,
+              updatedAt: p.updatedAt
+            })) || []
+          }
+        }
+
+        case 'get_project': {
+          const { projectId } = params
+          if (!projectId) return { error: 'projectId is required' }
+          const resp = await fetch(`https://api.vercel.com/v9/projects/${projectId}`, { headers })
+          if (!resp.ok) throw new Error(`Vercel API error: ${resp.status}`)
+          const p = await resp.json()
+          return {
+            success: true,
+            project: {
+              name: p.name,
+              id: p.id,
+              framework: p.framework,
+              nodeVersion: p.nodeVersion,
+              buildCommand: p.buildCommand,
+              outputDirectory: p.outputDirectory,
+              gitRepo: p.link?.repo
+            }
+          }
+        }
+
+        case 'list_deployments': {
+          const { projectId, limit = 10 } = params
+          let url = `https://api.vercel.com/v6/deployments?limit=${limit}`
+          if (projectId) url += `&projectId=${projectId}`
+          const resp = await fetch(url, { headers })
+          if (!resp.ok) throw new Error(`Vercel API error: ${resp.status}`)
+          const data = await resp.json()
+          return {
+            success: true,
+            deployments: data.deployments?.map(d => ({
+              id: d.uid,
+              name: d.name,
+              url: d.url ? `https://${d.url}` : null,
+              state: d.state,
+              createdAt: d.createdAt,
+              target: d.target
+            })) || []
+          }
+        }
+
+        case 'get_deployment': {
+          const { deploymentId } = params
+          if (!deploymentId) return { error: 'deploymentId is required' }
+          const resp = await fetch(`https://api.vercel.com/v13/deployments/${deploymentId}`, { headers })
+          if (!resp.ok) throw new Error(`Vercel API error: ${resp.status}`)
+          const d = await resp.json()
+          return {
+            success: true,
+            deployment: {
+              id: d.id,
+              name: d.name,
+              url: d.url ? `https://${d.url}` : null,
+              state: d.readyState,
+              createdAt: d.createdAt,
+              buildingAt: d.buildingAt,
+              ready: d.ready
+            }
+          }
+        }
+
+        case 'create_deployment': {
+          const { projectId, gitSource, target = 'production' } = params
+          if (!projectId) return { error: 'projectId is required' }
+          const body = {
+            name: projectId,
+            target,
+            ...(gitSource && { gitSource })
+          }
+          const resp = await fetch('https://api.vercel.com/v13/deployments', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body)
+          })
+          if (!resp.ok) {
+            const err = await resp.json()
+            throw new Error(err.error?.message || `Vercel API error: ${resp.status}`)
+          }
+          const d = await resp.json()
+          return {
+            success: true,
+            message: `Deployment triggered for ${projectId}`,
+            deployment: {
+              id: d.id,
+              url: d.url ? `https://${d.url}` : null,
+              state: d.readyState
+            }
+          }
+        }
+
+        case 'list_domains': {
+          const { projectId } = params
+          if (!projectId) return { error: 'projectId is required' }
+          const resp = await fetch(`https://api.vercel.com/v9/projects/${projectId}/domains`, { headers })
+          if (!resp.ok) throw new Error(`Vercel API error: ${resp.status}`)
+          const data = await resp.json()
+          return {
+            success: true,
+            domains: data.domains?.map(d => ({
+              name: d.name,
+              verified: d.verified,
+              gitBranch: d.gitBranch
+            })) || []
+          }
+        }
+
+        case 'get_env_vars': {
+          const { projectId } = params
+          if (!projectId) return { error: 'projectId is required' }
+          const resp = await fetch(`https://api.vercel.com/v9/projects/${projectId}/env`, { headers })
+          if (!resp.ok) throw new Error(`Vercel API error: ${resp.status}`)
+          const data = await resp.json()
+          return {
+            success: true,
+            envVars: data.envs?.map(e => ({
+              key: e.key,
+              target: e.target,
+              type: e.type
+              // Don't include value for security
+            })) || []
+          }
+        }
+
+        default:
+          return { error: `Unknown Vercel action: ${action}` }
+      }
+    } catch (e) {
+      return { error: e.message || 'Vercel operation failed' }
+    }
+  }
+
   const handleSearch = async (query) => {
     const trimmed = (query || '').trim()
     if (!trimmed) {
@@ -9552,9 +9911,16 @@ else console.log('Deleted successfully')`
       : ''
 
     const profileBlock = buildUserProfileBlock()
+    
+    // Check which skills are enabled
+    const githubEnabled = enabledSkills.includes('github') && githubToken
+    const vercelEnabled = enabledSkills.includes('vercel') && vercelToken
+    
     const systemParts = [
       selectedAgent.systemPrompt || 'You are a helpful assistant.',
       searchUrl ? 'You have access to a web_search tool to search the internet for current information.' : '',
+      githubEnabled ? 'You have access to GitHub tools to manage repositories, files, and code. Use these when the user asks about their GitHub repos or wants to create/modify code.' : '',
+      vercelEnabled ? 'You have access to Vercel tools to manage deployments and projects. Use these when the user asks about deployments or wants to deploy their projects.' : '',
       profileBlock,
       memoryBlock,
       ragBlock,
@@ -9610,40 +9976,104 @@ else console.log('Deleted successfully')`
       }
     }
 
-    const makeRequest = async (msgs, includeTools = false) => {
-      const payload = { ...basePayload, messages: msgs }
-      if (includeTools && searchUrl) {
-        payload.tools = [searchTool]
+    // GitHub tool definition
+    const githubTool = {
+      type: 'function',
+      function: {
+        name: 'github',
+        description: 'Interact with GitHub to manage repositories and files. Actions: list_repos, get_repo, create_repo, list_files, get_file, create_file, update_file, delete_file, search_code.',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['list_repos', 'get_repo', 'create_repo', 'list_files', 'get_file', 'create_file', 'update_file', 'delete_file', 'search_code'],
+              description: 'The GitHub action to perform'
+            },
+            owner: { type: 'string', description: 'Repository owner (username or org)' },
+            repo: { type: 'string', description: 'Repository name' },
+            path: { type: 'string', description: 'File path within the repository' },
+            content: { type: 'string', description: 'File content for create/update operations' },
+            message: { type: 'string', description: 'Commit message' },
+            name: { type: 'string', description: 'Name for new repository' },
+            description: { type: 'string', description: 'Description for new repository' },
+            isPrivate: { type: 'boolean', description: 'Whether repo should be private (default: true)' },
+            query: { type: 'string', description: 'Search query for code search' }
+          },
+          required: ['action']
+        }
+      }
     }
 
-    const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openRouterApiKey.trim()}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': window.location.origin,
-        'X-Title': 'Agent Me',
-      },
-        signal,
-      body: JSON.stringify(payload),
-    })
+    // Vercel tool definition
+    const vercelTool = {
+      type: 'function',
+      function: {
+        name: 'vercel',
+        description: 'Interact with Vercel to manage deployments and projects. Actions: list_projects, get_project, list_deployments, get_deployment, create_deployment, list_domains, get_env_vars.',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['list_projects', 'get_project', 'list_deployments', 'get_deployment', 'create_deployment', 'list_domains', 'get_env_vars'],
+              description: 'The Vercel action to perform'
+            },
+            projectId: { type: 'string', description: 'Project ID or name' },
+            deploymentId: { type: 'string', description: 'Deployment ID' },
+            target: { type: 'string', enum: ['production', 'preview'], description: 'Deployment target' },
+            limit: { type: 'number', description: 'Max number of results to return' }
+          },
+          required: ['action']
+        }
+      }
+    }
 
-    if (!resp.ok) {
-      const t = await resp.text()
+    // Build tools array based on enabled skills
+    const buildToolsArray = () => {
+      const tools = []
+      if (searchUrl) tools.push(searchTool)
+      if (githubEnabled) tools.push(githubTool)
+      if (vercelEnabled) tools.push(vercelTool)
+      return tools
+    }
+
+    const makeRequest = async (msgs, includeTools = false) => {
+      const payload = { ...basePayload, messages: msgs }
+      const tools = buildToolsArray()
+      if (includeTools && tools.length > 0) {
+        payload.tools = tools
+      }
+
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openRouterApiKey.trim()}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'Agent Me',
+        },
+        signal,
+        body: JSON.stringify(payload),
+      })
+
+      if (!resp.ok) {
+        const t = await resp.text()
         // Give a clearer message for the common auth failure case
         if (resp.status === 401) {
           throw new Error(
             `OpenRouter auth failed (401). Your key is invalid/revoked or not an OpenRouter key. Re-paste it in Settings → OpenRouter and click Connect again.\n\n${t}`
           )
         }
-      throw new Error(`OpenRouter error: ${resp.status} ${t}`)
+        throw new Error(`OpenRouter error: ${resp.status} ${t}`)
       }
       return resp.json()
     }
 
     // Try with tools first, fallback to without if model doesn't support it
     let data
-    let useTools = !!searchUrl
+    const toolsAvailable = buildToolsArray()
+    let useTools = toolsAvailable.length > 0
     
     try {
       data = await makeRequest(messages, useTools)
@@ -9660,30 +10090,41 @@ else console.log('Deleted successfully')`
     
     let choice = data?.choices?.[0]
 
-    // Handle tool calls (max 3 iterations to prevent infinite loops)
+    // Handle tool calls (max 5 iterations to allow for multi-step operations)
     let iterations = 0
-    while (useTools && choice?.message?.tool_calls && iterations < 3) {
+    while (useTools && choice?.message?.tool_calls && iterations < 5) {
       iterations++
       const toolCalls = choice.message.tool_calls
       const updatedMessages = [...messages, choice.message]
 
       for (const tc of toolCalls) {
-        if (tc.function?.name === 'web_search') {
-          try {
-            const args = JSON.parse(tc.function.arguments || '{}')
-            const searchResult = await executeWebSearch(args.query)
-            updatedMessages.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: JSON.stringify(searchResult)
-            })
-          } catch (e) {
-            updatedMessages.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: JSON.stringify({ error: e.message })
-            })
+        const toolName = tc.function?.name
+        const args = JSON.parse(tc.function.arguments || '{}')
+        
+        try {
+          let result
+          
+          if (toolName === 'web_search') {
+            result = await executeWebSearch(args.query)
+          } else if (toolName === 'github') {
+            result = await executeGitHubTool(args.action, args)
+          } else if (toolName === 'vercel') {
+            result = await executeVercelTool(args.action, args)
+          } else {
+            result = { error: `Unknown tool: ${toolName}` }
           }
+          
+          updatedMessages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify(result)
+          })
+        } catch (e) {
+          updatedMessages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify({ error: e.message })
+          })
         }
       }
 
