@@ -3762,10 +3762,10 @@ button,
   position: absolute;
   bottom: 40px;
   left: 0;
-  min-width: 180px;
-  padding: 6px;
-  border-radius: 10px;
-  background: var(--main-bg);
+  min-width: 200px;
+  padding: 8px;
+  border-radius: 12px;
+  background: var(--sidebar-bg);
   border: 1px solid var(--border-color);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
   display: flex;
@@ -3774,10 +3774,31 @@ button,
   z-index: 20;
 }
 
+.tools-menu-section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.tools-menu-section + .tools-menu-section {
+  border-top: 1px solid var(--border-color);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.tools-menu-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  padding: 4px 10px;
+}
+
 .tools-menu button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   border: none;
   background: transparent;
   color: var(--text-primary);
@@ -3785,6 +3806,13 @@ button,
   border-radius: 8px;
   cursor: pointer;
   font-size: 13px;
+  text-align: left;
+}
+
+.tools-menu button svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 
 .tools-menu button:hover {
@@ -3794,6 +3822,58 @@ button,
 .tools-menu button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Skills in tools menu */
+.tools-skill-btn {
+  justify-content: flex-start !important;
+}
+
+.tools-skill-btn span:first-of-type {
+  flex: 1;
+}
+
+.tools-skill-status {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.tools-skill-status.on {
+  background: var(--accent-color);
+  color: white;
+}
+
+.tools-skill-status.off {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+}
+
+.tools-skill-btn.active {
+  background: rgba(16, 163, 127, 0.1);
+}
+
+.tools-skill-btn.active svg {
+  color: var(--accent-color);
+}
+
+/* Tools menu footer */
+.tools-menu-footer {
+  border-top: 1px solid var(--border-color);
+  padding-top: 8px;
+  margin-top: 4px;
+}
+
+.tools-menu-footer button {
+  width: 100%;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.tools-menu-footer button:hover {
+  color: var(--text-primary);
 }
 
 .input-actions-right {
