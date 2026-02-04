@@ -8619,15 +8619,46 @@ else console.log('Deleted successfully')`
 
   const fetchRelevantMemories = async (query) => {
     if (!dbEnabled) return []
-    const { data, error } = await supabase
+    
+    // Fetch ALL active memories to ensure nothing important is missed
+    // Priority types like personal_detail and preference should always be included
+    const { data: allMemories, error } = await supabase
       .from('user_memories')
       .select('content,memory_type,confidence')
       .eq('owner_user_id', authUser.id)
       .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(20)
+      .order('confidence', { ascending: false })
+    
     if (error) throw error
-    return data || []
+    if (!allMemories || !allMemories.length) return []
+    
+    // Priority memory types - always include these
+    const priorityTypes = ['personal_detail', 'preference', 'fact']
+    const priorityMemories = allMemories.filter(m => priorityTypes.includes(m.memory_type))
+    const otherMemories = allMemories.filter(m => !priorityTypes.includes(m.memory_type))
+    
+    // Simple keyword relevance scoring for non-priority memories
+    const queryLower = (query || '').toLowerCase()
+    const queryWords = queryLower.split(/\s+/).filter(w => w.length > 2)
+    
+    const scoredOthers = otherMemories.map(m => {
+      const contentLower = (m.content || '').toLowerCase()
+      let score = 0
+      queryWords.forEach(word => {
+        if (contentLower.includes(word)) score += 1
+      })
+      return { ...m, relevanceScore: score }
+    })
+    
+    // Sort by relevance, then take top ones
+    scoredOthers.sort((a, b) => b.relevanceScore - a.relevanceScore)
+    const relevantOthers = scoredOthers.slice(0, 20)
+    
+    // Combine: all priority memories + top relevant others
+    // Limit total to 40 to avoid too much context
+    const combined = [...priorityMemories, ...relevantOthers].slice(0, 40)
+    
+    return combined
   }
 
   const isTextLikeFile = (file) => {
@@ -9418,8 +9449,8 @@ else console.log('Deleted successfully')`
     const docChunks = await fetchRelevantDocChunks(message).catch(() => [])
 
     const memoryBlock = memories.length
-      ? `Known user info (memory):\n${memories
-          .slice(0, 10)
+      ? `Known user info (memory) - USE THIS TO ANSWER PERSONAL QUESTIONS:\n${memories
+          .slice(0, 25)
           .map(m => `- (${m.memory_type}) ${m.content}`)
           .join('\n')}`
       : ''
@@ -9591,8 +9622,8 @@ else console.log('Deleted successfully')`
     const docChunks = await fetchRelevantDocChunks(message).catch(() => [])
 
     const memoryBlock = memories.length
-      ? `Known user info (memory):\n${memories
-          .slice(0, 10)
+      ? `Known user info (memory) - USE THIS TO ANSWER PERSONAL QUESTIONS:\n${memories
+          .slice(0, 25)
           .map(m => `- (${m.memory_type}) ${m.content}`)
           .join('\n')}`
       : ''
@@ -9679,8 +9710,8 @@ else console.log('Deleted successfully')`
     const docChunks = await fetchRelevantDocChunks(message).catch(() => [])
 
     const memoryBlock = memories.length
-      ? `Known user info (memory):\n${memories
-          .slice(0, 10)
+      ? `Known user info (memory) - USE THIS TO ANSWER PERSONAL QUESTIONS:\n${memories
+          .slice(0, 25)
           .map(m => `- (${m.memory_type}) ${m.content}`)
           .join('\n')}`
       : ''
