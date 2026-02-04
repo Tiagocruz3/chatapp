@@ -1514,6 +1514,15 @@ function App() {
       return saved ? JSON.parse(saved) : []
     } catch { return [] }
   })
+  const [skillTokens, setSkillTokens] = useState(() => {
+    try {
+      const saved = localStorage.getItem('skillTokens')
+      return saved ? JSON.parse(saved) : {}
+    } catch { return {} }
+  })
+  const [skillCredentialsModal, setSkillCredentialsModal] = useState(null) // { skillId, skillName, tokenKey, tokenLabel, tokenHelp }
+  const [skillCredentialsInput, setSkillCredentialsInput] = useState('')
+  const [skillConnecting, setSkillConnecting] = useState(false)
 
   // Available skills definition
   const availableSkills = [
@@ -1523,7 +1532,11 @@ function App() {
       description: 'Manage repositories, issues, PRs, and code on GitHub',
       icon: 'github',
       category: 'Development',
-      capabilities: ['Create/manage repos', 'Handle issues & PRs', 'Code search', 'Actions & workflows']
+      capabilities: ['Create/manage repos', 'Handle issues & PRs', 'Code search', 'Actions & workflows'],
+      tokenKey: 'github_token',
+      tokenLabel: 'Personal Access Token',
+      tokenHelp: 'Get one from github.com/settings/tokens with repo scope',
+      testEndpoint: 'https://api.github.com/user'
     },
     {
       id: 'vercel',
@@ -1531,7 +1544,11 @@ function App() {
       description: 'Deploy apps and projects to Vercel with zero configuration',
       icon: 'vercel',
       category: 'Deployment',
-      capabilities: ['Deploy projects', 'Manage domains', 'Environment variables', 'Deployment logs']
+      capabilities: ['Deploy projects', 'Manage domains', 'Environment variables', 'Deployment logs'],
+      tokenKey: 'vercel_token',
+      tokenLabel: 'API Token',
+      tokenHelp: 'Get one from vercel.com/account/tokens',
+      testEndpoint: 'https://api.vercel.com/v2/user'
     },
     {
       id: 'figma',
@@ -1539,7 +1556,11 @@ function App() {
       description: 'Use Figma MCP for design-to-code work',
       icon: 'figma',
       category: 'Design',
-      capabilities: ['Export assets', 'Inspect designs', 'Generate code', 'Design tokens']
+      capabilities: ['Export assets', 'Inspect designs', 'Generate code', 'Design tokens'],
+      tokenKey: 'figma_token',
+      tokenLabel: 'Personal Access Token',
+      tokenHelp: 'Get one from figma.com/developers/api',
+      testEndpoint: 'https://api.figma.com/v1/me'
     },
     {
       id: 'notion',
@@ -1547,7 +1568,11 @@ function App() {
       description: 'Capture conversations into structured Notion pages',
       icon: 'notion',
       category: 'Productivity',
-      capabilities: ['Create pages', 'Update databases', 'Search content', 'Sync notes']
+      capabilities: ['Create pages', 'Update databases', 'Search content', 'Sync notes'],
+      tokenKey: 'notion_token',
+      tokenLabel: 'Integration Token',
+      tokenHelp: 'Create an integration at notion.so/my-integrations',
+      testEndpoint: 'https://api.notion.com/v1/users/me'
     },
     {
       id: 'linear',
@@ -1555,7 +1580,11 @@ function App() {
       description: 'Manage Linear issues and projects in Codex',
       icon: 'linear',
       category: 'Project Management',
-      capabilities: ['Create issues', 'Update status', 'Manage sprints', 'Track progress']
+      capabilities: ['Create issues', 'Update status', 'Manage sprints', 'Track progress'],
+      tokenKey: 'linear_token',
+      tokenLabel: 'API Key',
+      tokenHelp: 'Get one from linear.app/settings/api',
+      testEndpoint: null // Linear uses GraphQL
     },
     {
       id: 'sora',
@@ -1563,7 +1592,11 @@ function App() {
       description: 'Generate and manage Sora AI videos',
       icon: 'sora',
       category: 'AI Generation',
-      capabilities: ['Generate videos', 'Edit clips', 'Manage assets', 'Export formats']
+      capabilities: ['Generate videos', 'Edit clips', 'Manage assets', 'Export formats'],
+      tokenKey: 'sora_token',
+      tokenLabel: 'API Key',
+      tokenHelp: 'Coming soon - Sora API not yet public',
+      testEndpoint: null
     }
   ]
 
@@ -2178,6 +2211,34 @@ function App() {
     })
   }
 
+  // Check if a skill has a valid token
+  const isSkillConnected = (skillId) => {
+    const skill = availableSkills.find(s => s.id === skillId)
+    if (!skill?.tokenKey) return false
+    return !!skillTokens[skill.tokenKey]
+  }
+
+  // Handle skill card click
+  const handleSkillClick = (skill) => {
+    const hasToken = skillTokens[skill.tokenKey]
+    
+    if (!hasToken) {
+      // Open credentials modal
+      setSkillCredentialsModal({
+        skillId: skill.id,
+        skillName: skill.name,
+        tokenKey: skill.tokenKey,
+        tokenLabel: skill.tokenLabel,
+        tokenHelp: skill.tokenHelp,
+        testEndpoint: skill.testEndpoint
+      })
+      setSkillCredentialsInput('')
+    } else {
+      // Toggle enabled/disabled
+      toggleSkill(skill.id)
+    }
+  }
+
   // Toggle skill enabled/disabled
   const toggleSkill = (skillId) => {
     setEnabledSkills(prev => {
@@ -2193,6 +2254,71 @@ function App() {
       }
       return newSkills
     })
+  }
+
+  // Save skill token and test connection
+  const saveSkillToken = async () => {
+    if (!skillCredentialsModal || !skillCredentialsInput.trim()) return
+    
+    setSkillConnecting(true)
+    const { skillId, skillName, tokenKey, testEndpoint } = skillCredentialsModal
+    const token = skillCredentialsInput.trim()
+    
+    try {
+      // Test the token if endpoint available
+      if (testEndpoint) {
+        const headers = { 'Authorization': `Bearer ${token}` }
+        // Notion uses different auth header
+        if (skillId === 'notion') {
+          headers['Authorization'] = `Bearer ${token}`
+          headers['Notion-Version'] = '2022-06-28'
+        }
+        
+        const resp = await fetch(testEndpoint, { headers })
+        if (!resp.ok) {
+          throw new Error(`Invalid token (${resp.status})`)
+        }
+      }
+      
+      // Save token
+      const newTokens = { ...skillTokens, [tokenKey]: token }
+      setSkillTokens(newTokens)
+      localStorage.setItem('skillTokens', JSON.stringify(newTokens))
+      
+      // Auto-enable the skill
+      if (!enabledSkills.includes(skillId)) {
+        const newEnabled = [...enabledSkills, skillId]
+        setEnabledSkills(newEnabled)
+        localStorage.setItem('enabledSkills', JSON.stringify(newEnabled))
+      }
+      
+      showToast(`${skillName} connected successfully!`)
+      setSkillCredentialsModal(null)
+      setSkillCredentialsInput('')
+    } catch (e) {
+      showToast(`Connection failed: ${e.message}`)
+    } finally {
+      setSkillConnecting(false)
+    }
+  }
+
+  // Disconnect a skill (remove token)
+  const disconnectSkill = (skillId) => {
+    const skill = availableSkills.find(s => s.id === skillId)
+    if (!skill?.tokenKey) return
+    
+    // Remove token
+    const newTokens = { ...skillTokens }
+    delete newTokens[skill.tokenKey]
+    setSkillTokens(newTokens)
+    localStorage.setItem('skillTokens', JSON.stringify(newTokens))
+    
+    // Disable skill
+    const newEnabled = enabledSkills.filter(id => id !== skillId)
+    setEnabledSkills(newEnabled)
+    localStorage.setItem('enabledSkills', JSON.stringify(newEnabled))
+    
+    showToast(`${skill.name} disconnected`)
   }
 
   // Filter skills by search query
@@ -9585,12 +9711,13 @@ else console.log('Deleted successfully')`
 
   // ========== GitHub Tool Functions ==========
   const executeGitHubTool = async (action, params) => {
-    if (!githubToken) {
-      return { error: 'GitHub not connected. Please add your GitHub token in Settings.' }
+    const token = skillTokens.github_token
+    if (!token) {
+      return { error: 'GitHub not connected. Please click on the GitHub skill to add your token.' }
     }
     
     const headers = {
-      'Authorization': `Bearer ${githubToken}`,
+      'Authorization': `Bearer ${token}`,
       'Accept': 'application/vnd.github.v3+json',
       'Content-Type': 'application/json'
     }
@@ -9785,12 +9912,13 @@ else console.log('Deleted successfully')`
 
   // ========== Vercel Tool Functions ==========
   const executeVercelTool = async (action, params) => {
-    if (!vercelToken) {
-      return { error: 'Vercel not connected. Please add your Vercel token in Settings.' }
+    const token = skillTokens.vercel_token
+    if (!token) {
+      return { error: 'Vercel not connected. Please click on the Vercel skill to add your token.' }
     }
 
     const headers = {
-      'Authorization': `Bearer ${vercelToken}`,
+      'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json'
     }
 
@@ -10004,8 +10132,8 @@ else console.log('Deleted successfully')`
     const profileBlock = buildUserProfileBlock()
     
     // Check which skills are enabled
-    const githubEnabled = enabledSkills.includes('github') && githubToken
-    const vercelEnabled = enabledSkills.includes('vercel') && vercelToken
+    const githubEnabled = enabledSkills.includes('github') && skillTokens.github_token
+    const vercelEnabled = enabledSkills.includes('vercel') && skillTokens.vercel_token
     
     const systemParts = [
       selectedAgent.systemPrompt || 'You are a helpful assistant.',
@@ -13277,13 +13405,21 @@ else console.log('Deleted successfully')`
           <div className="settings-page-content">
             <div className="skills-grid">
               {filteredSkills.map((skill) => {
+                const isConnected = isSkillConnected(skill.id)
                 const isEnabled = enabledSkills.includes(skill.id)
                 return (
                   <div
                     key={skill.id}
-                    className={`skill-card ${isEnabled ? 'skill-enabled' : ''}`}
-                    onClick={() => toggleSkill(skill.id)}
+                    className={`skill-card ${isConnected ? 'skill-connected' : ''} ${isEnabled ? 'skill-enabled' : ''}`}
+                    onClick={() => handleSkillClick(skill)}
                   >
+                    {/* Connection indicator */}
+                    {isConnected && (
+                      <div className="skill-connection-badge">
+                        <span className="skill-connection-dot"></span>
+                        Connected
+                      </div>
+                    )}
                     <div className="skill-card-icon">
                       {skill.icon === 'github' && (
                         <svg viewBox="0 0 24 24" fill="currentColor">
@@ -13322,17 +13458,38 @@ else console.log('Deleted successfully')`
                         <span className="skill-card-category">{skill.category}</span>
                       </div>
                       <p className="skill-card-description">{skill.description}</p>
+                      {!isConnected && (
+                        <p className="skill-card-hint">Click to connect</p>
+                      )}
                     </div>
-                    <div className="skill-card-toggle">
-                      {isEnabled ? (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="skill-check">
-                          <path d="M20 6L9 17l-5-5"/>
-                        </svg>
+                    <div className="skill-card-actions">
+                      {isConnected ? (
+                        <>
+                          <button
+                            className={`skill-toggle-btn ${isEnabled ? 'active' : ''}`}
+                            onClick={(e) => { e.stopPropagation(); toggleSkill(skill.id) }}
+                            title={isEnabled ? 'Disable' : 'Enable'}
+                          >
+                            {isEnabled ? 'ON' : 'OFF'}
+                          </button>
+                          <button
+                            className="skill-disconnect-btn"
+                            onClick={(e) => { e.stopPropagation(); disconnectSkill(skill.id) }}
+                            title="Disconnect"
+                          >
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>
+                              <line x1="12" y1="2" x2="12" y2="12"/>
+                            </svg>
+                          </button>
+                        </>
                       ) : (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="skill-add">
-                          <line x1="12" y1="5" x2="12" y2="19"/>
-                          <line x1="5" y1="12" x2="19" y2="12"/>
-                        </svg>
+                        <div className="skill-connect-icon">
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                          </svg>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -13345,6 +13502,55 @@ else console.log('Deleted successfully')`
               </div>
             )}
           </div>
+
+          {/* Skill Credentials Modal */}
+          {skillCredentialsModal && (
+            <div className="skill-credentials-overlay" onClick={() => setSkillCredentialsModal(null)}>
+              <div className="skill-credentials-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="skill-credentials-header">
+                  <h2>Connect {skillCredentialsModal.skillName}</h2>
+                  <button className="skill-credentials-close" onClick={() => setSkillCredentialsModal(null)}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="18" y1="6" x2="6" y2="18"/>
+                      <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                  </button>
+                </div>
+                <div className="skill-credentials-body">
+                  <label className="skill-credentials-label">
+                    {skillCredentialsModal.tokenLabel}
+                  </label>
+                  <input
+                    type="password"
+                    className="skill-credentials-input"
+                    value={skillCredentialsInput}
+                    onChange={(e) => setSkillCredentialsInput(e.target.value)}
+                    placeholder={`Enter your ${skillCredentialsModal.tokenLabel.toLowerCase()}`}
+                    onKeyDown={(e) => e.key === 'Enter' && saveSkillToken()}
+                    autoFocus
+                  />
+                  <p className="skill-credentials-hint">
+                    {skillCredentialsModal.tokenHelp}
+                  </p>
+                </div>
+                <div className="skill-credentials-footer">
+                  <button 
+                    className="skill-credentials-cancel"
+                    onClick={() => setSkillCredentialsModal(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    className="skill-credentials-connect"
+                    onClick={saveSkillToken}
+                    disabled={!skillCredentialsInput.trim() || skillConnecting}
+                  >
+                    {skillConnecting ? 'Connecting...' : 'Connect'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Admin Page */}
