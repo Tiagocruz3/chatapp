@@ -10138,8 +10138,20 @@ else console.log('Deleted successfully')`
     const systemParts = [
       selectedAgent.systemPrompt || 'You are a helpful assistant.',
       searchUrl ? 'You have access to a web_search tool to search the internet for current information.' : '',
-      githubEnabled ? 'You have access to GitHub tools to manage repositories, files, and code. Use these when the user asks about their GitHub repos or wants to create/modify code.' : '',
-      vercelEnabled ? 'You have access to Vercel tools to manage deployments and projects. Use these when the user asks about deployments or wants to deploy their projects.' : '',
+      githubEnabled ? `You have access to GitHub tools to manage repositories, files, and code.
+IMPORTANT: After any GitHub action, ALWAYS report back to the user with:
+- What was done (created repo, updated file, etc.)
+- The repository/file name
+- A clickable link (format as markdown: [text](url))
+- Any relevant details (private/public, branch, commit message)
+Example: "I created the repository **username/my-project**: [View on GitHub](https://github.com/username/my-project)"` : '',
+      vercelEnabled ? `You have access to Vercel tools to manage deployments and projects.
+IMPORTANT: After any Vercel action, ALWAYS report back to the user with:
+- What was done (deployed, listed projects, etc.)
+- The project name
+- The deployment URL as a clickable link (format: [Visit Site](url))
+- The deployment status (building, ready, error)
+Example: "Deployment triggered for **my-project**: [View Deployment](https://my-project-xyz.vercel.app) - Status: Building"` : '',
       profileBlock,
       memoryBlock,
       ragBlock,
