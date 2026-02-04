@@ -8777,18 +8777,51 @@ else console.log('Deleted successfully')`
     return chunks
   }
 
-  const extractPdfText = async (file) => {
-    const buf = await file.arrayBuffer()
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buf) })
-    const pdf = await loadingTask.promise
-    const out = []
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i)
-      const tc = await page.getTextContent()
-      const text = (tc?.items || []).map((it) => it?.str || '').join(' ').trim()
-      if (text) out.push(text)
+  const extractPdfText = async (file, onProgress) => {
+    try {
+      const buf = await file.arrayBuffer()
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buf) })
+      
+      // Add timeout to PDF loading (30 seconds)
+      const pdf = await withTimeout(
+        loadingTask.promise,
+        30000,
+        'PDF loading timed out - file may be too large or corrupted'
+      )
+      
+      const out = []
+      const totalPages = pdf.numPages
+      
+      // Limit to 100 pages to prevent hanging on huge documents
+      const maxPages = Math.min(totalPages, 100)
+      
+      for (let i = 1; i <= maxPages; i++) {
+        try {
+          const page = await pdf.getPage(i)
+          const tc = await page.getTextContent()
+          const text = (tc?.items || []).map((it) => it?.str || '').join(' ').trim()
+          if (text) out.push(text)
+          
+          // Report progress if callback provided
+          if (onProgress) {
+            const progress = Math.round((i / maxPages) * 100)
+            onProgress(progress)
+          }
+        } catch (pageErr) {
+          console.warn(`Failed to extract page ${i}:`, pageErr)
+          // Continue with other pages
+        }
+      }
+      
+      if (totalPages > maxPages) {
+        out.push(`\n[Note: Document truncated - showing first ${maxPages} of ${totalPages} pages]`)
+      }
+      
+      return out.join('\n\n').trim()
+    } catch (e) {
+      console.error('PDF extraction failed:', e)
+      throw new Error(`PDF extraction failed: ${e.message}`)
     }
-    return out.join('\n\n').trim()
   }
 
   const extractDocxText = async (file) => {
@@ -8797,42 +8830,75 @@ else console.log('Deleted successfully')`
     return (res?.value || '').trim()
   }
 
+  // Helper to add timeout to any promise
+  const withTimeout = (promise, ms, errorMessage = 'Operation timed out') => {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error(errorMessage)), ms)
+      )
+    ])
+  }
+
   const openAiAnalyzeText = async ({ text, filename }) => {
     const key = openAiApiKey.trim()
-    if (!key) throw new Error('OpenAI API key not set (Settings → OCR)')
+    if (!key) {
+      // Don't throw - just return empty if no key
+      console.log('Skipping analysis: No OpenAI API key')
+      return ''
+    }
     const t = String(text || '').trim()
     if (!t) return ''
     const snippet = t.slice(0, 12000)
-    const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: ocrModel || 'gpt-4o',
-        temperature: 0.2,
-        messages: [
-          { role: 'system', content: 'You analyze documents. Respond with clean bullet points (•) only. Be concise.' },
-          {
-            role: 'user',
-            content:
-              `Analyze this ${filename || 'document'}:\n\n` +
-              `${snippet}\n\n` +
-              `Format your response as:\n` +
-              `• Type: [document type]\n` +
-              `• Summary: [one sentence]\n` +
-              `• Key points: [2-3 important details]`,
-          },
-        ],
-      }),
-    })
-    if (!resp.ok) {
-      const body = await resp.text()
-      throw new Error(`OpenAI analysis error: ${resp.status} ${body}`)
+    
+    // Create AbortController for timeout
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 60000) // 60 second timeout
+    
+    try {
+      const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${key}`,
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: ocrModel || 'gpt-4o',
+          temperature: 0.2,
+          messages: [
+            { role: 'system', content: 'You analyze documents. Respond with clean bullet points (•) only. Be concise.' },
+            {
+              role: 'user',
+              content:
+                `Analyze this ${filename || 'document'}:\n\n` +
+                `${snippet}\n\n` +
+                `Format your response as:\n` +
+                `• Type: [document type]\n` +
+                `• Summary: [one sentence]\n` +
+                `• Key points: [2-3 important details]`,
+            },
+          ],
+        }),
+      })
+      clearTimeout(timeoutId)
+      
+      if (!resp.ok) {
+        const body = await resp.text()
+        console.error(`OpenAI analysis error: ${resp.status}`, body)
+        return `Analysis unavailable (API error: ${resp.status})`
+      }
+      const data = await resp.json()
+      return String(data?.choices?.[0]?.message?.content || '').trim()
+    } catch (e) {
+      clearTimeout(timeoutId)
+      if (e.name === 'AbortError') {
+        console.error('OpenAI analysis timed out')
+        return 'Analysis unavailable (timed out)'
+      }
+      console.error('OpenAI analysis failed:', e)
+      return 'Analysis unavailable'
     }
-    const data = await resp.json()
-    return String(data?.choices?.[0]?.message?.content || '').trim()
   }
 
   const extractTextForRag = async ({ file, filename, mime }) => {
@@ -9146,26 +9212,51 @@ else console.log('Deleted successfully')`
           }
           setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
         } else if (String(f?.name || '').toLowerCase().endsWith('.pdf') || String(f?.type || '').toLowerCase().includes('pdf')) {
-          const pdfText = await extractPdfText(f.file)
-          extractedText = pdfText || ''
-          setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
-          if (ocrAutoPostSummaryToChat && extractedText.trim()) {
-            analysis = await openAiAnalyzeText({ text: extractedText, filename: f.name })
-          } else {
-            analysis = extractedText.trim()
-              ? 'PDF text extracted.'
-              : 'PDF has no extractable text layer (likely scanned).'
+          try {
+            // Extract PDF with progress reporting
+            const pdfText = await extractPdfText(f.file, (pdfProgress) => {
+              // Map PDF extraction progress (0-100) to overall progress (10-55)
+              const mappedProgress = 10 + Math.round(pdfProgress * 0.45)
+              setAttachmentProgress((prev) => ({ ...prev, [f.id]: mappedProgress }))
+            })
+            extractedText = pdfText || ''
+            setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
+            
+            if (ocrAutoPostSummaryToChat && extractedText.trim()) {
+              setAttachmentProgress((prev) => ({ ...prev, [f.id]: 65 })) // Show analysis starting
+              analysis = await openAiAnalyzeText({ text: extractedText, filename: f.name })
+            } else {
+              analysis = extractedText.trim()
+                ? 'PDF text extracted.'
+                : 'PDF has no extractable text layer (likely scanned).'
+            }
+          } catch (pdfErr) {
+            console.error('PDF processing failed:', pdfErr)
+            analysis = `PDF processing failed: ${pdfErr.message}`
+            setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
           }
         } else if (String(f?.name || '').toLowerCase().endsWith('.docx') || String(f?.type || '').toLowerCase().includes('officedocument.wordprocessingml.document')) {
-          const docxText = await extractDocxText(f.file)
-          extractedText = docxText || ''
-          setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
-          if (ocrAutoPostSummaryToChat && extractedText.trim()) {
-            analysis = await openAiAnalyzeText({ text: extractedText, filename: f.name })
-          } else {
-            analysis = extractedText.trim()
-              ? 'DOCX text extracted.'
-              : 'DOCX contained no extractable text.'
+          try {
+            const docxText = await withTimeout(
+              extractDocxText(f.file),
+              30000,
+              'DOCX extraction timed out'
+            )
+            extractedText = docxText || ''
+            setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
+            
+            if (ocrAutoPostSummaryToChat && extractedText.trim()) {
+              setAttachmentProgress((prev) => ({ ...prev, [f.id]: 65 }))
+              analysis = await openAiAnalyzeText({ text: extractedText, filename: f.name })
+            } else {
+              analysis = extractedText.trim()
+                ? 'DOCX text extracted.'
+                : 'DOCX contained no extractable text.'
+            }
+          } catch (docxErr) {
+            console.error('DOCX processing failed:', docxErr)
+            analysis = `DOCX processing failed: ${docxErr.message}`
+            setAttachmentProgress((prev) => ({ ...prev, [f.id]: 60 }))
           }
         } else if (isTextLikeFile(f?.file)) {
           const text = await f.file.text()
