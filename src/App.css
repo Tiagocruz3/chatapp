@@ -7067,6 +7067,244 @@ button,
   height: 16px;
 }
 
+/* Skills Page */
+.skills-page .settings-page-header {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.skills-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.skills-refresh-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.skills-refresh-btn:hover {
+  background: var(--hover-bg);
+  border-color: var(--text-muted);
+}
+
+.skills-refresh-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.skills-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  min-width: 200px;
+}
+
+.skills-search-wrap svg {
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.skills-search-wrap input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.skills-search-wrap input::placeholder {
+  color: var(--text-muted);
+}
+
+.skills-new-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--accent-color);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.skills-new-btn:hover {
+  filter: brightness(1.1);
+}
+
+.skills-new-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Skills Grid */
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  padding: 4px;
+}
+
+.skill-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.skill-card:hover {
+  border-color: var(--text-muted);
+  background: var(--hover-bg);
+}
+
+.skill-card.skill-enabled {
+  border-color: var(--accent-color);
+  background: rgba(16, 163, 127, 0.08);
+}
+
+.skill-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.skill-card-icon svg {
+  width: 24px;
+  height: 24px;
+  color: var(--text-primary);
+}
+
+.skill-card.skill-enabled .skill-card-icon {
+  background: var(--accent-color);
+}
+
+.skill-card.skill-enabled .skill-card-icon svg {
+  color: white;
+}
+
+.skill-card-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.skill-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.skill-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.skill-card-category {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.skill-card-description {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.skill-card-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.skill-card-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+.skill-add {
+  color: var(--text-muted);
+  transition: color 0.15s;
+}
+
+.skill-card:hover .skill-add {
+  color: var(--text-primary);
+}
+
+.skill-check {
+  color: var(--accent-color);
+}
+
+.skills-empty {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+}
+
+/* Sidebar Skills Badge */
+.sidebar-nav-badge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--accent-color);
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  margin-left: auto;
+}
+
+.skills-nav-btn {
+  color: var(--accent-color) !important;
+}
+
+.skills-nav-btn .sidebar-nav-icon svg {
+  stroke: var(--accent-color);
+}
+
 .formatted-response pre {
   background: #1e1e1e;
   padding: 12px;

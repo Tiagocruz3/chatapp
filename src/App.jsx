@@ -1506,6 +1506,67 @@ function App() {
   const [showGalleryPage, setShowGalleryPage] = useState(false)
   const [showKnowledgeBasePage, setShowKnowledgeBasePage] = useState(false)
   const [knowledgeBaseTab, setKnowledgeBaseTab] = useState('memory') // memory | rag | graph
+  const [showSkillsPage, setShowSkillsPage] = useState(false)
+  const [skillsSearchQuery, setSkillsSearchQuery] = useState('')
+  const [enabledSkills, setEnabledSkills] = useState(() => {
+    try {
+      const saved = localStorage.getItem('enabledSkills')
+      return saved ? JSON.parse(saved) : []
+    } catch { return [] }
+  })
+
+  // Available skills definition
+  const availableSkills = [
+    {
+      id: 'github',
+      name: 'GitHub',
+      description: 'Manage repositories, issues, PRs, and code on GitHub',
+      icon: 'github',
+      category: 'Development',
+      capabilities: ['Create/manage repos', 'Handle issues & PRs', 'Code search', 'Actions & workflows']
+    },
+    {
+      id: 'vercel',
+      name: 'Vercel Deploy',
+      description: 'Deploy apps and projects to Vercel with zero configuration',
+      icon: 'vercel',
+      category: 'Deployment',
+      capabilities: ['Deploy projects', 'Manage domains', 'Environment variables', 'Deployment logs']
+    },
+    {
+      id: 'figma',
+      name: 'Figma',
+      description: 'Use Figma MCP for design-to-code work',
+      icon: 'figma',
+      category: 'Design',
+      capabilities: ['Export assets', 'Inspect designs', 'Generate code', 'Design tokens']
+    },
+    {
+      id: 'notion',
+      name: 'Notion',
+      description: 'Capture conversations into structured Notion pages',
+      icon: 'notion',
+      category: 'Productivity',
+      capabilities: ['Create pages', 'Update databases', 'Search content', 'Sync notes']
+    },
+    {
+      id: 'linear',
+      name: 'Linear',
+      description: 'Manage Linear issues and projects in Codex',
+      icon: 'linear',
+      category: 'Project Management',
+      capabilities: ['Create issues', 'Update status', 'Manage sprints', 'Track progress']
+    },
+    {
+      id: 'sora',
+      name: 'Sora Video',
+      description: 'Generate and manage Sora AI videos',
+      icon: 'sora',
+      category: 'AI Generation',
+      capabilities: ['Generate videos', 'Edit clips', 'Manage assets', 'Export formats']
+    }
+  ]
+
   const [adminUsers, setAdminUsers] = useState([])
   const [adminUsage, setAdminUsage] = useState([])
   const [adminUsageModels, setAdminUsageModels] = useState([])
@@ -2116,6 +2177,34 @@ function App() {
       showToast('Failed to copy')
     })
   }
+
+  // Toggle skill enabled/disabled
+  const toggleSkill = (skillId) => {
+    setEnabledSkills(prev => {
+      const newSkills = prev.includes(skillId)
+        ? prev.filter(id => id !== skillId)
+        : [...prev, skillId]
+      localStorage.setItem('enabledSkills', JSON.stringify(newSkills))
+      const skill = availableSkills.find(s => s.id === skillId)
+      if (skill) {
+        showToast(newSkills.includes(skillId) 
+          ? `${skill.name} skill enabled` 
+          : `${skill.name} skill disabled`)
+      }
+      return newSkills
+    })
+  }
+
+  // Filter skills by search query
+  const filteredSkills = availableSkills.filter(skill => {
+    if (!skillsSearchQuery.trim()) return true
+    const query = skillsSearchQuery.toLowerCase()
+    return (
+      skill.name.toLowerCase().includes(query) ||
+      skill.description.toLowerCase().includes(query) ||
+      skill.category.toLowerCase().includes(query)
+    )
+  })
 
   // Rename artifact
   const renameCodeArtifact = async (id, newTitle) => {
@@ -10059,6 +10148,22 @@ else console.log('Deleted successfully')`
             </button>
 
             <button
+              className="sidebar-nav-btn skills-nav-btn"
+              type="button"
+              onClick={() => { setShowSkillsPage(true); setSidebarOpen(false) }}
+            >
+              <span className="sidebar-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+                </svg>
+              </span>
+              <span className="sidebar-nav-label">Skills</span>
+              {enabledSkills.length > 0 && (
+                <span className="sidebar-nav-badge">{enabledSkills.length}</span>
+              )}
+            </button>
+
+            <button
               className="sidebar-nav-btn coder-nav-btn"
               type="button"
               onClick={() => showToast('Code IDE coming soon')}
@@ -12589,6 +12694,123 @@ else console.log('Deleted successfully')`
                   </div>
                 )}
               </section>
+            )}
+          </div>
+        </div>
+
+        {/* Skills Page */}
+        <div className={`settings-page skills-page ${showSkillsPage ? 'slide-in' : 'slide-out'}`}>
+          <div className="settings-page-header">
+            <button
+              className="settings-back-btn"
+              onClick={() => setShowSkillsPage(false)}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M19 12H5"/>
+                <path d="M12 19l-7-7 7-7"/>
+              </svg>
+            </button>
+            <h1>Skills</h1>
+            <div className="skills-header-actions">
+              <button className="skills-refresh-btn" onClick={() => showToast('Skills refreshed')}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 2v6h-6"/>
+                  <path d="M3 12a9 9 0 0 1 15-6.7L21 8"/>
+                  <path d="M3 22v-6h6"/>
+                  <path d="M21 12a9 9 0 0 1-15 6.7L3 16"/>
+                </svg>
+                Refresh
+              </button>
+              <div className="skills-search-wrap">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input
+                  type="text"
+                  placeholder="Search skills"
+                  value={skillsSearchQuery}
+                  onChange={(e) => setSkillsSearchQuery(e.target.value)}
+                />
+              </div>
+              <button className="skills-new-btn" onClick={() => showToast('Create custom skill coming soon')}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+                New skill
+              </button>
+            </div>
+          </div>
+          <div className="settings-page-content">
+            <div className="skills-grid">
+              {filteredSkills.map((skill) => {
+                const isEnabled = enabledSkills.includes(skill.id)
+                return (
+                  <div
+                    key={skill.id}
+                    className={`skill-card ${isEnabled ? 'skill-enabled' : ''}`}
+                    onClick={() => toggleSkill(skill.id)}
+                  >
+                    <div className="skill-card-icon">
+                      {skill.icon === 'github' && (
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                        </svg>
+                      )}
+                      {skill.icon === 'vercel' && (
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M24 22.525H0l12-21.05 12 21.05z"/>
+                        </svg>
+                      )}
+                      {skill.icon === 'figma' && (
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M15.852 8.981h-4.588V0h4.588c2.476 0 4.49 2.014 4.49 4.49s-2.014 4.491-4.49 4.491zM12.735 7.51h3.117c1.665 0 3.019-1.355 3.019-3.019s-1.355-3.019-3.019-3.019h-3.117V7.51zM8.148 24c-2.476 0-4.49-2.014-4.49-4.49s2.014-4.49 4.49-4.49h4.588v4.441c0 2.503-2.047 4.539-4.588 4.539zm-.001-7.509c-1.665 0-3.019 1.355-3.019 3.019s1.355 3.019 3.019 3.019c1.665 0 3.019-1.355 3.019-3.019v-3.019H8.147zM8.148 8.981c-2.476 0-4.49-2.014-4.49-4.49S5.672 0 8.148 0h4.588v8.981H8.148zm0-7.51c-1.665 0-3.019 1.355-3.019 3.019s1.355 3.019 3.019 3.019h3.117V1.471H8.148zM8.148 15.02c-2.476 0-4.49-2.014-4.49-4.49s2.014-4.49 4.49-4.49h4.588v8.98H8.148zm0-7.509c-1.665 0-3.019 1.355-3.019 3.019s1.355 3.019 3.019 3.019h3.117V7.51H8.148zM15.852 15.02c-2.476 0-4.49-2.014-4.49-4.49s2.014-4.49 4.49-4.49 4.49 2.014 4.49 4.49-2.014 4.49-4.49 4.49zm0-7.509c-1.665 0-3.019 1.355-3.019 3.019s1.355 3.019 3.019 3.019 3.019-1.355 3.019-3.019-1.354-3.019-3.019-3.019z"/>
+                        </svg>
+                      )}
+                      {skill.icon === 'notion' && (
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.98-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.373.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.84-.046.933-.56.933-1.167V6.354c0-.606-.233-.933-.746-.886l-15.177.886c-.56.047-.747.327-.747.933zm14.337.746c.093.42 0 .84-.42.886l-.7.14v10.264c-.607.327-1.167.513-1.634.513-.746 0-.933-.233-1.493-.933l-4.572-7.186v6.952l1.447.327s0 .84-1.167.84l-3.22.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.62c-.094-.42.14-1.026.793-1.073l3.453-.233 4.759 7.279v-6.44l-1.214-.14c-.093-.513.28-.886.746-.933zM2.874.5l13.682-.933c1.68-.14 2.101.093 2.802.606l3.86 2.708c.466.326.606.42.606.793v15.924c0 1.026-.373 1.634-1.68 1.727l-15.458.933c-.98.047-1.447-.093-1.96-.747l-3.127-4.06c-.56-.747-.793-1.306-.793-1.96V2.081C.813 1.128 1.187.593 2.874.5z"/>
+                        </svg>
+                      )}
+                      {skill.icon === 'linear' && (
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M3 12c0-1.2.3-2.4.8-3.5L12 16.8c-1 .5-2.3.8-3.5.8A6.5 6.5 0 013 12zm9 6.5c-1.8 0-3.5-.7-4.8-1.9L15.5 8c1.2 1.3 2 3 2 4.8a6.5 6.5 0 01-5.5 5.7zm3.2-12L7.5 14.2a6.5 6.5 0 014.5-8.2 6.5 6.5 0 013.2 2.5zM12 1a11 11 0 100 22 11 11 0 000-22z"/>
+                        </svg>
+                      )}
+                      {skill.icon === 'sora' && (
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                        </svg>
+                      )}
+                    </div>
+                    <div className="skill-card-content">
+                      <div className="skill-card-header">
+                        <h3 className="skill-card-name">{skill.name}</h3>
+                        <span className="skill-card-category">{skill.category}</span>
+                      </div>
+                      <p className="skill-card-description">{skill.description}</p>
+                    </div>
+                    <div className="skill-card-toggle">
+                      {isEnabled ? (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="skill-check">
+                          <path d="M20 6L9 17l-5-5"/>
+                        </svg>
+                      ) : (
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="skill-add">
+                          <line x1="12" y1="5" x2="12" y2="19"/>
+                          <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {filteredSkills.length === 0 && (
+              <div className="skills-empty">
+                <p>No skills found matching "{skillsSearchQuery}"</p>
+              </div>
             )}
           </div>
         </div>
