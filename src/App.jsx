@@ -1522,6 +1522,7 @@ function App() {
   })
   const [skillCredentialsModal, setSkillCredentialsModal] = useState(null) // { skillId, skillName, tokenKey, tokenLabel, tokenHelp }
   const [skillCredentialsInput, setSkillCredentialsInput] = useState('')
+  const [deleteChatModal, setDeleteChatModal] = useState(null) // { id, title } - chat to delete
   const [skillConnecting, setSkillConnecting] = useState(false)
 
   // Available skills definition
@@ -11147,7 +11148,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                 className="delete-btn"
                 onClick={(e) => {
                   e.stopPropagation()
-                  deleteConversation(conv.id)
+                  setDeleteChatModal({ id: conv.id, title: conv.title || 'New chat' })
                 }}
                     title="Delete chat"
               >
@@ -13729,6 +13730,44 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                     disabled={!skillCredentialsInput.trim() || skillConnecting}
                   >
                     {skillConnecting ? 'Connecting...' : 'Connect'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Delete Chat Confirmation Modal */}
+          {deleteChatModal && (
+            <div className="delete-chat-modal-overlay" onClick={() => setDeleteChatModal(null)}>
+              <div className="delete-chat-modal" onClick={(e) => e.stopPropagation()}>
+                <div className="delete-chat-modal-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M3 6h18"/>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    <line x1="10" y1="11" x2="10" y2="17"/>
+                    <line x1="14" y1="11" x2="14" y2="17"/>
+                  </svg>
+                </div>
+                <h2>Delete Chat?</h2>
+                <p className="delete-chat-modal-text">
+                  Are you sure you want to delete "<strong>{deleteChatModal.title}</strong>"? This action cannot be undone.
+                </p>
+                <div className="delete-chat-modal-actions">
+                  <button 
+                    className="delete-chat-modal-btn cancel"
+                    onClick={() => setDeleteChatModal(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    className="delete-chat-modal-btn confirm"
+                    onClick={() => {
+                      deleteConversation(deleteChatModal.id)
+                      setDeleteChatModal(null)
+                      showToast('Chat deleted')
+                    }}
+                  >
+                    Delete
                   </button>
                 </div>
               </div>
