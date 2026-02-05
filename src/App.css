@@ -7179,9 +7179,19 @@ button,
 }
 
 /* Skills Page */
+.skills-page {
+  z-index: 120;
+}
+
 .skills-page .settings-page-header {
   flex-wrap: wrap;
   gap: 12px;
+  position: relative;
+  z-index: 10;
+}
+
+.skills-page .settings-back-btn {
+  z-index: 10;
 }
 
 .skills-header-actions {

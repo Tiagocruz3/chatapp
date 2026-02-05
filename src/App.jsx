@@ -10773,7 +10773,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
   const appBody = (
     <div className="app">
       {/* Mobile Header - Only visible on mobile via CSS */}
-      {!showSettingsPage && !showGalleryPage && !showKnowledgeBasePage && !showAdminPage && (
+      {!showSettingsPage && !showGalleryPage && !showKnowledgeBasePage && !showAdminPage && !showSkillsPage && (
         <header className="mobile-header">
           <div className="mobile-header-left">
             <button
@@ -10816,7 +10816,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
       />
 
       {/* Sidebar */}
-      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showAdminPage) ? 'hidden' : ''}`}>
+      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showAdminPage || showSkillsPage) ? 'hidden' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-top-actions">
             {/* Sidebar toggle (close) */}
@@ -10924,7 +10924,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
             <button
               className="sidebar-nav-btn skills-nav-btn"
               type="button"
-              onClick={() => { setShowSkillsPage(true); setSidebarOpen(false) }}
+              onClick={() => { setShowSkillsPage(true); setShowKnowledgeBasePage(false); setShowSettingsPage(false); setShowGalleryPage(false); setShowAdminPage(false); setShowDeepResearchPage(false); setSidebarOpen(false) }}
             >
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -11317,7 +11317,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
       {/* Main Chat Area */}
       <main className="chat-main">
         {/* Chat View */}
-        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showDeepResearchPage || showAdminPage) ? 'slide-out' : 'slide-in'}`}>
+        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showDeepResearchPage || showAdminPage || showSkillsPage) ? 'slide-out' : 'slide-in'}`}>
           {!sidebarOpen && (
           <button className="open-sidebar" onClick={() => setSidebarOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -11802,7 +11802,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                             </div>
                           )}
                           <div className="tools-menu-footer">
-                            <button type="button" onClick={() => { setShowSkillsPage(true); setShowToolsMenu(false); setSidebarOpen(false) }}>
+                            <button type="button" onClick={() => { setShowSkillsPage(true); setShowKnowledgeBasePage(false); setShowSettingsPage(false); setShowGalleryPage(false); setShowAdminPage(false); setShowDeepResearchPage(false); setShowToolsMenu(false); setSidebarOpen(false) }}>
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <circle cx="12" cy="12" r="3"/>
                                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
