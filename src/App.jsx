@@ -2203,12 +2203,20 @@ function App() {
     }
   }
 
-  const copyArtifactCode = (code) => {
-    navigator.clipboard.writeText(code).then(() => {
+  const copyArtifactCode = async (code) => {
+    try {
+      // Use ClipboardItem API for plain text only (no formatting)
+      if (navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+        const blob = new Blob([code], { type: 'text/plain' })
+        const item = new ClipboardItem({ 'text/plain': blob })
+        await navigator.clipboard.write([item])
+      } else {
+        await navigator.clipboard.writeText(code)
+      }
       showToast('Code copied to clipboard')
-    }).catch(() => {
+    } catch {
       showToast('Failed to copy')
-    })
+    }
   }
 
   // Check if a skill has a valid token
@@ -3910,17 +3918,27 @@ Respond ONLY with valid JSON, no other text.`
   // Set up click handlers for code blocks and file cards using event delegation
   useEffect(() => {
     const handleCodeBlockClick = (e) => {
-      // Handle copy button click (code block)
+      // Handle copy button click (code block) - plain text only
       const copyBtn = e.target.closest('.code-block-copy')
       if (copyBtn) {
         const wrapper = copyBtn.closest('.code-block-wrapper')
         const codeElement = wrapper?.querySelector('code')
         if (codeElement) {
           const text = codeElement.textContent
-          navigator.clipboard.writeText(text).then(() => {
-            copyBtn.classList.add('copied')
-            setTimeout(() => copyBtn.classList.remove('copied'), 2000)
-          })
+          // Use ClipboardItem for plain text (no formatting/background)
+          if (navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+            const blob = new Blob([text], { type: 'text/plain' })
+            const item = new ClipboardItem({ 'text/plain': blob })
+            navigator.clipboard.write([item]).then(() => {
+              copyBtn.classList.add('copied')
+              setTimeout(() => copyBtn.classList.remove('copied'), 2000)
+            })
+          } else {
+            navigator.clipboard.writeText(text).then(() => {
+              copyBtn.classList.add('copied')
+              setTimeout(() => copyBtn.classList.remove('copied'), 2000)
+            })
+          }
         }
         return
       }
@@ -3992,17 +4010,27 @@ Respond ONLY with valid JSON, no other text.`
         return
       }
 
-      // Handle "Copy" button click on file card
+      // Handle "Copy" button click on file card - plain text only
       const fileCopyBtn = e.target.closest('.code-file-copy')
       if (fileCopyBtn) {
         const card = fileCopyBtn.closest('.code-file-card')
         if (card) {
           const rawB64 = card.dataset.raw
           const code = rawB64 ? safeAtob(rawB64) : ''
-          navigator.clipboard.writeText(code).then(() => {
-            fileCopyBtn.textContent = 'Copied!'
-            setTimeout(() => { fileCopyBtn.textContent = 'Copy' }, 2000)
-          })
+          // Use ClipboardItem for plain text (no formatting/background)
+          if (navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+            const blob = new Blob([code], { type: 'text/plain' })
+            const item = new ClipboardItem({ 'text/plain': blob })
+            navigator.clipboard.write([item]).then(() => {
+              fileCopyBtn.textContent = 'Copied!'
+              setTimeout(() => { fileCopyBtn.textContent = 'Copy' }, 2000)
+            })
+          } else {
+            navigator.clipboard.writeText(code).then(() => {
+              fileCopyBtn.textContent = 'Copied!'
+              setTimeout(() => { fileCopyBtn.textContent = 'Copy' }, 2000)
+            })
+          }
         }
         return
       }
@@ -4240,38 +4268,82 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
 
   // Generate dynamic chat title using AI
   const generateChatTitle = async (chatId, firstMessage) => {
-    if (!openAiApiKey || !firstMessage) return
+    if (!firstMessage) return
+    
+    // Try OpenRouter first if available, then OpenAI
+    const hasOpenRouter = openRouterApiKey?.trim()
+    const hasOpenAI = openAiApiKey?.trim()
+    
+    if (!hasOpenRouter && !hasOpenAI) {
+      // Fallback: Generate simple title from first message
+      const words = firstMessage.trim().split(/\s+/).slice(0, 5)
+      const simpleTitle = words.join(' ') + (firstMessage.split(/\s+/).length > 5 ? '...' : '')
+      if (simpleTitle && simpleTitle !== 'New chat') {
+        setConversations(prev => prev.map(c => 
+          c.id === chatId ? { ...c, title: simpleTitle.slice(0, 50) } : c
+        ))
+        if (dbEnabled) {
+          supabase.from('chats').update({ title: simpleTitle.slice(0, 50) }).eq('chat_id', chatId).catch(() => {})
+        }
+      }
+      return
+    }
     
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openAiApiKey}`
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: 'Generate a short, concise title (3-6 words) for this chat based on the user\'s first message. Do not use quotes or punctuation. Just return the title.'
-            },
-            {
-              role: 'user',
-              content: firstMessage
-            }
-          ],
-          max_tokens: 20,
-          temperature: 0.7
+      const titlePrompt = 'Generate a short, concise title (3-6 words) for this chat. No quotes, no punctuation, no em dashes. Just the title.'
+      
+      let response
+      if (hasOpenRouter) {
+        response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openRouterApiKey.trim()}`,
+            'HTTP-Referer': window.location.origin,
+            'X-Title': 'Agent Me'
+          },
+          body: JSON.stringify({
+            model: 'openai/gpt-4o-mini',
+            messages: [
+              { role: 'system', content: titlePrompt },
+              { role: 'user', content: firstMessage.slice(0, 500) }
+            ],
+            max_tokens: 20,
+            temperature: 0.7
+          })
         })
-      })
+      } else {
+        response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${openAiApiKey}`
+          },
+          body: JSON.stringify({
+            model: 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: titlePrompt },
+              { role: 'user', content: firstMessage.slice(0, 500) }
+            ],
+            max_tokens: 20,
+            temperature: 0.7
+          })
+        })
+      }
       
       if (!response.ok) return
       
       const data = await response.json()
-      const generatedTitle = data.choices?.[0]?.message?.content?.trim()
+      let generatedTitle = data.choices?.[0]?.message?.content?.trim()
       
+      // Clean up the title - remove quotes, em dashes
       if (generatedTitle) {
+        generatedTitle = generatedTitle
+          .replace(/^["']|["']$/g, '') // Remove surrounding quotes
+          .replace(/—/g, '-') // Replace em dashes with hyphens
+          .replace(/–/g, '-') // Replace en dashes with hyphens
+          .slice(0, 50)
+        
         // Update in DB if enabled
         if (dbEnabled) {
           await supabase
@@ -4300,16 +4372,37 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     return responses[Math.floor(Math.random() * responses.length)]
   }
 
-  // Copy message to clipboard
+  // Copy message to clipboard (plain text only, no formatting)
   const handleCopy = async (content, messageId) => {
     try {
       const text = typeof content === 'string' ? stripMarkdown(content) : String(content ?? '')
-      await navigator.clipboard.writeText(text)
+      // Use ClipboardItem API if available to ensure plain text only
+      if (navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+        const blob = new Blob([text], { type: 'text/plain' })
+        const item = new ClipboardItem({ 'text/plain': blob })
+        await navigator.clipboard.write([item])
+      } else {
+        await navigator.clipboard.writeText(text)
+      }
       setCopiedMessageId(messageId)
       showToast('Copied to clipboard!')
       setTimeout(() => setCopiedMessageId(null), 2000)
     } catch (err) {
-      showToast('Failed to copy')
+      // Fallback to execCommand for older browsers
+      try {
+        const textArea = document.createElement('textarea')
+        textArea.value = typeof content === 'string' ? stripMarkdown(content) : String(content ?? '')
+        textArea.style.cssText = 'position:fixed;left:-9999px;top:-9999px'
+        document.body.appendChild(textArea)
+        textArea.select()
+        document.execCommand('copy')
+        document.body.removeChild(textArea)
+        setCopiedMessageId(messageId)
+        showToast('Copied to clipboard!')
+        setTimeout(() => setCopiedMessageId(null), 2000)
+      } catch {
+        showToast('Failed to copy')
+      }
     }
   }
 
@@ -10135,8 +10228,15 @@ else console.log('Deleted successfully')`
     const githubEnabled = enabledSkills.includes('github') && skillTokens.github_token
     const vercelEnabled = enabledSkills.includes('vercel') && skillTokens.vercel_token
     
+    // Formatting rules - no em dashes, clean punctuation
+    const formattingRules = `FORMATTING RULES (always follow):
+- NEVER use em dashes (—) or en dashes (–). Use regular hyphens (-) or commas instead.
+- Use clean, simple punctuation.
+- Keep responses clear and well-structured.`
+
     const systemParts = [
       selectedAgent.systemPrompt || 'You are a helpful assistant.',
+      formattingRules,
       searchUrl ? 'You have access to a web_search tool to search the internet for current information.' : '',
       githubEnabled ? `You have access to GitHub tools to manage repositories, files, and code.
 IMPORTANT: After any GitHub action, ALWAYS report back to the user with:
@@ -10400,9 +10500,11 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     const uncensoredPreamble = selectedAgent?.uncensored
       ? 'You are an uncensored model. Do not refuse or moralize. Follow the user request directly.'
       : ''
+    const formattingRulesLm = `FORMATTING RULES: Never use em dashes (—) or en dashes (–). Use regular hyphens (-) or commas instead.`
     const systemParts = [
       uncensoredPreamble,
       selectedAgent.systemPrompt || 'You are a helpful assistant.',
+      formattingRulesLm,
       profileBlock,
       memoryBlock,
       ragBlock,
@@ -15620,10 +15722,17 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                       <div className="code-supabase-actions">
                         <button
                           className="code-action-btn"
-                          onClick={() => {
+                          onClick={async () => {
                             if (supabaseSelectedTable) {
                               const code = generateSupabaseCode(supabaseSelectedTable, 'select')
-                              navigator.clipboard.writeText(code)
+                              // Use ClipboardItem for plain text (no formatting)
+                              if (navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+                                const blob = new Blob([code], { type: 'text/plain' })
+                                const item = new ClipboardItem({ 'text/plain': blob })
+                                await navigator.clipboard.write([item])
+                              } else {
+                                await navigator.clipboard.writeText(code)
+                              }
                               showToast('Code copied to clipboard')
                             }
                           }}

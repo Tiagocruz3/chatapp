@@ -6665,6 +6665,37 @@ button,
   min-height: 1.7em;
 }
 
+/* Prevent background colors from being copied */
+.formatted-response *::selection {
+  background: var(--accent-color);
+  color: white;
+  -webkit-text-fill-color: white;
+}
+
+.formatted-response pre::selection,
+.formatted-response code::selection,
+.formatted-response pre *::selection,
+.formatted-response code *::selection {
+  background: rgba(255, 255, 255, 0.2);
+  color: inherit;
+}
+
+/* Copy-clean styles - ensure text copies without formatting */
+.message-content,
+.formatted-response {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+@media print {
+  .formatted-response pre,
+  .formatted-response code,
+  .code-block-wrapper {
+    background: transparent !important;
+    color: black !important;
+  }
+}
+
 .formatted-response p {
   margin: 0 0 12px 0;
 }
