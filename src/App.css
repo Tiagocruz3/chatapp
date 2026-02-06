@@ -14472,6 +14472,9 @@ button,
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     padding-top: env(safe-area-inset-top);
     box-shadow: none;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .sidebar.open {
@@ -14482,6 +14485,20 @@ button,
   .sidebar.closed {
     width: 280px;
     transform: translateX(-100%);
+  }
+
+  /* Ensure sidebar content is scrollable on mobile */
+  .sidebar-content {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    min-height: 0;
+  }
+
+  /* Ensure sidebar footer is always visible at bottom */
+  .sidebar-footer {
+    flex-shrink: 0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Hide sidebar toggle on mobile (use mobile header instead) */
