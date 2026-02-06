@@ -88,6 +88,15 @@
   gap: 6px;
 }
 
+.sidebar-nav-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 8px;
+}
+
 .sidebar-nav-btn {
   display: flex;
   align-items: center;

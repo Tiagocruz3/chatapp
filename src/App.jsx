@@ -10920,7 +10920,13 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                 />
               </div>
             )}
+          </div>
+        </div>
 
+        {/* Scrollable sidebar content */}
+        <div className="sidebar-content">
+          {/* Navigation Items */}
+          <div className="sidebar-nav-scroll">
             <button
               className="sidebar-nav-btn"
               type="button"
@@ -11002,10 +11008,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
               <span className="sidebar-nav-label">Code</span>
             </button>
           </div>
-        </div>
 
-        {/* Scrollable sidebar content */}
-        <div className="sidebar-content">
           {/* Projects Section */}
           <div className="projects-section">
           <div className="projects-section-header">
