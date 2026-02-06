@@ -11086,7 +11086,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                         <div
                           key={chat.id}
                           className={`project-chat-item ${chat.id === activeConversation ? 'active' : ''}`}
-                          onClick={() => { setActiveConversation(chat.id); setShowDeepResearchPage(false); setSidebarOpen(false) }}
+                          onClick={() => { setActiveConversation(chat.id); setShowDeepResearchPage(false) }}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -11117,7 +11117,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                 <div
                   key={conv.id}
                   className={`conversation-item ${conv.id === activeConversation ? 'active' : ''} ${chatProject ? 'in-project' : ''} ${moveToChatId === conv.id ? 'dropdown-open' : ''}`}
-                  onClick={() => { setActiveConversation(conv.id); setShowDeepResearchPage(false); setSidebarOpen(false) }}
+                  onClick={() => { setActiveConversation(conv.id); setShowDeepResearchPage(false) }}
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
