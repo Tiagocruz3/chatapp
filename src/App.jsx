@@ -1477,6 +1477,7 @@ function App() {
   const [sidebarChatSearchOpen, setSidebarChatSearchOpen] = useState(false)
   const [sidebarChatSearchQuery, setSidebarChatSearchQuery] = useState('')
   const [chatsExpanded, setChatsExpanded] = useState(true)
+  const [sidebarViewMode, setSidebarViewMode] = useState('chats') // 'chats' or 'research'
   const [renamingChatId, setRenamingChatId] = useState(null)
   const [renameChatTitle, setRenameChatTitle] = useState('')
   const [moveToChatId, setMoveToChatId] = useState(null) // Chat ID for move-to-project dropdown
@@ -11099,33 +11100,44 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
           )}
         </div>
 
-          {/* Chats Section */}
-          <div className="chats-section">
-            <div
-              className="chats-section-header"
-              onClick={() => setChatsExpanded((v) => !v)}
-            >
-              <span className={`chats-section-chevron ${chatsExpanded ? 'expanded' : ''}`}>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </span>
-              <span className="chats-section-title">Chats</span>
-              <span className="chats-section-count">{filteredConversations.length}</span>
-            </div>
-
-            <div className={`conversation-list ${chatsExpanded ? '' : 'collapsed'} ${moveToChatId ? 'has-dropdown' : ''}`}>
-          {filteredConversations.map(conv => {
-            const chatProject = getProjectForChat(conv.id)
-            return (
-            <div
-              key={conv.id}
-                className={`conversation-item ${conv.id === activeConversation ? 'active' : ''} ${chatProject ? 'in-project' : ''} ${moveToChatId === conv.id ? 'dropdown-open' : ''}`}
-              onClick={() => { setActiveConversation(conv.id); setShowDeepResearchPage(false); setSidebarOpen(false) }}
+          {/* History Toggle */}
+          <div className="history-toggle">
+            <button
+              className={`history-toggle-btn ${sidebarViewMode === 'chats' ? 'active' : ''}`}
+              onClick={() => setSidebarViewMode('chats')}
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
               </svg>
+              Chats
+              <span className="history-toggle-count">{filteredConversations.length}</span>
+            </button>
+            <button
+              className={`history-toggle-btn ${sidebarViewMode === 'research' ? 'active' : ''}`}
+              onClick={() => setSidebarViewMode('research')}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              Research
+              <span className="history-toggle-count">{deepResearchConversations.length}</span>
+            </button>
+          </div>
+
+          {/* Conversation List */}
+          <div className="conversation-list">
+            {sidebarViewMode === 'chats' && filteredConversations.map(conv => {
+              const chatProject = getProjectForChat(conv.id)
+              return (
+                <div
+                  key={conv.id}
+                  className={`conversation-item ${conv.id === activeConversation ? 'active' : ''} ${chatProject ? 'in-project' : ''} ${moveToChatId === conv.id ? 'dropdown-open' : ''}`}
+                  onClick={() => { setActiveConversation(conv.id); setShowDeepResearchPage(false); setSidebarOpen(false) }}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                  </svg>
                 {renamingChatId === conv.id ? (
                   <input
                     type="text"
@@ -11254,76 +11266,47 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                     )}
                   </div>
                 )}
-            </div>
-            )
-          })}
-          </div>
-          </div>
+                </div>
+              )
+            })}
 
-          {/* Deep Research Section */}
-          <div className="deep-research-section">
-            <div
-              className="chats-section-header deep-research-section-header"
-              onClick={() => {}}
-            >
-              <span className="chats-section-chevron expanded">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </span>
-              <span className="chats-section-title deep-research-title">Deep Research</span>
-              <span className="chats-section-count deep-research-count">{deepResearchConversations.length}</span>
-              <button
-                className="new-deep-research-btn"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  createNewDeepResearch()
-                }}
-                title="New research"
+            {sidebarViewMode === 'chats' && filteredConversations.length === 0 && (
+              <div className="conversation-empty">No chats yet</div>
+            )}
+
+            {sidebarViewMode === 'research' && deepResearchConversations.map(conv => (
+              <div
+                key={conv.id}
+                className={`conversation-item deep-research-item ${conv.id === activeDeepResearchId && showDeepResearchPage ? 'active' : ''}`}
+                onClick={() => loadDeepResearchConversation(conv.id)}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="12" y1="5" x2="12" y2="19"/>
-                  <line x1="5" y1="12" x2="19" y2="12"/>
+                  <circle cx="11" cy="11" r="8"/>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                  <path d="M11 7v4l3 2"/>
                 </svg>
-              </button>
-            </div>
+                <span className="conversation-title">{conv.title}</span>
+                <div className="conversation-actions">
+                  <button
+                    className="conversation-action-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteDeepResearchConversation(conv.id)
+                    }}
+                    title="Delete"
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="3 6 5 6 21 6"/>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ))}
 
-            <div className="conversation-list deep-research-list">
-              {deepResearchConversations.map(conv => (
-                <div
-                  key={conv.id}
-                  className={`conversation-item deep-research-item ${conv.id === activeDeepResearchId && showDeepResearchPage ? 'active' : ''}`}
-                  onClick={() => loadDeepResearchConversation(conv.id)}
-                >
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <circle cx="11" cy="11" r="8"/>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                    <path d="M11 7v4l3 2"/>
-                  </svg>
-                  <span className="conversation-title">{conv.title}</span>
-                  <div className="conversation-actions">
-                    <button
-                      className="conversation-action-btn"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        deleteDeepResearchConversation(conv.id)
-                      }}
-                      title="Delete"
-                    >
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <polyline points="3 6 5 6 21 6"/>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-              ))}
-              {deepResearchConversations.length === 0 && (
-                <div className="conversation-empty deep-research-empty">
-                  No research yet
-                </div>
-              )}
-            </div>
+            {sidebarViewMode === 'research' && deepResearchConversations.length === 0 && (
+              <div className="conversation-empty">No research yet</div>
+            )}
           </div>
         </div>
 
