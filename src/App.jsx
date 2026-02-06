@@ -10302,7 +10302,8 @@ else console.log('Deleted successfully')`
     const systemParts = [
       selectedAgent.systemPrompt || 'You are a helpful assistant.',
       formattingRules,
-      searchUrl ? 'You have access to a web_search tool to search the internet for current information.' : '',
+      searchUrl ? `You have access to a web_search tool to search the internet for current information.
+IMPORTANT RULE: If you are unsure about ANY fact, do not know the answer, or the question involves recent events, current data, real-time information, specific people, companies, products, dates, statistics, news, or anything you are not 100% certain about - you MUST use the web_search tool AUTOMATICALLY to look it up BEFORE responding. NEVER guess or say "I don't know" without searching first. When in doubt, ALWAYS search.` : '',
       githubEnabled ? `You have access to GitHub tools to manage repositories, files, and code.
 IMPORTANT: After any GitHub action, ALWAYS report back to the user with:
 - What was done (created repo, updated file, etc.)
@@ -10358,7 +10359,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
       type: 'function',
       function: {
         name: 'web_search',
-        description: 'Search the web for current information. Use this when you need up-to-date information or facts you are unsure about.',
+        description: 'Search the web for current information. You MUST use this tool automatically whenever you are unsure about any fact, the question involves recent events, real-time data, specific people, companies, products, news, dates, statistics, or anything you are not 100% confident about. Never guess or say you do not know without searching first.',
         parameters: {
           type: 'object',
           properties: {
@@ -10539,10 +10540,56 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
       }
     }
 
-    const text = choice?.message?.content
-    if (!text) throw new Error('OpenRouter returned no content')
+    let finalText = choice?.message?.content
+    if (!finalText) throw new Error('OpenRouter returned no content')
+    
+    // Auto-search fallback: if the model didn't use tools but shows uncertainty, search automatically
+    if (searchUrl && !choice?.message?.tool_calls) {
+      const lowerText = finalText.toLowerCase()
+      const uncertaintyPhrases = [
+        "i don't know", "i don't have", "i'm not sure", "i am not sure",
+        "i cannot", "i can't", "i do not have", "i don't have access",
+        "i'm unable", "i am unable", "my knowledge", "my training",
+        "cutoff", "cut-off", "as of my last", "i lack",
+        "i don't currently", "i do not currently",
+        "not available to me", "beyond my knowledge",
+        "i would need to search", "i'd need to search",
+        "i cannot access", "i can't access",
+        "i'm not able", "i am not able",
+        "unfortunately, i",
+      ]
+      const showsUncertainty = uncertaintyPhrases.some(phrase => lowerText.includes(phrase))
+      
+      if (showsUncertainty) {
+        try {
+          setTypingStatus('searching')
+          const autoQuery = message.length > 200 ? message.slice(0, 200) : message
+          const searchResult = await executeWebSearch(autoQuery)
+          setTypingStatus('generating')
+          
+          if (searchResult && searchResult.results && searchResult.results.length > 0) {
+            // Feed search results back to the model for a proper answer
+            const toolResultStr = JSON.stringify(searchResult, null, 2)
+            const searchMessages = [
+              ...messages,
+              { role: 'assistant', content: finalText },
+              { role: 'user', content: `I searched the web for you. Here are the results:\n\`\`\`json\n${toolResultStr}\n\`\`\`\n\nPlease provide a helpful and accurate response based on these search results. Include clickable links where applicable.` }
+            ]
+            
+            const searchData = await makeRequest(searchMessages, false)
+            const searchChoice = searchData?.choices?.[0]
+            if (searchChoice?.message?.content) {
+              finalText = formatSearchResultsBeautiful(searchResult.results, autoQuery) + '\n\n' + searchChoice.message.content
+            }
+          }
+        } catch (e) {
+          console.error('Auto-search fallback error:', e)
+        }
+      }
+    }
+    
     const usage = data?.usage || choice?.usage || null
-    return { text, usage }
+    return { text: finalText, usage }
   }
 
   const sendMessageToLmStudio = async (message, extraContext = '', signal) => {
@@ -10595,7 +10642,8 @@ Available tools:`
       if (searchEnabled) {
         toolsInstruction += `
 - web_search: Search the internet for current information
-  Usage: {"tool": "web_search", "params": {"query": "your search query"}}`
+  Usage: {"tool": "web_search", "params": {"query": "your search query"}}
+  IMPORTANT: You MUST use web_search AUTOMATICALLY whenever you are unsure about ANY fact, the question involves recent events, real-time data, specific people, companies, products, news, dates, statistics, or anything you are not 100% certain about. NEVER guess or say "I don't know" without searching first. When in doubt, ALWAYS search.`
       }
       
       if (githubEnabled) {
@@ -10612,7 +10660,8 @@ Available tools:`
   Usage: {"tool": "vercel", "params": {"action": "list_projects"}}`
       }
       
-      toolsInstruction += `\n\nAfter receiving tool results, provide a helpful response to the user. Always report what actions were taken with links.`
+      toolsInstruction += `\n\nAfter receiving tool results, provide a helpful response to the user. Always report what actions were taken with links.
+CRITICAL: If you are unsure about ANY fact or the user asks about something you are not 100% certain about, you MUST use web_search first before answering. Never respond with "I don't know" or make up information without searching first.`
     }
     
     const systemParts = [
@@ -10677,6 +10726,65 @@ Available tools:`
     
     // Check if model wants to use a tool
     const toolMatch = out.match(/```tool\s*\n?([\s\S]*?)\n?```/)
+    
+    // Auto-search fallback: if the model didn't use a tool but shows uncertainty, search automatically
+    if (!toolMatch && searchEnabled) {
+      const lowerOut = out.toLowerCase()
+      const uncertaintyPhrases = [
+        "i don't know", "i don't have", "i'm not sure", "i am not sure",
+        "i cannot", "i can't", "i do not have", "i don't have access",
+        "i'm unable", "i am unable", "my knowledge", "my training",
+        "cutoff", "cut-off", "as of my last", "i lack",
+        "i don't currently", "i do not currently",
+        "not available to me", "beyond my knowledge",
+        "i would need to search", "i'd need to search",
+        "i cannot access", "i can't access",
+        "i'm not able", "i am not able",
+        "unfortunately, i",
+      ]
+      const showsUncertainty = uncertaintyPhrases.some(phrase => lowerOut.includes(phrase))
+      
+      if (showsUncertainty) {
+        try {
+          setTypingStatus('searching')
+          const autoQuery = message.length > 200 ? message.slice(0, 200) : message
+          const searchResult = await executeWebSearch(autoQuery)
+          setTypingStatus('generating')
+          
+          if (searchResult && searchResult.results && searchResult.results.length > 0) {
+            const toolResultStr = JSON.stringify(searchResult, null, 2)
+            messages.push({ role: 'assistant', content: out })
+            messages.push({ role: 'user', content: `I searched the web for you. Here are the results:\n\`\`\`json\n${toolResultStr}\n\`\`\`\n\nPlease provide a helpful and accurate response based on these search results. Include clickable links where applicable.` })
+            
+            resp = await fetch(`${base}/chat/completions`, {
+              method: 'POST',
+              headers,
+              signal,
+              body: JSON.stringify({
+                model: selectedAgent.model,
+                messages,
+                temperature: Number(selectedAgent.temperature ?? 0.7),
+              }),
+            })
+            text = await resp.text()
+            if (resp.ok) {
+              try {
+                data = JSON.parse(text)
+                const finalOut = data?.choices?.[0]?.message?.content
+                if (finalOut) {
+                  out = formatSearchResultsBeautiful(searchResult.results, autoQuery) + '\n\n' + finalOut
+                }
+              } catch {
+                // Keep original output if parsing fails
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Auto-search fallback error:', e)
+        }
+      }
+    }
+    
     if (toolMatch) {
       try {
         const toolCall = JSON.parse(toolMatch[1])
@@ -13410,7 +13518,7 @@ Available tools:`
 
         {/* Gallery / Library Page */}
         <div className={`settings-page ${showGalleryPage ? 'slide-in' : 'slide-out'}`}>
-          <div className="settings-page-header">
+          <div className="library-page-header">
             <button
               className="settings-back-btn"
               onClick={() => setShowGalleryPage(false)}
@@ -13419,59 +13527,59 @@ Available tools:`
                 <path d="M19 12H5"/>
                 <path d="M12 19l-7-7 7-7"/>
               </svg>
-              Back to Chat
+              Back
             </button>
             <h1>Library</h1>
-          </div>
 
-          {/* Library Tabs */}
-          <div className="library-tabs">
-            <button
-              className={`library-tab ${libraryTab === 'images' ? 'active' : ''}`}
-              onClick={() => setLibraryTab('images')}
-            >
-              <div className="library-tab-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                  <circle cx="8.5" cy="8.5" r="1.5"/>
-                  <polyline points="21 15 16 10 5 21"/>
-                </svg>
-              </div>
-              <div className="library-tab-content">
+            {/* Library Tabs */}
+            <div className="library-tabs">
+              <button
+                className={`library-tab ${libraryTab === 'images' ? 'active' : ''}`}
+                onClick={() => setLibraryTab('images')}
+              >
+                <div className="library-tab-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                  </svg>
+                </div>
                 <span className="library-tab-label">Images</span>
                 <span className="library-tab-count">{generatedImages.length}</span>
-              </div>
-            </button>
-            <button
-              className={`library-tab ${libraryTab === 'artifacts' ? 'active' : ''}`}
-              onClick={() => setLibraryTab('artifacts')}
-            >
-              <div className="library-tab-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <polyline points="16 18 22 12 16 6"/>
-                  <polyline points="8 6 2 12 8 18"/>
-                </svg>
-              </div>
-              <div className="library-tab-content">
+              </button>
+              <button
+                className={`library-tab ${libraryTab === 'artifacts' ? 'active' : ''}`}
+                onClick={() => setLibraryTab('artifacts')}
+              >
+                <div className="library-tab-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="16 18 22 12 16 6"/>
+                    <polyline points="8 6 2 12 8 18"/>
+                  </svg>
+                </div>
                 <span className="library-tab-label">Code Artifacts</span>
                 <span className="library-tab-count">{codeArtifacts.length}</span>
-              </div>
-            </button>
+              </button>
+            </div>
           </div>
 
           <div className="settings-page-content">
             {/* Images Tab */}
             {libraryTab === 'images' && (
-              <section className="settings-page-section">
-                <div className="settings-page-section-header">
+              <section className="settings-page-section library-section">
+                <div className="library-section-header">
                   <h2>Generated Images</h2>
                   <button
-                    className="settings-test-btn"
+                    className="library-refresh-btn"
                     type="button"
                     onClick={loadGeneratedImages}
                     disabled={!dbEnabled || galleryLoading}
                     title={!dbEnabled ? 'Requires Supabase sign-in' : 'Refresh'}
                   >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                      <polyline points="23 4 23 10 17 10"/>
+                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                    </svg>
                     Refresh
                   </button>
                 </div>
@@ -13557,16 +13665,20 @@ Available tools:`
 
             {/* Code Artifacts Tab */}
             {libraryTab === 'artifacts' && (
-              <section className="settings-page-section">
-                <div className="settings-page-section-header">
+              <section className="settings-page-section library-section">
+                <div className="library-section-header">
                   <h2>Code Artifacts</h2>
                   <button
-                    className="settings-test-btn"
+                    className="library-refresh-btn"
                     type="button"
                     onClick={loadCodeArtifacts}
                     disabled={!dbEnabled || artifactsLoading}
                     title={!dbEnabled ? 'Requires Supabase sign-in' : 'Refresh'}
                   >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="14" height="14">
+                      <polyline points="23 4 23 10 17 10"/>
+                      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+                    </svg>
                     Refresh
                   </button>
                 </div>
