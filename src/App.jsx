@@ -10724,8 +10724,17 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
     let out = data?.choices?.[0]?.message?.content
     if (!out) throw new Error('LM Studio returned no content')
     
-    // Check if model wants to use a tool
-    const toolMatch = out.match(/```tool\s*\n?([\s\S]*?)\n?```/)
+    // Check if model wants to use a tool - support multiple formats models may use:
+    // ```tool {...}``` or ```json {...}``` or ```JSON {...}``` or just {"tool": "...", "params": {...}}
+    let toolMatch = out.match(/```(?:tool|json|JSON)\s*\n?([\s\S]*?)\n?```/)
+    
+    // If no fenced block found, try to find inline JSON with tool/params keys
+    if (!toolMatch) {
+      const inlineMatch = out.match(/\{[\s\n]*"tool"\s*:\s*"[^"]+"\s*,\s*"params"\s*:\s*\{[\s\S]*?\}\s*\}/)
+      if (inlineMatch) {
+        toolMatch = [inlineMatch[0], inlineMatch[0]]
+      }
+    }
     
     // Auto-search fallback: if the model didn't use a tool but shows uncertainty, search automatically
     if (!toolMatch && searchEnabled) {
@@ -10791,6 +10800,12 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
         const toolName = toolCall.tool
         const params = toolCall.params || {}
         
+        // Strip the tool call block from output so user never sees raw JSON
+        let cleanedOut = out
+          .replace(/```(?:tool|json|JSON)\s*\n?[\s\S]*?\n?```/g, '')
+          .replace(/\{[\s\n]*"tool"\s*:\s*"[^"]+"\s*,\s*"params"\s*:\s*\{[\s\S]*?\}\s*\}/g, '')
+          .trim()
+        
         let toolResult = null
         
         if (toolName === 'web_search' && searchEnabled) {
@@ -10806,7 +10821,7 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
         if (toolResult) {
           // Send tool result back to model for final response
           const toolResultStr = JSON.stringify(toolResult, null, 2)
-          messages.push({ role: 'assistant', content: out })
+          messages.push({ role: 'assistant', content: cleanedOut || 'I searched for the information.' })
           messages.push({ role: 'user', content: `Tool result:\n\`\`\`json\n${toolResultStr}\n\`\`\`\n\nPlease provide a helpful response based on this result. Include clickable links where applicable.` })
           
           resp = await fetch(`${base}/chat/completions`, {
@@ -10831,15 +10846,26 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                 } else {
                   out = finalOut
                 }
+              } else {
+                out = cleanedOut || out
               }
             } catch {
-              // Keep original output if parsing fails
+              out = cleanedOut || out
             }
+          } else {
+            out = cleanedOut || out
           }
+        } else {
+          // Tool not available, strip the raw JSON from output
+          out = cleanedOut || out
         }
       } catch (e) {
         console.error('Tool execution error:', e)
-        // Continue with original output if tool fails
+        // Strip any raw tool JSON from output even on error
+        out = out
+          .replace(/```(?:tool|json|JSON)\s*\n?[\s\S]*?\n?```/g, '')
+          .replace(/\{[\s\n]*"tool"\s*:\s*"[^"]+"\s*,\s*"params"\s*:\s*\{[\s\S]*?\}\s*\}/g, '')
+          .trim() || out
       }
     }
     
@@ -13517,53 +13543,65 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
         </div>
 
         {/* Gallery / Library Page */}
-        <div className={`settings-page ${showGalleryPage ? 'slide-in' : 'slide-out'}`}>
+        <div className={`settings-page library-page ${showGalleryPage ? 'slide-in' : 'slide-out'}`}>
           <div className="library-page-header">
-            <button
-              className="settings-back-btn"
-              onClick={() => setShowGalleryPage(false)}
-            >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M19 12H5"/>
-                <path d="M12 19l-7-7 7-7"/>
-              </svg>
-              Back
-            </button>
-            <h1>Library</h1>
+            <div className="library-header-inner">
+              <div className="library-topbar">
+                <button
+                  className="settings-back-btn"
+                  onClick={() => setShowGalleryPage(false)}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M19 12H5"/>
+                    <path d="M12 19l-7-7 7-7"/>
+                  </svg>
+                  Back to Chat
+                </button>
 
-            {/* Library Tabs */}
-            <div className="library-tabs">
-              <button
-                className={`library-tab ${libraryTab === 'images' ? 'active' : ''}`}
-                onClick={() => setLibraryTab('images')}
-              >
-                <div className="library-tab-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                    <circle cx="8.5" cy="8.5" r="1.5"/>
-                    <polyline points="21 15 16 10 5 21"/>
-                  </svg>
+                <div className="library-topbar-center">
+                  <h1>Library</h1>
+                  <div className="library-subtitle">Saved images and code artifacts</div>
                 </div>
-                <span className="library-tab-label">Images</span>
-                <span className="library-tab-count">{generatedImages.length}</span>
-              </button>
-              <button
-                className={`library-tab ${libraryTab === 'artifacts' ? 'active' : ''}`}
-                onClick={() => setLibraryTab('artifacts')}
-              >
-                <div className="library-tab-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="16 18 22 12 16 6"/>
-                    <polyline points="8 6 2 12 8 18"/>
-                  </svg>
+
+                <div className="library-topbar-right" />
+              </div>
+
+              {/* Library Tabs */}
+              <div className="library-tabs-wrap">
+                <div className="library-tabs">
+                  <button
+                    className={`library-tab ${libraryTab === 'images' ? 'active' : ''}`}
+                    onClick={() => setLibraryTab('images')}
+                  >
+                    <div className="library-tab-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                        <circle cx="8.5" cy="8.5" r="1.5"/>
+                        <polyline points="21 15 16 10 5 21"/>
+                      </svg>
+                    </div>
+                    <span className="library-tab-label">Images</span>
+                    <span className="library-tab-count">{generatedImages.length}</span>
+                  </button>
+                  <button
+                    className={`library-tab ${libraryTab === 'artifacts' ? 'active' : ''}`}
+                    onClick={() => setLibraryTab('artifacts')}
+                  >
+                    <div className="library-tab-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="16 18 22 12 16 6"/>
+                        <polyline points="8 6 2 12 8 18"/>
+                      </svg>
+                    </div>
+                    <span className="library-tab-label">Code Artifacts</span>
+                    <span className="library-tab-count">{codeArtifacts.length}</span>
+                  </button>
                 </div>
-                <span className="library-tab-label">Code Artifacts</span>
-                <span className="library-tab-count">{codeArtifacts.length}</span>
-              </button>
+              </div>
             </div>
           </div>
 
-          <div className="settings-page-content">
+          <div className="settings-page-content library-page-content">
             {/* Images Tab */}
             {libraryTab === 'images' && (
               <section className="settings-page-section">
