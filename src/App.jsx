@@ -403,12 +403,15 @@ const highlightCode = (code, lang) => {
 const formatMarkdown = (text) => {
   if (!text || typeof text !== 'string') return text
   
-  // Check if content contains search results - preserve them
+  // Check if content contains search results HTML - preserve them (don't escape)
   let searchResultsHtml = ''
   let remainingText = text
-  const searchResultsMatch = text.match(/<div class="search-results-container">[\s\S]*?<\/div><\/div><\/div>/)
+  // Try marker-based match first, then fall back to structure-based match
+  const markerMatch = text.match(/<div class="search-results-container">[\s\S]*?<!--\/SEARCH_RESULTS-->/)
+  const structureMatch = !markerMatch && text.match(/<div class="search-results-container">[\s\S]*?<\/div>\s*<\/div>\s*(?=\n|$)/)
+  const searchResultsMatch = markerMatch || structureMatch
   if (searchResultsMatch) {
-    searchResultsHtml = searchResultsMatch[0]
+    searchResultsHtml = searchResultsMatch[0].replace('<!--/SEARCH_RESULTS-->', '')
     remainingText = text.replace(searchResultsMatch[0], '')
   }
   
@@ -10763,7 +10766,7 @@ Available tools:`
 </a>`
     })
     
-    formatted += `</div></div>\n\n`
+    formatted += `</div></div><!--/SEARCH_RESULTS-->\n\n`
     return formatted
   }
 
