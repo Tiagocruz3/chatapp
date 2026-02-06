@@ -2401,7 +2401,6 @@ function App() {
 
     // Close library page and go to chat
     setShowGalleryPage(false)
-    setSidebarOpen(false)
 
     // Start a new conversation about this artifact
     const newId = `conv-${Date.now()}`
@@ -11042,7 +11041,7 @@ Available tools:`
               </span>
             </button>
 
-            <button className="sidebar-nav-btn" type="button" onClick={() => { createNewChat(); setSidebarOpen(false) }}>
+            <button className="sidebar-nav-btn" type="button" onClick={() => { createNewChat() }}>
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 20h9"/>
@@ -11091,7 +11090,7 @@ Available tools:`
             <button
               className="sidebar-nav-btn"
               type="button"
-              onClick={() => { setShowGalleryPage(true); setSidebarOpen(false) }}
+              onClick={() => { setShowGalleryPage(true) }}
             >
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -11106,7 +11105,7 @@ Available tools:`
             <button
               className="sidebar-nav-btn"
               type="button"
-              onClick={() => { setShowKnowledgeBasePage(true); setSidebarOpen(false) }}
+              onClick={() => { setShowKnowledgeBasePage(true) }}
             >
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -11141,7 +11140,7 @@ Available tools:`
             <button
               className="sidebar-nav-btn skills-nav-btn"
               type="button"
-              onClick={() => { setShowSkillsPage(true); setShowKnowledgeBasePage(false); setShowSettingsPage(false); setShowGalleryPage(false); setShowAdminPage(false); setShowDeepResearchPage(false); setSidebarOpen(false) }}
+              onClick={() => { setShowSkillsPage(true); setShowKnowledgeBasePage(false); setShowSettingsPage(false); setShowGalleryPage(false); setShowAdminPage(false); setShowDeepResearchPage(false) }}
             >
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -11464,7 +11463,7 @@ Available tools:`
             )}
             <button
               className="sidebar-settings-btn"
-              onClick={() => { setShowSettingsPage(true); setSidebarOpen(false) }}
+              onClick={() => { setShowSettingsPage(true) }}
               title="Settings"
             >
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -11964,7 +11963,7 @@ Available tools:`
                             </div>
                           )}
                           <div className="tools-menu-footer">
-                            <button type="button" onClick={() => { setShowSkillsPage(true); setShowKnowledgeBasePage(false); setShowSettingsPage(false); setShowGalleryPage(false); setShowAdminPage(false); setShowDeepResearchPage(false); setShowToolsMenu(false); setSidebarOpen(false) }}>
+                            <button type="button" onClick={() => { setShowSkillsPage(true); setShowKnowledgeBasePage(false); setShowSettingsPage(false); setShowGalleryPage(false); setShowAdminPage(false); setShowDeepResearchPage(false); setShowToolsMenu(false) }}>
                               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                 <circle cx="12" cy="12" r="3"/>
                                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
