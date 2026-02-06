@@ -11000,8 +11000,10 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
           </div>
         </div>
 
-        {/* Projects Section */}
-        <div className="projects-section">
+        {/* Scrollable sidebar content */}
+        <div className="sidebar-content">
+          {/* Projects Section */}
+          <div className="projects-section">
           <div className="projects-section-header">
             <span 
               className={`chats-section-chevron ${projectsExpanded ? 'expanded' : ''}`}
@@ -11097,21 +11099,22 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
           )}
         </div>
 
-        {/* Chats Section Header */}
-        <div
-          className="chats-section-header"
-          onClick={() => setChatsExpanded((v) => !v)}
-        >
-          <span className={`chats-section-chevron ${chatsExpanded ? 'expanded' : ''}`}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </span>
-          <span className="chats-section-title">Chats</span>
-          <span className="chats-section-count">{filteredConversations.length}</span>
-        </div>
+          {/* Chats Section */}
+          <div className="chats-section">
+            <div
+              className="chats-section-header"
+              onClick={() => setChatsExpanded((v) => !v)}
+            >
+              <span className={`chats-section-chevron ${chatsExpanded ? 'expanded' : ''}`}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </span>
+              <span className="chats-section-title">Chats</span>
+              <span className="chats-section-count">{filteredConversations.length}</span>
+            </div>
 
-        <div className={`conversation-list ${chatsExpanded ? '' : 'collapsed'} ${moveToChatId ? 'has-dropdown' : ''}`}>
+            <div className={`conversation-list ${chatsExpanded ? '' : 'collapsed'} ${moveToChatId ? 'has-dropdown' : ''}`}>
           {filteredConversations.map(conv => {
             const chatProject = getProjectForChat(conv.id)
             return (
@@ -11254,70 +11257,74 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
             </div>
             )
           })}
-        </div>
+          </div>
+          </div>
 
-        {/* Deep Research Section */}
-        <div
-          className="chats-section-header deep-research-section-header"
-          onClick={() => {}}
-        >
-          <span className="chats-section-chevron expanded">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-          </span>
-          <span className="chats-section-title deep-research-title">Deep Research</span>
-          <span className="chats-section-count deep-research-count">{deepResearchConversations.length}</span>
-          <button
-            className="new-deep-research-btn"
-            onClick={(e) => {
-              e.stopPropagation()
-              createNewDeepResearch()
-            }}
-            title="New research"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="12" y1="5" x2="12" y2="19"/>
-              <line x1="5" y1="12" x2="19" y2="12"/>
-            </svg>
-          </button>
-        </div>
-
-        <div className="conversation-list deep-research-list">
-          {deepResearchConversations.map(conv => (
+          {/* Deep Research Section */}
+          <div className="deep-research-section">
             <div
-              key={conv.id}
-              className={`conversation-item deep-research-item ${conv.id === activeDeepResearchId && showDeepResearchPage ? 'active' : ''}`}
-              onClick={() => loadDeepResearchConversation(conv.id)}
+              className="chats-section-header deep-research-section-header"
+              onClick={() => {}}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="11" cy="11" r="8"/>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-                <path d="M11 7v4l3 2"/>
-              </svg>
-              <span className="conversation-title">{conv.title}</span>
-              <div className="conversation-actions">
-                <button
-                  className="conversation-action-btn"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    deleteDeepResearchConversation(conv.id)
-                  }}
-                  title="Delete"
+              <span className="chats-section-chevron expanded">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </span>
+              <span className="chats-section-title deep-research-title">Deep Research</span>
+              <span className="chats-section-count deep-research-count">{deepResearchConversations.length}</span>
+              <button
+                className="new-deep-research-btn"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  createNewDeepResearch()
+                }}
+                title="New research"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              </button>
+            </div>
+
+            <div className="conversation-list deep-research-list">
+              {deepResearchConversations.map(conv => (
+                <div
+                  key={conv.id}
+                  className={`conversation-item deep-research-item ${conv.id === activeDeepResearchId && showDeepResearchPage ? 'active' : ''}`}
+                  onClick={() => loadDeepResearchConversation(conv.id)}
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="3 6 5 6 21 6"/>
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                    <circle cx="11" cy="11" r="8"/>
+                    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    <path d="M11 7v4l3 2"/>
                   </svg>
-                </button>
-              </div>
+                  <span className="conversation-title">{conv.title}</span>
+                  <div className="conversation-actions">
+                    <button
+                      className="conversation-action-btn"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deleteDeepResearchConversation(conv.id)
+                      }}
+                      title="Delete"
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3 6 5 6 21 6"/>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {deepResearchConversations.length === 0 && (
+                <div className="conversation-empty deep-research-empty">
+                  No research yet
+                </div>
+              )}
             </div>
-          ))}
-          {deepResearchConversations.length === 0 && (
-            <div className="conversation-empty deep-research-empty">
-              No research yet
-            </div>
-          )}
+          </div>
         </div>
 
         {/* Sidebar Footer */}

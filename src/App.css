@@ -37,6 +37,7 @@
   flex-shrink: 0;
   position: relative;
   height: 100%;
+  overflow: hidden;
 }
 
 .sidebar.closed {
@@ -49,6 +50,36 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Scrollable content area */
+.sidebar-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  scroll-behavior: smooth;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+
+.sidebar-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 3px;
+}
+
+.sidebar-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.25);
 }
 
 .sidebar-top-actions {
@@ -207,16 +238,21 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 10px 12px;
   cursor: pointer;
   user-select: none;
   transition: background-color 0.08s;
-  border-radius: 8px;
-  margin: 4px 8px;
+  border-radius: 0;
+  margin: 0;
+  position: sticky;
+  top: 0;
+  background: var(--sidebar-bg);
+  z-index: 10;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .chats-section-header:hover {
-  background-color: var(--hover-bg);
+  background-color: var(--sidebar-bg);
 }
 
 .chats-section-chevron {
@@ -257,18 +293,21 @@
 /* Projects Section */
 .projects-section {
   border-bottom: 1px solid var(--border-color);
-  padding-bottom: 8px;
-  margin-bottom: 4px;
+  flex-shrink: 0;
 }
 
 .projects-section-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
+  padding: 10px 12px;
   user-select: none;
-  border-radius: 8px;
-  margin: 4px 8px;
+  border-radius: 0;
+  margin: 0;
+  position: sticky;
+  top: 0;
+  background: var(--sidebar-bg);
+  z-index: 10;
 }
 
 .projects-section-header .chats-section-chevron,
@@ -685,21 +724,30 @@
 
 .conversation-list {
   flex: 1;
-  overflow-y: auto;
-  padding: 8px 10px;
-  transition: max-height 0.12s var(--ease-out-snap), opacity 0.1s;
-  min-height: 120px;
+  overflow-y: visible;
+  padding: 4px 8px 8px;
+  transition: max-height 0.2s ease, opacity 0.15s, padding 0.2s ease;
+  min-height: 0;
 }
 
 .conversation-list.collapsed {
-  max-height: 0;
+  max-height: 0 !important;
   padding: 0 8px;
   overflow: hidden;
   opacity: 0;
+  min-height: 0;
 }
 
 .conversation-list.has-dropdown {
   overflow: visible;
+}
+
+/* Chats section wrapper for proper scrolling */
+.chats-section {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .sidebar-footer {
@@ -1170,10 +1218,19 @@
 }
 
 /* Deep Research Sidebar Section */
-.deep-research-section-header {
-  margin-top: 8px;
+.deep-research-section {
   border-top: 1px solid var(--border-color);
-  padding-top: 12px;
+  flex-shrink: 0;
+}
+
+.deep-research-section-header {
+  margin-top: 0;
+  border-top: none;
+  padding-top: 10px;
+  position: sticky;
+  top: 0;
+  background: var(--sidebar-bg);
+  z-index: 10;
 }
 
 .deep-research-section-header .deep-research-title {
