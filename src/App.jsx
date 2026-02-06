@@ -403,7 +403,16 @@ const highlightCode = (code, lang) => {
 const formatMarkdown = (text) => {
   if (!text || typeof text !== 'string') return text
   
-  let html = text
+  // Check if content contains search results - preserve them
+  let searchResultsHtml = ''
+  let remainingText = text
+  const searchResultsMatch = text.match(/<div class="search-results-container">[\s\S]*?<\/div><\/div><\/div>/)
+  if (searchResultsMatch) {
+    searchResultsHtml = searchResultsMatch[0]
+    remainingText = text.replace(searchResultsMatch[0], '')
+  }
+  
+  let html = remainingText
     // Escape HTML first
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -466,6 +475,12 @@ const formatMarkdown = (text) => {
   
   // Restore code newlines (kept safe from '\n' -> '<br/>' conversion)
   html = html.replace(new RegExp(CODE_NL_SENTINEL, 'g'), '\n')
+  
+  // Prepend search results if we had them
+  if (searchResultsHtml) {
+    html = searchResultsHtml + html
+  }
+  
   return html
 }
 
