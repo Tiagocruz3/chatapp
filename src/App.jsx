@@ -10996,7 +10996,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
             <button
               className="sidebar-nav-btn coder-nav-btn"
               type="button"
-              onClick={() => showToast('Code IDE coming soon')}
+              onClick={() => window.open('https://code.agentme.app', '_blank')}
             >
               <span className="sidebar-nav-icon">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
