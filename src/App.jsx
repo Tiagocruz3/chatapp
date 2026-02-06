@@ -13566,7 +13566,7 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
           <div className="settings-page-content">
             {/* Images Tab */}
             {libraryTab === 'images' && (
-              <section className="settings-page-section library-section">
+              <section className="settings-page-section">
                 <div className="library-section-header">
                   <h2>Generated Images</h2>
                   <button
@@ -13665,7 +13665,7 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
 
             {/* Code Artifacts Tab */}
             {libraryTab === 'artifacts' && (
-              <section className="settings-page-section library-section">
+              <section className="settings-page-section">
                 <div className="library-section-header">
                   <h2>Code Artifacts</h2>
                   <button

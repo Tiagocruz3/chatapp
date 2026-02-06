@@ -7442,27 +7442,23 @@ button,
 
 /* Library Page Header */
 .library-page-header {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 20px 24px 24px;
-  border-bottom: 1px solid var(--border-color);
   position: sticky;
   top: 0;
   background-color: var(--main-bg);
   z-index: 10;
-  gap: 16px;
+  border-bottom: 1px solid var(--border-color);
+  padding: 20px 24px 24px;
 }
 
 .library-page-header .settings-back-btn {
-  align-self: flex-start;
+  margin-bottom: 20px;
 }
 
 .library-page-header h1 {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   color: var(--text-primary);
-  margin: 0;
+  margin: 0 0 20px 0;
   text-align: center;
 }
 
@@ -7472,6 +7468,8 @@ button,
   justify-content: center;
   gap: 4px;
   padding: 4px;
+  max-width: 340px;
+  margin: 0 auto;
   background: rgba(255, 255, 255, 0.04);
   border-radius: 12px;
   border: 1px solid rgba(255, 255, 255, 0.06);
@@ -7482,6 +7480,7 @@ button,
   align-items: center;
   justify-content: center;
   gap: 8px;
+  flex: 1;
   padding: 10px 20px;
   background: transparent;
   border: none;
@@ -7552,20 +7551,15 @@ button,
 }
 
 /* Library Section Content */
-.library-section {
-  text-align: center;
-}
-
 .library-section-header {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
+  justify-content: space-between;
+  margin-bottom: 20px;
 }
 
 .library-section-header h2 {
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
@@ -7575,12 +7569,12 @@ button,
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 16px;
+  padding: 7px 14px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 8px;
   color: var(--text-secondary);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
@@ -7600,16 +7594,6 @@ button,
 .library-refresh-btn svg {
   width: 14px;
   height: 14px;
-}
-
-.library-section .gallery-grid {
-  justify-items: center;
-}
-
-.library-section .settings-help-text,
-.library-section .settings-error-message,
-.library-section .settings-form-hint {
-  text-align: center;
 }
 
 /* Code Artifacts Grid */
@@ -15329,19 +15313,22 @@ button,
   /* Library page mobile */
   .library-page-header {
     padding: 14px 16px 18px;
-    gap: 12px;
+  }
+
+  .library-page-header .settings-back-btn {
+    margin-bottom: 14px;
   }
 
   .library-page-header h1 {
     font-size: 20px;
+    margin-bottom: 14px;
   }
 
   .library-tabs {
-    width: 100%;
+    max-width: none;
   }
 
   .library-tab {
-    flex: 1;
     padding: 10px 12px;
     gap: 6px;
   }
