@@ -242,17 +242,12 @@
   cursor: pointer;
   user-select: none;
   transition: background-color 0.08s;
-  border-radius: 0;
-  margin: 0;
-  position: sticky;
-  top: 0;
-  background: var(--sidebar-bg);
-  z-index: 10;
-  border-bottom: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin: 4px 8px;
 }
 
 .chats-section-header:hover {
-  background-color: var(--sidebar-bg);
+  background-color: var(--hover-bg);
 }
 
 .chats-section-chevron {
@@ -293,7 +288,6 @@
 /* Projects Section */
 .projects-section {
   border-bottom: 1px solid var(--border-color);
-  flex-shrink: 0;
 }
 
 .projects-section-header {
@@ -304,10 +298,6 @@
   user-select: none;
   border-radius: 0;
   margin: 0;
-  position: sticky;
-  top: 0;
-  background: var(--sidebar-bg);
-  z-index: 10;
 }
 
 .projects-section-header .chats-section-chevron,
@@ -723,11 +713,8 @@
 }
 
 .conversation-list {
-  flex: 1;
-  overflow-y: visible;
   padding: 4px 8px 8px;
   transition: max-height 0.2s ease, opacity 0.15s, padding 0.2s ease;
-  min-height: 0;
 }
 
 .conversation-list.collapsed {
@@ -735,19 +722,12 @@
   padding: 0 8px;
   overflow: hidden;
   opacity: 0;
-  min-height: 0;
 }
 
-.conversation-list.has-dropdown {
-  overflow: visible;
-}
-
-/* Chats section wrapper for proper scrolling */
+/* Chats section wrapper */
 .chats-section {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
 }
 
 .sidebar-footer {
@@ -1220,17 +1200,13 @@
 /* Deep Research Sidebar Section */
 .deep-research-section {
   border-top: 1px solid var(--border-color);
-  flex-shrink: 0;
+  margin-top: 8px;
 }
 
 .deep-research-section-header {
   margin-top: 0;
   border-top: none;
   padding-top: 10px;
-  position: sticky;
-  top: 0;
-  background: var(--sidebar-bg);
-  z-index: 10;
 }
 
 .deep-research-section-header .deep-research-title {
