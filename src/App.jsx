@@ -3387,7 +3387,7 @@ Respond ONLY with valid JSON, no other text.`
 
   useEffect(() => {
     scrollToBottom()
-  }, [currentConversation?.messages])
+  }, [currentConversation?.messages, isTyping])
 
   useEffect(() => {
     if (!showCodeChat) return

@@ -14752,27 +14752,42 @@ button,
     min-height: 100%;
   }
 
-  /* Typing indicator */
+  /* Typing indicator - force visible on mobile */
   .typing-status {
+    display: block !important;
     font-size: 13px;
     padding: 6px 0;
     color: var(--accent-color);
     font-weight: 500;
+    font-style: italic;
   }
 
   .typing-indicator {
-    display: flex;
-    gap: 5px;
+    display: flex !important;
+    gap: 6px;
     padding: 10px 0;
     align-items: center;
   }
 
   .typing-indicator span {
+    display: block !important;
     width: 8px;
     height: 8px;
     background-color: var(--accent-color);
     border-radius: 50%;
     animation: bounce 1.4s ease-in-out infinite;
+  }
+
+  .typing-indicator span:nth-child(1) {
+    animation-delay: 0s;
+  }
+
+  .typing-indicator span:nth-child(2) {
+    animation-delay: 0.2s;
+  }
+
+  .typing-indicator span:nth-child(3) {
+    animation-delay: 0.4s;
   }
 
   /* Welcome screen */
