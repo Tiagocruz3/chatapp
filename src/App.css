@@ -93,8 +93,6 @@
   flex-direction: column;
   gap: 2px;
   padding: 0 12px 8px;
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: 8px;
 }
 
 .sidebar-nav-btn {
@@ -296,7 +294,6 @@
 
 /* Projects Section */
 .projects-section {
-  border-bottom: 1px solid var(--border-color);
 }
 
 .projects-section-header {
