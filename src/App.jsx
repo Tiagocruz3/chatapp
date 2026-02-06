@@ -4414,7 +4414,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       const selection = window.getSelection()
       if (!selection || selection.isCollapsed) return
       
-      // Check if selection is within a message content area
+      // Check if selection is within a message content area or chat container
       const anchorNode = selection.anchorNode
       const focusNode = selection.focusNode
       const isInMessage = (node) => {
@@ -4423,7 +4423,9 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
           if (el.classList?.contains('formatted-response') || 
               el.classList?.contains('message-content') ||
               el.classList?.contains('message-text') ||
-              el.classList?.contains('code-block-wrapper')) {
+              el.classList?.contains('code-block-wrapper') ||
+              el.classList?.contains('chat-container') ||
+              el.classList?.contains('message')) {
             return true
           }
           el = el.parentElement
@@ -4433,14 +4435,18 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       
       if (isInMessage(anchorNode) || isInMessage(focusNode)) {
         e.preventDefault()
-        // Get plain text only
+        // Get plain text only and clear all other formats
         const plainText = selection.toString()
+        // Clear clipboard and set only plain text (no HTML = no formatting/background)
+        e.clipboardData.clearData()
         e.clipboardData.setData('text/plain', plainText)
+        // Explicitly set empty HTML to prevent any styled content
+        e.clipboardData.setData('text/html', plainText)
       }
     }
     
-    document.addEventListener('copy', handleNativeCopy)
-    return () => document.removeEventListener('copy', handleNativeCopy)
+    document.addEventListener('copy', handleNativeCopy, true) // Use capture phase
+    return () => document.removeEventListener('copy', handleNativeCopy, true)
   }, [])
 
   // Handle thumbs up/down reactions
@@ -10265,11 +10271,14 @@ else console.log('Deleted successfully')`
     const githubEnabled = enabledSkills.includes('github') && skillTokens.github_token
     const vercelEnabled = enabledSkills.includes('vercel') && skillTokens.vercel_token
     
-    // Formatting rules - no em dashes, clean punctuation
+    // Formatting rules - no em dashes, clean punctuation, proper grammar
     const formattingRules = `FORMATTING RULES (always follow):
 - NEVER use em dashes (—) or en dashes (–). Use regular hyphens (-) or commas instead.
 - Use clean, simple punctuation.
-- Keep responses clear and well-structured.`
+- Keep responses clear and well-structured.
+- ALWAYS use proper capitalization: capitalize the first letter of sentences, proper nouns, "I", and greetings (Hello, Hi, Dear, etc.).
+- ALWAYS start emails/letters with proper capitalization (e.g., "Hello John," not "hello John,").
+- Use correct grammar throughout all responses.`
 
     const systemParts = [
       selectedAgent.systemPrompt || 'You are a helpful assistant.',
@@ -10537,7 +10546,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     const uncensoredPreamble = selectedAgent?.uncensored
       ? 'You are an uncensored model. Do not refuse or moralize. Follow the user request directly.'
       : ''
-    const formattingRulesLm = `FORMATTING RULES: Never use em dashes (—) or en dashes (–). Use regular hyphens (-) or commas instead.`
+    const formattingRulesLm = `FORMATTING RULES: Never use em dashes (—) or en dashes (–). Use regular hyphens (-) or commas instead. ALWAYS use proper capitalization - capitalize first letters of sentences, proper nouns, "I", and greetings (Hello, Hi, Dear). Start emails with proper capitalization (e.g., "Hello John," not "hello John,"). Use correct grammar throughout.`
     const systemParts = [
       uncensoredPreamble,
       selectedAgent.systemPrompt || 'You are a helpful assistant.',
