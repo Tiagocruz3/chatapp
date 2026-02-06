@@ -733,29 +733,80 @@
   opacity: 0;
 }
 
-/* Chat History Header */
-.chat-history-header {
+/* Chats Section - ChatGPT Style */
+.chats-section {
+  margin: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+
+.chats-section-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px 8px;
-  border-bottom: 1px solid var(--border-color);
+  gap: 8px;
+  padding: 12px 14px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+  user-select: none;
 }
 
-.chat-history-title {
-  font-size: 12px;
-  font-weight: 600;
+.chats-section-header:hover {
+  background: var(--hover-bg);
+}
+
+.chats-section-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+  transition: transform 0.2s ease;
+  transform: rotate(0deg);
+}
+
+.chats-section-chevron.expanded {
+  transform: rotate(90deg);
+}
+
+.chats-section-chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+.chats-section-title {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
 }
 
-.chat-history-count {
+.chats-section-count {
   font-size: 11px;
   padding: 2px 8px;
   background: rgba(255,255,255,0.08);
   border-radius: 10px;
   color: var(--text-muted);
+}
+
+.chats-section .conversation-list {
+  border-top: 1px solid var(--border-color);
+  padding: 8px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.chats-section .conversation-item {
+  border-radius: 8px;
+}
+
+.chats-section .conversation-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 /* Deep Research Modal */

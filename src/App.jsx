@@ -11106,15 +11106,25 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
           )}
         </div>
 
-          {/* Chat History Header */}
-          <div className="chat-history-header">
-            <span className="chat-history-title">Chat History</span>
-            <span className="chat-history-count">{filteredConversations.length}</span>
-          </div>
+          {/* Chats Section */}
+          <div className="chats-section">
+            <div 
+              className="chats-section-header"
+              onClick={() => setChatsExpanded(v => !v)}
+            >
+              <span className={`chats-section-chevron ${chatsExpanded ? 'expanded' : ''}`}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </span>
+              <span className="chats-section-title">Chats</span>
+              <span className="chats-section-count">{filteredConversations.length}</span>
+            </div>
 
-          {/* Conversation List */}
-          <div className="conversation-list">
-            {filteredConversations.map(conv => {
+            {/* Conversation List */}
+            {chatsExpanded && (
+              <div className="conversation-list">
+                {filteredConversations.map(conv => {
               const chatProject = getProjectForChat(conv.id)
               return (
                 <div
@@ -11257,8 +11267,10 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
               )
             })}
 
-            {filteredConversations.length === 0 && (
-              <div className="conversation-empty">No chats yet</div>
+                {filteredConversations.length === 0 && (
+                  <div className="conversation-empty">No chats yet</div>
+                )}
+              </div>
             )}
           </div>
         </div>
