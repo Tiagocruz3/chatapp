@@ -1496,6 +1496,7 @@ function App() {
   const [sidebarChatSearchQuery, setSidebarChatSearchQuery] = useState('')
   const [chatsExpanded, setChatsExpanded] = useState(true)
   const [showDeepResearchModal, setShowDeepResearchModal] = useState(false)
+  const [imagePreviewModal, setImagePreviewModal] = useState(null) // { url, prompt }
   const [renamingChatId, setRenamingChatId] = useState(null)
   const [renameChatTitle, setRenameChatTitle] = useState('')
   const [moveToChatId, setMoveToChatId] = useState(null) // Chat ID for move-to-project dropdown
@@ -13506,7 +13507,14 @@ Available tools:`
                       <div key={img.image_id} className="gallery-item">
                         <div className="gallery-thumb-wrapper">
                         {img.url ? (
-                          <img src={img.url} alt={img.prompt || 'Generated image'} className="gallery-thumb" loading="lazy" />
+                          <img 
+                            src={img.url} 
+                            alt={img.prompt || 'Generated image'} 
+                            className="gallery-thumb" 
+                            loading="lazy" 
+                            onClick={() => setImagePreviewModal({ url: img.url, prompt: img.prompt || 'Generated image' })}
+                            style={{ cursor: 'pointer' }}
+                          />
                         ) : (
                           <div className="gallery-thumb gallery-thumb-missing">No preview</div>
                         )}
@@ -18281,6 +18289,22 @@ Available tools:`
                 Delete
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Preview Modal */}
+      {imagePreviewModal && (
+        <div className="image-preview-overlay" onClick={() => setImagePreviewModal(null)}>
+          <div className="image-preview-modal" onClick={(e) => e.stopPropagation()}>
+            <button className="image-preview-close" onClick={() => setImagePreviewModal(null)}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+            <img src={imagePreviewModal.url} alt={imagePreviewModal.prompt} className="image-preview-img" />
+            <div className="image-preview-caption">{imagePreviewModal.prompt}</div>
           </div>
         </div>
       )}
