@@ -735,35 +735,33 @@
 
 /* Chats Section - ChatGPT Style */
 .chats-section {
-  margin: 8px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  background: rgba(255,255,255,0.02);
-  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .chats-section-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
+  gap: 6px;
+  padding: 8px 14px;
   cursor: pointer;
-  transition: background-color 0.15s;
   user-select: none;
 }
 
-.chats-section-header:hover {
-  background: var(--hover-bg);
+.chats-section-header:hover .chats-section-title {
+  color: var(--text-primary);
 }
 
 .chats-section-chevron {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   color: var(--text-muted);
-  transition: transform 0.2s ease;
+  transition: transform 0.15s ease;
   transform: rotate(0deg);
 }
 
@@ -772,39 +770,43 @@
 }
 
 .chats-section-chevron svg {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
 }
 
 .chats-section-title {
-  flex: 1;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
-  color: var(--text-secondary);
+  color: var(--text-muted);
+  transition: color 0.15s;
 }
 
 .chats-section-count {
   font-size: 11px;
-  padding: 2px 8px;
-  background: rgba(255,255,255,0.08);
-  border-radius: 10px;
   color: var(--text-muted);
+  margin-left: auto;
 }
 
 .chats-section .conversation-list {
-  border-top: 1px solid var(--border-color);
-  padding: 8px;
-  max-height: 400px;
+  flex: 1;
   overflow-y: auto;
+  padding: 0 8px 8px;
 }
 
 .chats-section .conversation-item {
+  padding: 10px 12px;
   border-radius: 8px;
+  gap: 10px;
+}
+
+.chats-section .conversation-item svg {
+  width: 16px;
+  height: 16px;
+  opacity: 0.5;
 }
 
 .chats-section .conversation-empty {
-  padding: 16px;
-  text-align: center;
+  padding: 12px 14px;
   color: var(--text-muted);
   font-size: 13px;
 }
