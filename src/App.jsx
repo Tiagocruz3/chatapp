@@ -11080,13 +11080,7 @@ Available tools:`
                 />
               </div>
             )}
-          </div>
-        </div>
 
-        {/* Scrollable sidebar content */}
-        <div className="sidebar-content">
-          {/* Navigation Items */}
-          <div className="sidebar-nav-scroll">
             <button
               className="sidebar-nav-btn"
               type="button"
@@ -11101,7 +11095,13 @@ Available tools:`
               </span>
               <span className="sidebar-nav-label">Library</span>
             </button>
+          </div>
+        </div>
 
+        {/* Scrollable sidebar content - everything below Library */}
+        <div className="sidebar-content">
+          {/* Navigation Items */}
+          <div className="sidebar-nav-scroll">
             <button
               className="sidebar-nav-btn"
               type="button"
