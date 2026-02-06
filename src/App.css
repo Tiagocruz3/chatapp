@@ -724,56 +724,227 @@
   opacity: 0;
 }
 
-/* History Toggle (Chats/Research) */
-.history-toggle {
+/* Chat History Header */
+.chat-history-header {
   display: flex;
-  gap: 4px;
-  padding: 8px 10px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 8px;
   border-bottom: 1px solid var(--border-color);
 }
 
-.history-toggle-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: transparent;
-  border: none;
-  border-radius: 8px;
+.chat-history-title {
+  font-size: 12px;
+  font-weight: 600;
   color: var(--text-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
-.history-toggle-btn:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
-.history-toggle-btn.active {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
-.history-toggle-btn svg {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-}
-
-.history-toggle-count {
+.chat-history-count {
   font-size: 11px;
-  padding: 2px 6px;
-  background: rgba(255,255,255,0.1);
+  padding: 2px 8px;
+  background: rgba(255,255,255,0.08);
   border-radius: 10px;
   color: var(--text-muted);
 }
 
-.history-toggle-btn.active .history-toggle-count {
+/* Deep Research Modal */
+.deep-research-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.deep-research-modal {
+  background: var(--card-bg);
+  border-radius: 16px;
+  width: 90%;
+  max-width: 480px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+  animation: modalSlideUp 0.2s ease-out;
+}
+
+.deep-research-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.deep-research-modal-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.deep-research-modal-header h2 svg {
+  width: 22px;
+  height: 22px;
+  stroke: var(--accent-color);
+}
+
+.deep-research-modal-close {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.deep-research-modal-close:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.deep-research-modal-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.deep-research-modal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.deep-research-new-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 16px;
+  background: var(--accent-color);
+  border: none;
+  border-radius: 10px;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-bottom: 16px;
+}
+
+.deep-research-new-btn:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+}
+
+.deep-research-new-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.deep-research-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.deep-research-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: transparent;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.deep-research-item:hover {
+  background: var(--hover-bg);
+}
+
+.deep-research-item.active {
+  background: var(--hover-bg);
+}
+
+.deep-research-item svg {
+  width: 18px;
+  height: 18px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.deep-research-item-title {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deep-research-item-delete {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: all 0.15s;
+}
+
+.deep-research-item:hover .deep-research-item-delete {
+  opacity: 1;
+}
+
+.deep-research-item-delete:hover {
+  background: rgba(239,68,68,0.15);
+  color: #ef4444;
+}
+
+.deep-research-item-delete svg {
+  width: 14px;
+  height: 14px;
+}
+
+.deep-research-empty {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-secondary);
+}
+
+.deep-research-empty p {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+
+.deep-research-empty p:last-child {
+  margin-bottom: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Deep Research Nav Button Badge */
+.deep-research-nav-btn .sidebar-nav-badge {
   background: var(--accent-color);
   color: white;
 }
