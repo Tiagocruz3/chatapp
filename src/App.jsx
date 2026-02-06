@@ -4407,6 +4407,42 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     }
   }
 
+  // Intercept browser's native copy to force plain text (no background colors)
+  useEffect(() => {
+    const handleNativeCopy = (e) => {
+      // Only intercept if copying from chat messages area
+      const selection = window.getSelection()
+      if (!selection || selection.isCollapsed) return
+      
+      // Check if selection is within a message content area
+      const anchorNode = selection.anchorNode
+      const focusNode = selection.focusNode
+      const isInMessage = (node) => {
+        let el = node?.nodeType === 3 ? node.parentElement : node
+        while (el) {
+          if (el.classList?.contains('formatted-response') || 
+              el.classList?.contains('message-content') ||
+              el.classList?.contains('message-text') ||
+              el.classList?.contains('code-block-wrapper')) {
+            return true
+          }
+          el = el.parentElement
+        }
+        return false
+      }
+      
+      if (isInMessage(anchorNode) || isInMessage(focusNode)) {
+        e.preventDefault()
+        // Get plain text only
+        const plainText = selection.toString()
+        e.clipboardData.setData('text/plain', plainText)
+      }
+    }
+    
+    document.addEventListener('copy', handleNativeCopy)
+    return () => document.removeEventListener('copy', handleNativeCopy)
+  }, [])
+
   // Handle thumbs up/down reactions
   const handleReaction = (messageId, type) => {
     // Keep this super fast: avoid toasts (extra renders) and run as a transition.
