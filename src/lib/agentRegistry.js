@@ -1788,7 +1788,7 @@ const ENABLED_AGENTS_KEY = 'enabledAgentsInSelector';
 
 /**
  * Get list of agent IDs enabled for the model selector
- * By default, all agents are enabled
+ * By default, all agents are disabled
  */
 export function getEnabledAgentsInSelector() {
   try {
@@ -1799,8 +1799,8 @@ export function getEnabledAgentsInSelector() {
   } catch (e) {
     console.error('Error loading enabled agents:', e);
   }
-  // Default: all agents enabled
-  return AGENTS.map(a => a.id);
+  // Default: all agents disabled
+  return [];
 }
 
 /**
