@@ -4,18 +4,110 @@
   box-sizing: border-box;
 }
 
+/* ============================================
+   THEME VARIABLES - DARK MODE (DEFAULT)
+   ============================================ */
 :root {
+  /* Background Colors */
   --sidebar-bg: #171717;
   --main-bg: #212121;
   --message-user-bg: #2f2f2f;
   --message-assistant-bg: transparent;
+  --card-bg: #2a2a2a;
+  --input-bg: #2f2f2f;
+  --hover-bg: #2f2f2f;
+  --elevated-bg: #1e1e1e;
+  
+  /* Text Colors */
   --text-primary: #ececec;
   --text-secondary: #b4b4b4;
   --text-muted: #8e8e8e;
+  --text-inverse: #171717;
+  
+  /* Border & Divider */
   --border-color: #2f2f2f;
-  --accent-color: #10a37f;
-  --hover-bg: #2f2f2f;
-  --input-bg: #2f2f2f;
+  --divider-color: rgba(255, 255, 255, 0.1);
+  
+  /* Accent Colors - Default Emerald */
+  --accent-color: #10b981;
+  --accent-hover: #059669;
+  --accent-light: rgba(16, 185, 129, 0.15);
+  
+  /* Status Colors */
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --error-color: #ef4444;
+  --info-color: #3b82f6;
+  
+  /* Overlay */
+  --overlay-bg: rgba(0, 0, 0, 0.7);
+  --modal-bg: #1a1a1a;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+  
+  /* Code Blocks */
+  --code-bg: #1e1e1e;
+  --code-text: #d4d4d4;
+  
+  /* Scrollbar */
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
+}
+
+/* ============================================
+   THEME VARIABLES - LIGHT MODE
+   ============================================ */
+[data-theme="light"] {
+  /* Background Colors */
+  --sidebar-bg: #f8f9fa;
+  --main-bg: #ffffff;
+  --message-user-bg: #f3f4f6;
+  --message-assistant-bg: transparent;
+  --card-bg: #ffffff;
+  --input-bg: #f3f4f6;
+  --hover-bg: #e5e7eb;
+  --elevated-bg: #ffffff;
+  
+  /* Text Colors */
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-muted: #9ca3af;
+  --text-inverse: #ffffff;
+  
+  /* Border & Divider */
+  --border-color: #e5e7eb;
+  --divider-color: rgba(0, 0, 0, 0.08);
+  
+  /* Accent Colors - Default Emerald (same for both) */
+  --accent-color: #10b981;
+  --accent-hover: #059669;
+  --accent-light: rgba(16, 185, 129, 0.1);
+  
+  /* Status Colors */
+  --success-color: #10b981;
+  --warning-color: #f59e0b;
+  --error-color: #ef4444;
+  --info-color: #3b82f6;
+  
+  /* Overlay */
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+  --modal-bg: #ffffff;
+  
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.15);
+  
+  /* Code Blocks */
+  --code-bg: #f3f4f6;
+  --code-text: #1f2937;
+  
+  /* Scrollbar */
+  --scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
 }
 
 html, body, #root {
@@ -29,4 +121,43 @@ body {
   background-color: var(--main-bg);
   color: var(--text-primary);
   line-height: 1.5;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* Selection Styling */
+::selection {
+  background: var(--accent-light);
+  color: var(--text-primary);
+}
+
+/* Focus Outline */
+:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* Smooth Transitions for Theme Changes */
+*, *::before, *::after {
+  transition-property: background-color, border-color, color, fill, stroke;
+  transition-duration: 0.15s;
+  transition-timing-function: ease;
 }
