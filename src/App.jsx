@@ -12806,7 +12806,7 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                 className={`settings-tab ${settingsTab === 'brainiac' ? 'active' : ''}`}
                 onClick={() => setSettingsTab('brainiac')}
               >
-                Brainiac
+                Brainiac Bot
               </button>
               <button
                 className={`settings-tab ${settingsTab === 'embeddings' ? 'active' : ''}`}
@@ -13644,10 +13644,11 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
             {settingsTab === 'brainiac' && (
               <div className="settings-tab-panel">
                 <section className="settings-page-section">
-                  <h2>Brainiac (OpenAI-Compatible)</h2>
+                  <h2>Brainiac Bot</h2>
                   <p className="settings-page-description">
-                    Connect to Brainiac relay for OpenAI-compatible API access.
-                    Uses the <code>/responses</code> endpoint for chat completions.
+                    OpenAI-compatible API endpoint configuration. 
+                    Base URL: <code>https://brainbot.capsulerelay.com/v1</code>, 
+                    Endpoint: <code>/responses</code>
                   </p>
                   <div className="settings-input-group">
                     <label htmlFor="brainiac-url">Base URL</label>
@@ -13732,11 +13733,11 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                     Models available through the Brainiac relay.
                   </p>
                   {brainiacConnectState === 'connected' ? (
-                    <div className="lmstudio-model-list">
+                    <div className="brainiac-model-list">
                       {brainiacModels.map((model) => (
-                        <div key={model.id} className="lmstudio-model-item">
-                          <span className="lmstudio-model-name">{model.name}</span>
-                          <code className="lmstudio-model-id">{model.id}</code>
+                        <div key={model.id} className="brainiac-model-item">
+                          <span className="brainiac-model-name">{model.name}</span>
+                          <code className="brainiac-model-id">{model.id}</code>
                         </div>
                       ))}
                     </div>
