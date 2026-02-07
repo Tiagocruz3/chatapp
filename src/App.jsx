@@ -4083,17 +4083,17 @@ Respond ONLY with valid JSON, no other text.`
     const n8nAgents = (agents || []).map(a => ({ ...a, provider: a.provider || 'n8n' }))
     const orAgents = (openRouterAgents || []).map(a => ({ ...a, provider: 'openrouter' }))
     const lmAgents = (lmStudioAgents || []).map(a => ({ ...a, provider: 'lmstudio' }))
-    const brainiacModelAgents = (brainiacConnectState === 'connected' ? (brainiacModels || []) : []).map(m => ({
-      id: `brainiac-${m.id}`,
-      name: `Brainiac • ${m.name || m.id}`,
-      provider: 'brainiac',
-      model: m.id,
-      baseUrl: brainiacBaseUrl,
-      apiKey: brainiacApiKey,
-      systemPrompt: 'You are a helpful assistant.',
-      temperature: 0.7,
-    }))
-    const brainiacCustomAgents = (brainiacAgents || []).map(a => ({ ...a, provider: 'brainiac' }))
+    const brainiacDefaultAgent = brainiacConnectState === 'connected'
+      ? [{
+          id: 'brainiac-default',
+          name: 'Brainiac (default)',
+          provider: 'brainiac',
+          baseUrl: brainiacBaseUrl,
+          apiKey: brainiacApiKey,
+          systemPrompt: 'You are a helpful assistant.',
+          temperature: 0.7,
+        }]
+      : []
     // Add persona agents from registry
     const personaAgents = AGENTS.map(a => ({
       id: `persona-${a.id}`,
@@ -4107,8 +4107,8 @@ Respond ONLY with valid JSON, no other text.`
       avatar: a.avatar,
       specialty: a.specialty
     }))
-    return [...personaAgents, ...brainiacModelAgents, ...brainiacCustomAgents, ...orAgents, ...lmAgents, ...n8nAgents]
-  }, [agents, openRouterAgents, lmStudioAgents, brainiacModels, brainiacConnectState, brainiacBaseUrl, brainiacApiKey, brainiacAgents])
+    return [...personaAgents, ...brainiacDefaultAgent, ...orAgents, ...lmAgents, ...n8nAgents]
+  }, [agents, openRouterAgents, lmStudioAgents, brainiacConnectState, brainiacBaseUrl, brainiacApiKey])
 
   useEffect(() => {
     if (!dbEnabled || !profileRow?.settings) return
@@ -11118,20 +11118,21 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
   const sendMessageToBrainiac = async (message, extraContext = '', signal) => {
     const base = normalizeOpenAiCompatibleBaseUrl(selectedAgent?.baseUrl || brainiacBaseUrl)
     if (!base) throw new Error('Brainiac base URL not set (Settings → Brainiac)')
-    if (!selectedAgent?.model) throw new Error('Brainiac agent missing model')
     const headers = { 'Content-Type': 'application/json' }
     const key = (selectedAgent?.apiKey || brainiacApiKey || '').trim()
     if (key) headers.Authorization = `Bearer ${key}`
 
     const endpoint = (brainiacEndpoint || '/responses').trim()
+    const payload = {
+      input: buildMessageArray(message, extraContext),
+      temperature: Number(selectedAgent.temperature ?? 0.7),
+    }
+    if (selectedAgent?.model) payload.model = selectedAgent.model
+
     const resp = await fetch(`${base}${endpoint}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model: selectedAgent.model,
-        input: buildMessageArray(message, extraContext),
-        temperature: Number(selectedAgent.temperature ?? 0.7),
-      }),
+      body: JSON.stringify(payload),
       signal
     })
     const text = await resp.text()
@@ -13534,20 +13535,15 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                 <section className="settings-page-section">
                   <h2>Available Models</h2>
                   <p className="settings-page-description">
-                    Models available through the Brainiac relay.
+                    The Brainiac relay will use OpenClaw's default model. No manual selection required.
                   </p>
                   {brainiacConnectState === 'connected' ? (
-                    <div className="brainiac-model-list">
-                      {brainiacModels.map((model) => (
-                        <div key={model.id} className="brainiac-model-item">
-                          <span className="brainiac-model-name">{model.name}</span>
-                          <code className="brainiac-model-id">{model.id}</code>
-                        </div>
-                      ))}
+                    <div className="settings-help-text">
+                      Connected. Using OpenClaw default model.
                     </div>
                   ) : (
                     <div className="settings-help-text">
-                      Connect to Brainiac first to see available models.
+                      Connect to Brainiac first to use the default model.
                     </div>
                   )}
                 </section>
