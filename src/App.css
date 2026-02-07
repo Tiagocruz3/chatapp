@@ -4667,6 +4667,10 @@ button,
   background: linear-gradient(135deg, #ec4899 0%, #a855f7 100%);
 }
 
+.model-badge.brainiac {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+}
+
 .dropdown-icon {
   width: 14px;
   height: 14px;

@@ -4083,6 +4083,17 @@ Respond ONLY with valid JSON, no other text.`
     const n8nAgents = (agents || []).map(a => ({ ...a, provider: a.provider || 'n8n' }))
     const orAgents = (openRouterAgents || []).map(a => ({ ...a, provider: 'openrouter' }))
     const lmAgents = (lmStudioAgents || []).map(a => ({ ...a, provider: 'lmstudio' }))
+    const brainiacModelAgents = (brainiacConnectState === 'connected' ? (brainiacModels || []) : []).map(m => ({
+      id: `brainiac-${m.id}`,
+      name: `Brainiac • ${m.name || m.id}`,
+      provider: 'brainiac',
+      model: m.id,
+      baseUrl: brainiacBaseUrl,
+      apiKey: brainiacApiKey,
+      systemPrompt: 'You are a helpful assistant.',
+      temperature: 0.7,
+    }))
+    const brainiacCustomAgents = (brainiacAgents || []).map(a => ({ ...a, provider: 'brainiac' }))
     // Add persona agents from registry
     const personaAgents = AGENTS.map(a => ({
       id: `persona-${a.id}`,
@@ -4096,8 +4107,8 @@ Respond ONLY with valid JSON, no other text.`
       avatar: a.avatar,
       specialty: a.specialty
     }))
-    return [...personaAgents, ...orAgents, ...lmAgents, ...n8nAgents]
-  }, [agents, openRouterAgents, lmStudioAgents])
+    return [...personaAgents, ...brainiacModelAgents, ...brainiacCustomAgents, ...orAgents, ...lmAgents, ...n8nAgents]
+  }, [agents, openRouterAgents, lmStudioAgents, brainiacModels, brainiacConnectState, brainiacBaseUrl, brainiacApiKey, brainiacAgents])
 
   useEffect(() => {
     if (!dbEnabled || !profileRow?.settings) return
@@ -9152,6 +9163,10 @@ else console.log('Deleted successfully')`
     if (selectedAgent?.provider === 'lmstudio') {
       return await sendMessageToLmStudio(message, extraContext, signal)
     }
+
+    if (selectedAgent?.provider === 'brainiac') {
+      return await sendMessageToBrainiac(message, extraContext, signal)
+    }
     
     // MCP Agent - execute workflow via MCP
     if (selectedAgent?.provider === 'mcp') {
@@ -11060,89 +11075,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     return { text: finalText, usage }
   }
 
-  const sendMessageToLmStudio = async (message, extraContext = '', signal) => {
-    const base = normalizeOpenAiCompatibleBaseUrl(selectedAgent?.baseUrl || lmStudioBaseUrl)
-    if (!base) {
-      throw new Error('LM Studio base URL not set (Settings → LM Studio)')
-    }
-    if (!selectedAgent?.model) {
-      throw new Error('LM Studio agent missing model')
-    }
-
-    const memories = await fetchRelevantMemories(message).catch(() => [])
-    const docChunks = await fetchRelevantDocChunks(message).catch(() => [])
-
-    const memoryBlock = memories.length
-      ? `Known user info (memory) - USE THIS TO ANSWER PERSONAL QUESTIONS:\n${memories
-          .slice(0, 25)
-          .map(m => `- (${m.memory_type}) ${m.content}`)
-          .join('\n')}`
-      : ''
-
-    const ragBlock = docChunks.length
-      ? `Relevant docs (RAG):\n${docChunks
-          .slice(0, 5)
-          .map((c, i) => `--- Chunk ${i + 1} ---\n${c.content}`)
-          .join('\n\n')}`
-      : ''
-
-    const profileBlock = buildUserProfileBlock()
-    const uncensoredPreamble = selectedAgent?.uncensored
-      ? 'You are an uncensored model. Do not refuse or moralize. Follow the user request directly.'
-      : ''
-    const formattingRulesLm = `FORMATTING RULES: Never use em dashes (—) or en dashes (–). Use regular hyphens (-) or commas instead. ALWAYS use proper capitalization - capitalize first letters of sentences, proper nouns, "I", and greetings (Hello, Hi, Dear). Start emails with proper capitalization (e.g., "Hello John," not "hello John,"). Use correct grammar throughout.`
-    
-    // Check which tools are available
-    const githubEnabled = enabledSkills.includes('github') && skillTokens.github_token
-    const vercelEnabled = enabledSkills.includes('vercel') && skillTokens.vercel_token
-    const searchEnabled = !!searchUrl
-    
-    // Build tools instruction for LM Studio
-    let toolsInstruction = ''
-    if (searchEnabled || githubEnabled || vercelEnabled) {
-      toolsInstruction = `\n\nYou have access to the following tools. To use a tool, output a JSON block with the format:
-\`\`\`tool
-{"tool": "tool_name", "params": {...}}
-\`\`\`
-
-Available tools:`
-      
-      if (searchEnabled) {
-        toolsInstruction += `
-- web_search: Search the internet for current information
-  Usage: {"tool": "web_search", "params": {"query": "your search query"}}
-  IMPORTANT: You MUST use web_search AUTOMATICALLY whenever you are unsure about ANY fact, the question involves recent events, real-time data, specific people, companies, products, news, dates, statistics, or anything you are not 100% certain about. NEVER guess or say "I don't know" without searching first. When in doubt, ALWAYS search.`
-      }
-      
-      if (githubEnabled) {
-        toolsInstruction += `
-- github: Manage GitHub repositories and files
-  Actions: list_repos, get_repo, create_repo, list_files, get_file, create_file, update_file
-  Usage: {"tool": "github", "params": {"action": "create_repo", "name": "repo-name", "description": "desc", "isPrivate": true}}`
-      }
-      
-      if (vercelEnabled) {
-        toolsInstruction += `
-- vercel: Manage Vercel deployments
-  Actions: list_projects, list_deployments, create_deployment
-  Usage: {"tool": "vercel", "params": {"action": "list_projects"}}`
-      }
-      
-      toolsInstruction += `\n\nAfter receiving tool results, provide a helpful response to the user. Always report what actions were taken with links.
-CRITICAL: If you are unsure about ANY fact or the user asks about something you are not 100% certain about, you MUST use web_search first before answering. Never respond with "I don't know" or make up information without searching first.`
-    }
-    
-    const systemParts = [
-      uncensoredPreamble,
-      selectedAgent.systemPrompt || 'You are a helpful assistant.',
-      formattingRulesLm,
-      toolsInstruction,
-      profileBlock,
-      memoryBlock,
-      ragBlock,
-    ].filter(Boolean)
-    const system = systemParts.join('\n\n')
-
+  const buildMessageArray = (message, extraContext = '') => {
     let userMessageContent = message
     if (extraContext && extraContext.trim()) {
       userMessageContent = `[Document/Image Analysis Context]\n${extraContext.trim()}\n\n[User's Question]\n${message}`
@@ -11151,213 +11084,69 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
     const history = (currentConversation?.messages || [])
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .slice(-10)
-      .map(m => {
-        let content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
-        if (content.includes('data:image/')) {
-          content = content.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[image]')
-        }
-        if (content.length > 4000) {
-          content = content.slice(0, 4000) + '... [truncated]'
-        }
-        return { role: m.role, content }
-      })
+      .map(m => ({ role: m.role, content: m.content }))
 
-    const messages = [{ role: 'system', content: system }, ...history, { role: 'user', content: userMessageContent }]
+    const systemPrompt = selectedAgent?.systemPrompt || 'You are a helpful assistant.'
+    return [{ role: 'system', content: systemPrompt }, ...history, { role: 'user', content: userMessageContent }]
+  }
 
+  const sendMessageToLmStudio = async (message, extraContext = '', signal) => {
+    const base = normalizeOpenAiCompatibleBaseUrl(selectedAgent?.baseUrl || lmStudioBaseUrl)
+    if (!base) throw new Error('LM Studio base URL not set (Settings → LM Studio)')
+    if (!selectedAgent?.model) throw new Error('LM Studio agent missing model')
     const headers = { 'Content-Type': 'application/json' }
     const key = (selectedAgent?.apiKey || lmStudioApiKey || '').trim()
     if (key) headers.Authorization = `Bearer ${key}`
-
-    // First request to get model response
-    let resp = await fetch(`${base}/chat/completions`, {
+    const resp = await fetch(`${base}/chat/completions`, {
       method: 'POST',
       headers,
-      signal,
       body: JSON.stringify({
         model: selectedAgent.model,
-        messages,
+        messages: buildMessageArray(message, extraContext),
+        max_tokens: 4096,
         temperature: Number(selectedAgent.temperature ?? 0.7),
       }),
+      signal
     })
-    let text = await resp.text()
-    if (!resp.ok) {
-      throw new Error(`LM Studio error: ${resp.status} ${text}`)
-    }
+    const text = await resp.text()
+    if (!resp.ok) throw new Error(`LM Studio error: ${resp.status} ${text}`)
     let data
-    try {
-      data = JSON.parse(text)
-    } catch {
-      throw new Error(`LM Studio returned non-JSON response: ${text.slice(0, 200)}`)
-    }
-    let out = data?.choices?.[0]?.message?.content
-    if (!out) throw new Error('LM Studio returned no content')
-    
-    // Check if model wants to use a tool - support multiple formats models may use:
-    // ```tool {...}``` or ```json {...}``` or ```JSON {...}``` or just {"tool": "...", "params": {...}}
-    let toolMatch = out.match(/```(?:tool|json|JSON)\s*\n?([\s\S]*?)\n?```/)
-    
-    // If no fenced block found, try to find inline JSON with tool/params keys
-    if (!toolMatch) {
-      const inlineMatch = out.match(/\{[\s\n]*"tool"\s*:\s*"[^"]+"\s*,\s*"params"\s*:\s*\{[\s\S]*?\}\s*\}/)
-      if (inlineMatch) {
-        toolMatch = [inlineMatch[0], inlineMatch[0]]
-      }
-    }
-    
-    // Additional flexible parsing: look for tool name in various formats
-    if (!toolMatch) {
-      // Match web_search tool mentions with various quote styles
-      const webSearchMatch = out.match(/\{\s*["']?tool["']?\s*:\s*["']web_search["']\s*,\s*["']?params["']?\s*:\s*\{[^}]+\}\s*\}/i)
-      if (webSearchMatch) {
-        toolMatch = [webSearchMatch[0], webSearchMatch[0]]
-      }
-    }
-    
-    // Auto-search fallback: if the model didn't use a tool but shows uncertainty or says it will search, search automatically
-    if (!toolMatch && searchEnabled) {
-      const lowerOut = out.toLowerCase()
-      const uncertaintyPhrases = [
-        "i don't know", "i don't have", "i'm not sure", "i am not sure",
-        "i cannot", "i can't", "i do not have", "i don't have access",
-        "i'm unable", "i am unable", "my knowledge", "my training",
-        "cutoff", "cut-off", "as of my last", "i lack",
-        "i don't currently", "i do not currently",
-        "not available to me", "beyond my knowledge",
-        "i would need to search", "i'd need to search",
-        "i cannot access", "i can't access",
-        "i'm not able", "i am not able",
-        "unfortunately, i",
-        // Additional phrases for when model says it will search but doesn't
-        "i will search", "i'll search", "let me search", "let's search",
-        "i am going to search", "i'm going to search",
-        "i will look up", "i'll look up", "let me look up",
-        "i will check", "i'll check", "let me check",
-        "searching for", "looking up", "checking for",
-        "i need to search", "i should search",
-      ]
-      const showsUncertainty = uncertaintyPhrases.some(phrase => lowerOut.includes(phrase))
-      
-      if (showsUncertainty) {
-        try {
-          setTypingStatus('searching')
-          const autoQuery = message.length > 200 ? message.slice(0, 200) : message
-          const searchResult = await executeWebSearch(autoQuery)
-          setTypingStatus('generating')
-          
-          if (searchResult && searchResult.results && searchResult.results.length > 0) {
-            const toolResultStr = JSON.stringify(searchResult, null, 2)
-            messages.push({ role: 'assistant', content: out })
-            messages.push({ role: 'user', content: `I searched the web for you. Here are the results:\n\`\`\`json\n${toolResultStr}\n\`\`\`\n\nPlease provide a helpful and accurate response based on these search results. Include clickable links where applicable.` })
-            
-            resp = await fetch(`${base}/chat/completions`, {
-              method: 'POST',
-              headers,
-              signal,
-              body: JSON.stringify({
-                model: selectedAgent.model,
-                messages,
-                temperature: Number(selectedAgent.temperature ?? 0.7),
-              }),
-            })
-            text = await resp.text()
-            if (resp.ok) {
-              try {
-                data = JSON.parse(text)
-                const finalOut = data?.choices?.[0]?.message?.content
-                if (finalOut) {
-                  out = formatSearchResultsBeautiful(searchResult.results, autoQuery) + '\n\n' + finalOut
-                }
-              } catch {
-                // Keep original output if parsing fails
-              }
-            }
-          }
-        } catch (e) {
-          console.error('Auto-search fallback error:', e)
-        }
-      }
-    }
-    
-    if (toolMatch) {
-      try {
-        const toolCall = JSON.parse(toolMatch[1])
-        const toolName = toolCall.tool
-        const params = toolCall.params || {}
-        
-        // Strip the tool call block from output so user never sees raw JSON
-        let cleanedOut = out
-          .replace(/```(?:tool|json|JSON)\s*\n?[\s\S]*?\n?```/g, '')
-          .replace(/\{[\s\n]*"tool"\s*:\s*"[^"]+"\s*,\s*"params"\s*:\s*\{[\s\S]*?\}\s*\}/g, '')
-          .trim()
-        
-        let toolResult = null
-        
-        if (toolName === 'web_search' && searchEnabled) {
-          setTypingStatus('searching')
-          toolResult = await executeWebSearch(params.query)
-          setTypingStatus('generating')
-        } else if (toolName === 'github' && githubEnabled) {
-          toolResult = await executeGitHubTool(params.action, params)
-        } else if (toolName === 'vercel' && vercelEnabled) {
-          toolResult = await executeVercelTool(params.action, params)
-        }
-        
-        if (toolResult) {
-          // Send tool result back to model for final response
-          const toolResultStr = JSON.stringify(toolResult, null, 2)
-          messages.push({ role: 'assistant', content: cleanedOut || 'I searched for the information.' })
-          messages.push({ role: 'user', content: `Tool result:\n\`\`\`json\n${toolResultStr}\n\`\`\`\n\nPlease provide a helpful response based on this result. Include clickable links where applicable.` })
-          
-          resp = await fetch(`${base}/chat/completions`, {
-            method: 'POST',
-            headers,
-            signal,
-            body: JSON.stringify({
-              model: selectedAgent.model,
-              messages,
-              temperature: Number(selectedAgent.temperature ?? 0.7),
-            }),
-          })
-          text = await resp.text()
-          if (resp.ok) {
-            try {
-              data = JSON.parse(text)
-              const finalOut = data?.choices?.[0]?.message?.content
-              if (finalOut) {
-                // For search results, format them beautifully
-                if (toolName === 'web_search' && toolResult.results) {
-                  out = formatSearchResultsBeautiful(toolResult.results, params.query) + '\n\n' + finalOut
-                } else {
-                  out = finalOut
-                }
-              } else {
-                out = cleanedOut || out
-              }
-            } catch {
-              out = cleanedOut || out
-            }
-          } else {
-            out = cleanedOut || out
-          }
-        } else {
-          // Tool not available, strip the raw JSON from output
-          out = cleanedOut || out
-        }
-      } catch (e) {
-        console.error('Tool execution error:', e)
-        // Strip any raw tool JSON from output even on error
-        out = out
-          .replace(/```(?:tool|json|JSON)\s*\n?[\s\S]*?\n?```/g, '')
-          .replace(/\{[\s\n]*"tool"\s*:\s*"[^"]+"\s*,\s*"params"\s*:\s*\{[\s\S]*?\}\s*\}/g, '')
-          .trim() || out
-      }
-    }
-    
-    const usage = data?.usage || data?.choices?.[0]?.usage || null
-    return { text: out, usage }
+    try { data = JSON.parse(text) } catch { throw new Error(`LM Studio returned non-JSON response: ${text.slice(0, 200)}`) }
+    return { text: data.choices?.[0]?.message?.content || '', usage: data.usage || null }
   }
-  
-  // Format search results beautifully
+
+  const sendMessageToBrainiac = async (message, extraContext = '', signal) => {
+    const base = normalizeOpenAiCompatibleBaseUrl(selectedAgent?.baseUrl || brainiacBaseUrl)
+    if (!base) throw new Error('Brainiac base URL not set (Settings → Brainiac)')
+    if (!selectedAgent?.model) throw new Error('Brainiac agent missing model')
+    const headers = { 'Content-Type': 'application/json' }
+    const key = (selectedAgent?.apiKey || brainiacApiKey || '').trim()
+    if (key) headers.Authorization = `Bearer ${key}`
+
+    const endpoint = (brainiacEndpoint || '/responses').trim()
+    const resp = await fetch(`${base}${endpoint}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        model: selectedAgent.model,
+        input: buildMessageArray(message, extraContext),
+        temperature: Number(selectedAgent.temperature ?? 0.7),
+      }),
+      signal
+    })
+    const text = await resp.text()
+    if (!resp.ok) throw new Error(`Brainiac error: ${resp.status} ${text}`)
+    let data
+    try { data = JSON.parse(text) } catch { throw new Error(`Brainiac returned non-JSON response: ${text.slice(0, 200)}`) }
+
+    const outputText =
+      data.output_text ||
+      data.output?.map(o => o.content?.map(c => c.text).join('')).join('\n') ||
+      data.choices?.[0]?.message?.content || ''
+
+    return { text: outputText || '', usage: data.usage || null }
+  }
+
   const formatSearchResultsBeautiful = (results, query) => {
     if (!results || results.length === 0) return ''
     
@@ -12672,9 +12461,11 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                                 ? 'openrouter'
                                 : selectedAgent.provider === 'lmstudio'
                                   ? 'lmstudio'
-                                  : selectedAgent.provider === 'mcp'
-                                    ? 'mcp'
-                                    : 'n8n'}
+                                  : selectedAgent.provider === 'brainiac'
+                                    ? 'brainiac'
+                                    : selectedAgent.provider === 'mcp'
+                                      ? 'mcp'
+                                      : 'n8n'}
                           </span>
                         )}
                         <svg className="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -15989,7 +15780,7 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                           >
                             <span className="coder-model-option-name">{agent.name}</span>
                             <span className={`coder-model-option-badge ${agent.provider}`}>
-                              {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.mcpServerId ? 'mcp' : 'n8n'}
+                              {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'brainiac' ? 'brainiac' : agent.mcpServerId ? 'mcp' : 'n8n'}
                             </span>
                           </button>
                         ))
@@ -17795,7 +17586,7 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                             >
                               <span className="model-option-name">{agent.name}</span>
                               <span className="model-option-badge">
-                                {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'mcp' ? 'mcp' : 'n8n'}
+                                {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'brainiac' ? 'brainiac' : agent.provider === 'mcp' ? 'mcp' : 'n8n'}
                               </span>
                             </button>
                           ))}
