@@ -14865,8 +14865,11 @@ button,
 
 @media (display-mode: standalone) {
   .mobile-header {
-    height: calc(56px + env(safe-area-inset-top) + 12px);
-    padding-top: calc(env(safe-area-inset-top) + 12px);
+    height: calc(56px + env(safe-area-inset-top) + 20px);
+    padding-top: calc(env(safe-area-inset-top) + 20px);
+  }
+  .app {
+    padding-top: 8px;
   }
 }
 
@@ -14915,6 +14918,16 @@ button,
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.build-tag {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .mobile-header-right {

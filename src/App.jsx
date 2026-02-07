@@ -11416,6 +11416,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
           </div>
           <span className="mobile-header-title">
             {currentConversation?.title || selectedAgent?.name || 'Agent Me'}
+            <span className="build-tag">510a580</span>
           </span>
           <div className="mobile-header-right">
             <button
@@ -11988,9 +11989,11 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                         ? 'openrouter'
                         : selectedAgent.provider === 'lmstudio'
                           ? 'lmstudio'
-                          : selectedAgent.provider === 'mcp'
-                            ? 'mcp'
-                            : 'n8n'}
+                          : selectedAgent.provider === 'brainiac'
+                            ? 'brainiac'
+                            : selectedAgent.provider === 'mcp'
+                              ? 'mcp'
+                              : 'claw'}
                     </span>
                   </div>
                 </div>
