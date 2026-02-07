@@ -471,34 +471,30 @@ export default function AgentsPage({
                   <p className="agent-description">{agent.description}</p>
                   
                   <div className="agent-skills">
-                    {agent.skills.slice(0, 4).map(skill => (
+                    {agent.skills.slice(0, 3).map(skill => (
                       <span key={skill} className="agent-skill-tag">
                         {skill}
                       </span>
                     ))}
-                    {agent.skills.length > 4 && (
-                      <span className="agent-skill-more">+{agent.skills.length - 4}</span>
+                    {agent.skills.length > 3 && (
+                      <span className="agent-skill-more">+{agent.skills.length - 3}</span>
                     )}
                   </div>
                 </div>
 
                 <div className="agent-card-footer">
-                  <div className="agent-model">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/>
-                      <path d="M2 12l10 5 10-5"/>
-                    </svg>
-                    <span>{agent.defaultModel.split('/').pop().slice(0, 20)}</span>
-                  </div>
+                  {currentAgentId === agent.id && (
+                    <div className="agent-active-badge" title="Active">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                        <polyline points="20 6 9 17 4 12"/>
+                      </svg>
+                      <span>Active</span>
+                    </div>
+                  )}
                   <div className="agent-card-actions">
-                    {currentAgentId === agent.id && (
-                      <div className="agent-active-badge" title="Active">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                          <polyline points="20 6 9 17 4 12"/>
-                        </svg>
-                        <span>Active</span>
-                      </div>
-                    )}
+                    <span className="agent-toggle-text">
+                      {enabledAgentIds.includes(agent.id) ? 'On' : 'Off'}
+                    </span>
                     {/* Toggle for model selector visibility */}
                     <label 
                       className="agent-toggle-label"

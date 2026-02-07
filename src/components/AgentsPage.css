@@ -243,8 +243,8 @@
 
 .agents-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
   max-width: 1200px;
   margin: 0 auto;
 }
@@ -254,11 +254,13 @@
   position: relative;
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 16px;
-  padding: 20px;
+  border-radius: 14px;
+  padding: 14px;
   cursor: pointer;
   transition: all 0.2s ease;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .agent-card:hover {
@@ -284,16 +286,16 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 10px;
 }
 
 .agent-avatar {
-  width: 48px;
-  height: 48px;
+  width: 38px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 12px;
+  border-radius: 10px;
   transition: transform 0.2s ease;
 }
 
@@ -302,41 +304,43 @@
 }
 
 .agent-avatar svg {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
 }
 
 .agent-category-badge {
-  padding: 4px 10px;
-  border-radius: 12px;
-  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
 .agent-card-content {
-  margin-bottom: 16px;
+  margin-bottom: 10px;
+  flex: 1;
+  min-height: 0;
 }
 
 .agent-name {
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--text-primary);
-  margin: 0 0 4px;
+  margin: 0 0 2px;
 }
 
 .agent-specialty {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-secondary);
   font-weight: 500;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
 }
 
 .agent-description {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-muted);
-  line-height: 1.5;
+  line-height: 1.4;
   margin: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -347,22 +351,22 @@
 .agent-skills {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
+  gap: 4px;
+  margin-top: 8px;
 }
 
 .agent-skill-tag {
-  padding: 3px 8px;
+  padding: 2px 6px;
   background: rgba(255, 255, 255, 0.08);
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-secondary);
 }
 
 .agent-skill-more {
-  padding: 3px 8px;
+  padding: 2px 6px;
   background: transparent;
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-muted);
 }
 
@@ -370,18 +374,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding-top: 12px;
+  padding-top: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .agent-model {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-muted);
-  min-width: 0;
-  overflow: hidden;
+  display: none;
 }
 
 .agent-model span {
@@ -415,24 +413,31 @@
   flex-shrink: 0;
 }
 
-/* Hide "Active" text on cards to save space, show only icon */
+/* Compact active badge on cards */
 .agent-card .agent-active-badge {
-  padding: 4px;
-  border-radius: 50%;
-  width: 20px;
-  height: 20px;
-  justify-content: center;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-size: 10px;
 }
 
-.agent-card .agent-active-badge span {
-  display: none;
+.agent-card .agent-active-badge svg {
+  width: 10px;
+  height: 10px;
 }
 
 .agent-card-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   flex-shrink: 0;
+  margin-left: auto;
+}
+
+.agent-toggle-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  user-select: none;
 }
 
 /* Toggle Switch */
@@ -448,15 +453,17 @@
   opacity: 0;
   width: 0;
   height: 0;
+  position: absolute;
 }
 
 .agent-toggle-slider {
   position: relative;
-  width: 36px;
-  height: 20px;
+  width: 44px;
+  height: 26px;
   background: rgba(255, 255, 255, 0.15);
-  border-radius: 20px;
-  transition: background 0.2s ease;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-radius: 26px;
+  transition: background 0.2s ease, border-color 0.2s ease;
   flex-shrink: 0;
 }
 
@@ -465,19 +472,21 @@
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   background: white;
   border-radius: 50%;
   transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
 .agent-toggle-label input:checked + .agent-toggle-slider {
   background: var(--accent-color);
+  border-color: var(--accent-color);
 }
 
 .agent-toggle-label input:checked + .agent-toggle-slider::before {
-  transform: translateX(16px);
+  transform: translateX(18px);
 }
 
 .agent-toggle-label.large {
@@ -898,8 +907,8 @@
   }
   
   .agents-grid {
-    grid-template-columns: 1fr;
-    gap: 16px;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
     padding: 0;
   }
   
@@ -914,6 +923,50 @@
   
   .agent-model-config {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .agents-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+
+  .agent-card {
+    padding: 10px;
+    border-radius: 12px;
+  }
+
+  .agent-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+
+  .agent-avatar svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .agent-name {
+    font-size: 13px;
+  }
+
+  .agent-specialty {
+    font-size: 11px;
+  }
+
+  .agent-description {
+    display: none;
+  }
+
+  .agent-skills {
+    display: none;
+  }
+
+  .agent-category-badge {
+    font-size: 9px;
+    padding: 2px 6px;
   }
 }
 

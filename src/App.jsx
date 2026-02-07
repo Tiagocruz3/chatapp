@@ -4090,6 +4090,7 @@ Respond ONLY with valid JSON, no other text.`
           provider: 'brainiac',
           baseUrl: brainiacBaseUrl,
           apiKey: brainiacApiKey,
+          model: 'openrouter/gpt-4.1',
           systemPrompt: 'You are a helpful assistant.',
           temperature: 0.7,
         }]
