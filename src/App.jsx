@@ -12466,7 +12466,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                                     ? 'brainiac'
                                     : selectedAgent.provider === 'mcp'
                                       ? 'mcp'
-                                      : 'n8n'}
+                                      : 'claw'}
                           </span>
                         )}
                         <svg className="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -15776,7 +15776,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                           >
                             <span className="coder-model-option-name">{agent.name}</span>
                             <span className={`coder-model-option-badge ${agent.provider}`}>
-                              {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'brainiac' ? 'brainiac' : agent.mcpServerId ? 'mcp' : 'n8n'}
+                              {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'brainiac' ? 'brainiac' : agent.mcpServerId ? 'mcp' : 'claw'}
                             </span>
                           </button>
                         ))
@@ -17582,7 +17582,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                             >
                               <span className="model-option-name">{agent.name}</span>
                               <span className="model-option-badge">
-                                {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'brainiac' ? 'brainiac' : agent.provider === 'mcp' ? 'mcp' : 'n8n'}
+                                {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'brainiac' ? 'brainiac' : agent.provider === 'mcp' ? 'mcp' : 'claw'}
                               </span>
                             </button>
                           ))}
