@@ -491,8 +491,8 @@
 .create-project-modal {
   width: 480px;
   max-width: calc(100vw - 32px);
-  background: #1a1a1a;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
   border-radius: 16px;
   overflow: hidden;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
@@ -1388,12 +1388,12 @@
   top: 100%;
   right: 8px;
   z-index: 9999;
-  background: #1e1e1e;
-  border: 1px solid #3a3a3a;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   min-width: 180px;
   max-width: 220px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   animation: dropdownFadeIn 0.15s ease;
 }
@@ -4528,12 +4528,12 @@ button,
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
-  background-color: #2a2a2a;
+  background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 6px;
   min-width: 220px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   animation: dropdownIn 0.1s var(--ease-out-fast);
   z-index: 9999;
 }
@@ -4882,7 +4882,7 @@ button,
   position: absolute;
   bottom: calc(100% + 8px);
   left: 0;
-  background-color: #1e1e1e;
+  background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 8px;
@@ -5016,7 +5016,7 @@ button,
   display: flex;
   align-items: center;
   gap: 10px;
-  background-color: #2a2a2a;
+  background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   padding: 8px 10px;
@@ -5209,7 +5209,7 @@ button,
 }
 
 .upload-modal {
-  background-color: #1e1e1e;
+  background-color: var(--main-bg);
   border: 1px solid var(--border-color);
   border-radius: 16px;
   width: 100%;
@@ -5340,7 +5340,7 @@ button,
 .upload-browse-btn {
   margin-top: 16px;
   padding: 10px 20px;
-  background-color: #2a2a2a;
+  background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
@@ -5351,8 +5351,8 @@ button,
 }
 
 .upload-browse-btn:hover {
-  background-color: #333;
-  border-color: #444;
+  background-color: var(--hover-bg);
+  border-color: var(--border-hover);
 }
 
 .upload-files-list {
@@ -5402,7 +5402,7 @@ button,
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  background-color: #2a2a2a;
+  background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 10px;
   position: relative;
@@ -5410,7 +5410,7 @@ button,
 }
 
 .upload-file-item:hover {
-  border-color: #444;
+  border-color: var(--border-hover);
 }
 
 .upload-file-preview {
@@ -5420,7 +5420,7 @@ button,
   align-items: center;
   justify-content: center;
   border-radius: 6px;
-  background-color: #1a1a1a;
+  background-color: var(--code-bg);
   overflow: hidden;
 }
 
@@ -5604,7 +5604,7 @@ button,
 }
 
 .profile-modal {
-  background-color: #1e1e1e;
+  background-color: var(--main-bg);
   border: 1px solid var(--border-color);
   border-radius: 16px;
   width: 100%;
@@ -5855,7 +5855,7 @@ button,
 }
 
 .settings-modal {
-  background-color: #1e1e1e;
+  background-color: var(--main-bg);
   border: 1px solid var(--border-color);
   border-radius: 16px;
   width: 100%;
@@ -5949,7 +5949,7 @@ button,
 
 .settings-input-group input {
   padding: 12px 16px;
-  background-color: #2a2a2a;
+  background-color: var(--input-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
@@ -6008,7 +6008,7 @@ button,
   justify-content: center;
   gap: 8px;
   padding: 12px 20px;
-  background-color: #2a2a2a;
+  background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
@@ -6080,7 +6080,7 @@ button,
   display: block;
   margin-top: 8px;
   padding: 10px 12px;
-  background-color: #1a1a1a;
+  background-color: var(--code-bg);
   border-radius: 6px;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
   font-size: 11px;
@@ -6096,7 +6096,7 @@ button,
   justify-content: space-between;
   gap: 12px;
   padding: 16px 18px;
-  background-color: #2a2a2a;
+  background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 12px;
 }
@@ -6228,7 +6228,7 @@ button,
   flex-direction: column;
   gap: 16px;
   padding: 20px;
-  background-color: #2a2a2a;
+  background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 12px;
 }
@@ -6248,7 +6248,7 @@ button,
 .settings-form-row input,
 .settings-form-row textarea {
   padding: 12px 14px;
-  background-color: #1a1a1a;
+  background-color: var(--input-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
@@ -6315,7 +6315,7 @@ button,
 .settings-cancel-btn {
   padding: 12px 20px;
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-secondary);
   font-size: 14px;
@@ -6325,8 +6325,8 @@ button,
 }
 
 .settings-cancel-btn:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--hover-bg);
+  border-color: var(--border-hover);
   color: var(--text-primary);
 }
 
@@ -6411,7 +6411,7 @@ button,
 .agents-count {
   font-size: 12px;
   color: var(--text-muted);
-  background-color: #2a2a2a;
+  background-color: var(--hover-bg);
   padding: 4px 10px;
   border-radius: 12px;
 }
@@ -6427,14 +6427,14 @@ button,
   align-items: flex-start;
   justify-content: space-between;
   padding: 16px;
-  background-color: #2a2a2a;
+  background-color: var(--card-bg);
   border: 1px solid var(--border-color);
   border-radius: 12px;
   transition: border-color 0.15s;
 }
 
 .agent-card:hover {
-  border-color: #444;
+  border-color: var(--border-hover);
 }
 
 .agent-info {
@@ -7053,7 +7053,7 @@ button,
 
 .settings-form-row select {
   padding: 12px 14px;
-  background-color: #2a2a2a;
+  background-color: var(--input-bg);
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
@@ -7366,7 +7366,7 @@ button,
   margin: 12px 0;
   border-radius: 6px;
   overflow: hidden;
-  background: #1e1e1e;
+  background: var(--code-bg);
 }
 
 
@@ -7375,8 +7375,8 @@ button,
   align-items: center;
   justify-content: space-between;
   padding: 2px 10px;
-  background: #2a2a2a;
-  border-bottom: 1px solid #333;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .formatted-response .code-block-lang {
@@ -7780,11 +7780,11 @@ button,
 .artifact-preview {
   margin: 0;
   padding: 12px;
-  background: #1a1a1a;
+  background: var(--code-bg);
   font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
   font-size: 11px;
   line-height: 1.4;
-  color: #888;
+  color: var(--text-secondary);
   max-height: 100px;
   overflow: hidden;
   border-top: 1px solid var(--border-color);
@@ -8521,17 +8521,18 @@ button,
 }
 
 .formatted-response pre {
-  background: #1e1e1e;
+  background: var(--code-bg);
   padding: 12px;
   margin: 0;
   overflow-x: auto;
+  border-radius: 8px;
 }
 
 .formatted-response code {
   font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
   font-size: 12px;
   line-height: 1.5;
-  color: #d4d4d4;
+  color: var(--code-text);
 }
 
 /* Syntax highlighting tokens */
@@ -8830,8 +8831,8 @@ button,
   right: 0;
   width: 0;
   height: 100vh;
-  background: #0a0a0a;
-  border-left: 1px solid #2a2a2a;
+  background: var(--main-bg);
+  border-left: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   z-index: 1000;
@@ -8856,8 +8857,8 @@ button,
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  background: #151515;
-  border-bottom: 1px solid #2a2a2a;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
@@ -8865,25 +8866,25 @@ button,
   display: flex;
   gap: 6px;
   padding: 10px 12px;
-  background: #0f0f0f;
-  border-bottom: 1px solid #2a2a2a;
+  background: var(--hover-bg);
+  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
 .code-canvas-tab {
   padding: 6px 10px;
   background: transparent;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  color: #9a9a9a;
+  color: var(--text-secondary);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.08s var(--ease-out-fast);
 }
 
 .code-canvas-tab:hover {
-  color: #e5e5e5;
-  border-color: #3a3a3a;
+  color: var(--text-primary);
+  border-color: var(--border-hover);
 }
 
 .code-canvas-tab.active {
@@ -8910,8 +8911,8 @@ button,
 .code-canvas-lang {
   font-size: 11px;
   font-weight: 500;
-  color: #888;
-  background: #2a2a2a;
+  color: var(--text-secondary);
+  background: var(--hover-bg);
   padding: 2px 8px;
   border-radius: 4px;
   text-transform: lowercase;
@@ -9053,9 +9054,9 @@ button,
   width: 95%;
   height: 95%;
   max-width: 1400px;
-  background: #0a0a0a;
+  background: var(--main-bg);
   border-radius: 12px;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -9078,8 +9079,8 @@ button,
   align-items: center;
   justify-content: space-between;
   padding: 12px 20px;
-  background: #151515;
-  border-bottom: 1px solid #2a2a2a;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
 }
 
@@ -9101,8 +9102,8 @@ button,
 .preview-modal-lang {
   font-size: 11px;
   font-weight: 500;
-  color: #888;
-  background: #2a2a2a;
+  color: var(--text-secondary);
+  background: var(--hover-bg);
   padding: 2px 8px;
   border-radius: 4px;
   text-transform: lowercase;
@@ -10637,10 +10638,10 @@ button,
   margin-top: 4px;
   min-width: 200px;
   max-width: 280px;
-  background: #1e1e1e;
-  border: 1px solid #3a3a3a;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
   border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-lg);
   z-index: 9999;
   overflow: hidden;
   animation: none;

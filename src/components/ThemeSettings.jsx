@@ -35,7 +35,7 @@ export default function ThemeSettings({ showToast }) {
       <div className="settings-page-section">
         <h2 className="settings-section-title">Appearance</h2>
         <p className="settings-section-description">
-          Customize the look and feel of your chat interface
+          Customise the look and feel of your chat interface
         </p>
 
         {/* Theme Mode Selection */}
@@ -113,7 +113,7 @@ export default function ThemeSettings({ showToast }) {
 
         {/* Accent Color Selection */}
         <div className="theme-color-section">
-          <h3 className="theme-subsection-title">Accent Color</h3>
+          <h3 className="theme-subsection-title">Accent Colour</h3>
           <div className="theme-color-options">
             {Object.entries(THEME_COLORS).map(([key, color]) => (
               <button
@@ -139,7 +139,7 @@ export default function ThemeSettings({ showToast }) {
             ))}
           </div>
           <p className="theme-color-hint">
-            Choose your preferred accent color for buttons, links, and highlights
+            Choose your preferred accent colour for buttons, links, and highlights
           </p>
         </div>
 
@@ -150,7 +150,7 @@ export default function ThemeSettings({ showToast }) {
             <span className="summary-value">{getThemeLabel(currentTheme)}</span>
           </div>
           <div className="theme-summary-item">
-            <span className="summary-label">Accent Color:</span>
+            <span className="summary-label">Accent Colour:</span>
             <span 
               className="summary-color-dot" 
               style={{ background: THEME_COLORS[currentColor]?.primary }}

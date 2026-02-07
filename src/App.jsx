@@ -9780,8 +9780,8 @@ else console.log('Deleted successfully')`
       
       const fileCount = results.length
       const header = fileCount === 1 
-        ? `📎 **Document Analyzed**` 
-        : `📎 **${fileCount} Documents Analyzed**`
+        ? `📎 **Document Analysed**` 
+        : `📎 **${fileCount} Documents Analysed**`
       
       const sections = results.map((r) => {
         const lines = []
