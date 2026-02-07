@@ -467,7 +467,7 @@ export default function AgentsPage({
                       <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/>
                       <path d="M2 12l10 5 10-5"/>
                     </svg>
-                    {agent.defaultModel.split('/').pop().slice(0, 20)}
+                    <span>{agent.defaultModel.split('/').pop().slice(0, 20)}</span>
                   </div>
                   <div className="agent-card-actions">
                     {currentAgentId === agent.id && (
