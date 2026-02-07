@@ -2006,6 +2006,39 @@ function App() {
   const agentsLoadedRef = useRef(false)
   const agentsSyncTimeoutRef = useRef(null)
 
+  // Brainiac (OpenAI-compatible) config
+  const [brainiacBaseUrl, setBrainiacBaseUrl] = useState(() => {
+    return localStorage.getItem('brainiacBaseUrl') || 'https://brainbot.capsulerelay.com/v1'
+  })
+  const [brainiacApiKey, setBrainiacApiKey] = useState(() => {
+    return localStorage.getItem('brainiacApiKey') || '0c35bae24ee3c00fc05f16408a79a296c663cbd85e36473b'
+  })
+  const [brainiacEndpoint, setBrainiacEndpoint] = useState(() => {
+    return localStorage.getItem('brainiacEndpoint') || '/responses'
+  })
+  const [brainiacConnectState, setBrainiacConnectState] = useState(() => {
+    return localStorage.getItem('brainiacConnectState') || 'disconnected'
+  })
+  const [brainiacConnectError, setBrainiacConnectError] = useState('')
+  const [brainiacModels, setBrainiacModels] = useState(() => {
+    const saved = localStorage.getItem('brainiacModels')
+    if (!saved) return []
+    try {
+      const parsed = JSON.parse(saved)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  })
+  const [brainiacModelFilter, setBrainiacModelFilter] = useState('')
+  const [brainiacAgents, setBrainiacAgents] = useState([])
+  const [newBrainiacAgent, setNewBrainiacAgent] = useState({
+    name: '',
+    model: '',
+    systemPrompt: 'You are a helpful assistant.',
+    temperature: 0.7,
+  })
+
   // Embeddings / RAG config
   const OPENAI_EMBEDDINGS_MODEL = 'text-embedding-3-small'
   // NOTE: Vite env vars (VITE_*) are bundled into the client and are not secret.
@@ -3890,6 +3923,46 @@ Respond ONLY with valid JSON, no other text.`
     if (!authUser?.id) return
     localStorage.setItem(`lmStudioAgents_${authUser.id}`, JSON.stringify(lmStudioAgents))
   }, [lmStudioAgents, authUser?.id, dbEnabled])
+
+  // Persist Brainiac settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('brainiacBaseUrl', brainiacBaseUrl)
+  }, [brainiacBaseUrl])
+
+  useEffect(() => {
+    localStorage.setItem('brainiacApiKey', brainiacApiKey)
+  }, [brainiacApiKey])
+
+  useEffect(() => {
+    localStorage.setItem('brainiacEndpoint', brainiacEndpoint)
+  }, [brainiacEndpoint])
+
+  useEffect(() => {
+    localStorage.setItem('brainiacConnectState', brainiacConnectState)
+  }, [brainiacConnectState])
+
+  useEffect(() => {
+    localStorage.setItem('brainiacModels', JSON.stringify(brainiacModels))
+  }, [brainiacModels])
+
+  // Load brainiacAgents from localStorage only when DB disabled
+  useEffect(() => {
+    if (dbEnabled) return
+    if (!authUser?.id) {
+      setBrainiacAgents([])
+      return
+    }
+    const key = `brainiacAgents_${authUser.id}`
+    const saved = localStorage.getItem(key)
+    setBrainiacAgents(saved ? JSON.parse(saved) : [])
+  }, [authUser?.id, dbEnabled])
+
+  // Save brainiacAgents to localStorage only when DB disabled
+  useEffect(() => {
+    if (dbEnabled) return
+    if (!authUser?.id) return
+    localStorage.setItem(`brainiacAgents_${authUser.id}`, JSON.stringify(brainiacAgents))
+  }, [brainiacAgents, authUser?.id, dbEnabled])
 
   useEffect(() => {
     localStorage.setItem('openRouterModels', JSON.stringify(openRouterModels))
@@ -5847,6 +5920,61 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     setLmStudioConnectState('disconnected')
     setLmStudioConnectError('')
     // keep models cached
+  }
+
+  const connectBrainiac = async () => {
+    const base = brainiacBaseUrl.trim()
+    if (!base) {
+      showToast('Set your Brainiac base URL first')
+      return
+    }
+    setBrainiacConnectError('')
+    setBrainiacConnectState('connecting')
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${brainiacApiKey.trim()}`
+      }
+
+      // Test connection by calling the /responses endpoint with a simple request
+      const testResp = await fetch(`${base}${brainiacEndpoint}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: 'openrouter/gpt-4.1',
+          input: 'Hello',
+        }),
+      })
+      
+      if (!testResp.ok) {
+        const errorText = await testResp.text()
+        throw new Error(`Brainiac connection failed (${testResp.status}): ${errorText}`)
+      }
+
+      const responseData = await testResp.json()
+      
+      // Store a default model list based on what the endpoint supports
+      // The actual models depend on what the relay supports
+      setBrainiacModels([
+        { id: 'openrouter/gpt-4.1', name: 'GPT-4.1' },
+        { id: 'openrouter/gpt-4o', name: 'GPT-4o' },
+        { id: 'openrouter/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
+        { id: 'openrouter/gemini-pro', name: 'Gemini Pro' },
+      ])
+
+      setBrainiacConnectState('connected')
+      showToast('Connected to Brainiac successfully.')
+    } catch (e) {
+      console.error(e)
+      setBrainiacConnectState('error')
+      setBrainiacConnectError(e.message || 'Failed to connect')
+      showToast('Brainiac connection failed')
+    }
+  }
+
+  const disconnectBrainiac = () => {
+    setBrainiacConnectState('disconnected')
+    setBrainiacConnectError('')
   }
 
   const addLmStudioModelAsAgent = (modelId) => {
@@ -12675,6 +12803,12 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                 LM Studio
               </button>
               <button
+                className={`settings-tab ${settingsTab === 'brainiac' ? 'active' : ''}`}
+                onClick={() => setSettingsTab('brainiac')}
+              >
+                Brainiac
+              </button>
+              <button
                 className={`settings-tab ${settingsTab === 'embeddings' ? 'active' : ''}`}
                 onClick={() => setSettingsTab('embeddings')}
               >
@@ -13504,6 +13638,114 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                     </div>
               </section>
                 )}
+              </div>
+            )}
+
+            {settingsTab === 'brainiac' && (
+              <div className="settings-tab-panel">
+                <section className="settings-page-section">
+                  <h2>Brainiac (OpenAI-Compatible)</h2>
+                  <p className="settings-page-description">
+                    Connect to Brainiac relay for OpenAI-compatible API access.
+                    Uses the <code>/responses</code> endpoint for chat completions.
+                  </p>
+                  <div className="settings-input-group">
+                    <label htmlFor="brainiac-url">Base URL</label>
+                    <input
+                      id="brainiac-url"
+                      type="text"
+                      value={brainiacBaseUrl}
+                      onChange={(e) => setBrainiacBaseUrl(e.target.value)}
+                      placeholder="https://brainbot.capsulerelay.com/v1"
+                    />
+                    <span className="settings-form-hint">
+                      Example: <code>https://brainbot.capsulerelay.com/v1</code>
+                    </span>
+
+                    <label htmlFor="brainiac-endpoint" style={{ marginTop: 12 }}>Endpoint</label>
+                    <input
+                      id="brainiac-endpoint"
+                      type="text"
+                      value={brainiacEndpoint}
+                      onChange={(e) => setBrainiacEndpoint(e.target.value)}
+                      placeholder="/responses"
+                    />
+                    <span className="settings-form-hint">
+                      The API endpoint path, e.g., <code>/responses</code> or <code>/chat/completions</code>
+                    </span>
+
+                    <label htmlFor="brainiac-key" style={{ marginTop: 12 }}>API Key</label>
+                    <input
+                      id="brainiac-key"
+                      type="password"
+                      value={brainiacApiKey}
+                      onChange={(e) => setBrainiacApiKey(e.target.value)}
+                      placeholder="Bearer token..."
+                    />
+
+                    <div className="openrouter-connect-row" style={{ marginTop: 12 }}>
+                      <div className={`openrouter-status ${brainiacConnectState}`}>
+                        <span className="openrouter-status-dot" />
+                        <span className="openrouter-status-text">
+                          {brainiacConnectState === 'connected'
+                            ? `Connected • ${brainiacModels.length} models`
+                            : brainiacConnectState === 'connecting'
+                              ? 'Connecting...'
+                              : brainiacConnectState === 'error'
+                                ? 'Error'
+                                : 'Disconnected'}
+                        </span>
+                      </div>
+                      <div className="openrouter-connect-actions">
+                        <button
+                          className="settings-test-btn"
+                          type="button"
+                          onClick={connectBrainiac}
+                          disabled={brainiacConnectState === 'connecting' || !brainiacBaseUrl.trim()}
+                          title="Test connection to Brainiac"
+                        >
+                          {brainiacConnectState === 'connecting' ? 'Connecting...' : 'Connect'}
+                        </button>
+                        {brainiacConnectState === 'connected' && (
+                          <button className="settings-clear-error-btn" type="button" onClick={disconnectBrainiac}>
+                            Disconnect
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {brainiacConnectError && (
+                      <div className="settings-error-message" style={{ marginTop: 12 }}>
+                        {brainiacConnectError}
+                      </div>
+                    )}
+                    <div className="settings-help-text">
+                      <strong>Security:</strong><br/>
+                      These credentials are stored locally in your browser only (localStorage).
+                    </div>
+                  </div>
+                </section>
+
+                <section className="settings-page-section">
+                  <h2>Available Models</h2>
+                  <p className="settings-page-description">
+                    Models available through the Brainiac relay.
+                  </p>
+                  {brainiacConnectState === 'connected' ? (
+                    <div className="lmstudio-model-list">
+                      {brainiacModels.map((model) => (
+                        <div key={model.id} className="lmstudio-model-item">
+                          <span className="lmstudio-model-name">{model.name}</span>
+                          <code className="lmstudio-model-id">{model.id}</code>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="settings-help-text">
+                      Connect to Brainiac first to see available models.
+                    </div>
+                  )}
+                </section>
               </div>
             )}
 
