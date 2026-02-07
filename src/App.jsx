@@ -5937,7 +5937,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
       }
 
       // Test connection by calling the /responses endpoint with a simple request
-      const testResp = await fetch(`${base}${brainiacEndpoint}`, {
+      const testResp = await fetch(`/api/brainiac?base=${encodeURIComponent(base)}&endpoint=${encodeURIComponent(brainiacEndpoint)}`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
