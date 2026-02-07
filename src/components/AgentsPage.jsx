@@ -8,6 +8,7 @@ import {
   getEnabledAgentsInSelector,
   toggleAgentInSelector,
   enableAllAgentsInSelector,
+  disableAllAgentsInSelector,
   getEnabledAgentCount
 } from '../lib/agentRegistry';
 import './AgentsPage.css';
@@ -290,6 +291,12 @@ export default function AgentsPage({
     showToast?.('All agents enabled in model selector');
   };
 
+  const handleDisableAll = () => {
+    disableAllAgentsInSelector();
+    setEnabledAgentIds(getEnabledAgentsInSelector());
+    showToast?.('All agents disabled in model selector');
+  };
+
   const handleSelectAgent = (agent) => {
     onSelectAgent(agent);
     showToast?.(`Switched to ${agent.displayName}`);
@@ -337,6 +344,20 @@ export default function AgentsPage({
                     <path d="M12 2v20M2 12h20"/>
                   </svg>
                   Enable All
+                </button>
+              )}
+
+              {/* Disable All button */}
+              {enabledCount > 0 && (
+                <button 
+                  className="agents-disable-all-btn"
+                  onClick={handleDisableAll}
+                  title="Disable all agents in model selector"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M18 6 6 18M6 6l12 12"/>
+                  </svg>
+                  Disable All
                 </button>
               )}
               

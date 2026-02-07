@@ -1850,6 +1850,13 @@ export function enableAllAgentsInSelector() {
 }
 
 /**
+ * Disable all agents for the model selector
+ */
+export function disableAllAgentsInSelector() {
+  setEnabledAgentsInSelector([]);
+}
+
+/**
  * Disable all agents except one for the model selector
  */
 export function disableAllAgentsExcept(agentId) {
