@@ -399,23 +399,39 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
+  padding: 4px 6px;
   background: rgba(16, 185, 129, 0.15);
   border-radius: 12px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   color: #10b981;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .agent-active-badge svg {
-  width: 12px;
-  height: 12px;
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+/* Hide "Active" text on cards to save space, show only icon */
+.agent-card .agent-active-badge {
+  padding: 4px;
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  justify-content: center;
+}
+
+.agent-card .agent-active-badge span {
+  display: none;
 }
 
 .agent-card-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 

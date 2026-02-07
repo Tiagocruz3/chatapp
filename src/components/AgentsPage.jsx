@@ -492,11 +492,11 @@ export default function AgentsPage({
                   </div>
                   <div className="agent-card-actions">
                     {currentAgentId === agent.id && (
-                      <div className="agent-active-badge">
+                      <div className="agent-active-badge" title="Active">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                           <polyline points="20 6 9 17 4 12"/>
                         </svg>
-                        Active
+                        <span>Active</span>
                       </div>
                     )}
                     {/* Toggle for model selector visibility */}
