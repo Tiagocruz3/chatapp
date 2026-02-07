@@ -404,6 +404,131 @@
   height: 12px;
 }
 
+.agent-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Toggle Switch */
+.agent-toggle-label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  gap: 8px;
+}
+
+.agent-toggle-label input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.agent-toggle-slider {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 20px;
+  transition: background 0.2s ease;
+  flex-shrink: 0;
+}
+
+.agent-toggle-slider::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.agent-toggle-label input:checked + .agent-toggle-slider {
+  background: var(--accent-color);
+}
+
+.agent-toggle-label input:checked + .agent-toggle-slider::before {
+  transform: translateX(16px);
+}
+
+.agent-toggle-label.large {
+  width: 100%;
+  justify-content: space-between;
+}
+
+.agent-toggle-label.large .agent-toggle-slider {
+  width: 44px;
+  height: 24px;
+}
+
+.agent-toggle-label.large .agent-toggle-slider::before {
+  width: 20px;
+  height: 20px;
+}
+
+.agent-toggle-label.large input:checked + .agent-toggle-slider::before {
+  transform: translateX(20px);
+}
+
+.toggle-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* Enable All Button */
+.agents-enable-all-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: 8px;
+  color: #10b981;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.agents-enable-all-btn:hover {
+  background: rgba(16, 185, 129, 0.25);
+}
+
+.agents-enable-all-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Visibility Section */
+.agent-visibility-section {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.agent-visibility-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.visibility-info {
+  margin-bottom: 4px;
+}
+
+.visibility-description {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
 /* Empty State */
 .agents-empty {
   display: flex;

@@ -8,7 +8,13 @@ import mammoth from 'mammoth/mammoth.browser'
 import { WebContainer } from '@webcontainer/api'
 
 // Agent Registry and Components
-import { AGENTS, getAgentById, getDefaultAgent } from './lib/agentRegistry'
+import { 
+  AGENTS, 
+  getAgentById, 
+  getDefaultAgent,
+  getEnabledAgentsInSelector,
+  getAgentsForModelSelector
+} from './lib/agentRegistry'
 import AgentsPage from './components/AgentsPage'
 
 // pdf.js worker config (Vite)
@@ -12418,27 +12424,31 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                       </div>
                       {showAgentSelector && (
                         <div className="model-dropdown">
-                          {/* Persona Agents Section */}
-                          {allAgents.filter(a => a.provider === 'persona').length > 0 && (
-                            <>
-                              <div className="model-dropdown-section">AI Agents</div>
-                              {allAgents.filter(a => a.provider === 'persona').map(agent => (
-                                <button 
-                                  key={agent.id}
-                                  className={`model-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
-                                  onClick={() => {
-                                    setSelectedAgent(agent)
-                                    setSelectedPersonaAgent(AGENTS.find(a => a.id === agent.personaId))
-                                    setShowAgentSelector(false)
-                                  }}
-                                >
-                                  <span className="model-option-name">{agent.name}</span>
-                                  <span className="model-option-badge persona">{agent.specialty}</span>
-                                </button>
-                              ))}
-                              <div className="model-dropdown-divider" />
-                            </>
-                          )}
+                          {/* Persona Agents Section - Filtered by enabled status */}
+                          {(() => {
+                            const enabledIds = getEnabledAgentsInSelector();
+                            const visiblePersonas = allAgents.filter(a => a.provider === 'persona' && enabledIds.includes(a.personaId));
+                            return visiblePersonas.length > 0 && (
+                              <>
+                                <div className="model-dropdown-section">AI Agents</div>
+                                {visiblePersonas.map(agent => (
+                                  <button 
+                                    key={agent.id}
+                                    className={`model-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+                                    onClick={() => {
+                                      setSelectedAgent(agent)
+                                      setSelectedPersonaAgent(AGENTS.find(a => a.id === agent.personaId))
+                                      setShowAgentSelector(false)
+                                    }}
+                                  >
+                                    <span className="model-option-name">{agent.name}</span>
+                                    <span className="model-option-badge persona">{agent.specialty}</span>
+                                  </button>
+                                ))}
+                                <div className="model-dropdown-divider" />
+                              </>
+                            );
+                          })()}
                           
                           {/* Custom Agents Section */}
                           {allAgents.filter(a => a.provider !== 'persona').map(agent => (
@@ -12462,11 +12472,19 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                               </span>
                             </button>
                           ))}
-                          {allAgents.length === 0 && (
-                            <div className="model-option-empty">
-                              No agents available. Go to Settings to add agents or browse AI Agents.
-                            </div>
-                          )}
+                          {(() => {
+                            const enabledIds = getEnabledAgentsInSelector();
+                            const visiblePersonas = allAgents.filter(a => a.provider === 'persona' && enabledIds.includes(a.personaId));
+                            const customAgents = allAgents.filter(a => a.provider !== 'persona');
+                            if (visiblePersonas.length === 0 && customAgents.length === 0) {
+                              return (
+                                <div className="model-option-empty">
+                                  No agents available. Go to Agents page to enable some.
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       )}
                     </div>

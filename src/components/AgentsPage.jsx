@@ -4,7 +4,11 @@ import {
   AGENT_SPECIALTIES, 
   searchAgents, 
   getCategoriesWithCounts,
-  getAllSkills 
+  getAllSkills,
+  getEnabledAgentsInSelector,
+  toggleAgentInSelector,
+  enableAllAgentsInSelector,
+  getEnabledAgentCount
 } from '../lib/agentRegistry';
 import './AgentsPage.css';
 
@@ -231,6 +235,9 @@ export default function AgentsPage({
   const [selectedAgent, setSelectedAgent] = useState(null);
   const [showPromptPreview, setShowPromptPreview] = useState(false);
   const [sortBy, setSortBy] = useState('name'); // 'name', 'category'
+  
+  // Track which agents are enabled for the model selector
+  const [enabledAgentIds, setEnabledAgentIds] = useState(() => getEnabledAgentsInSelector());
 
   // Get filtered and sorted agents
   const filteredAgents = useMemo(() => {
@@ -262,6 +269,26 @@ export default function AgentsPage({
 
   const categories = useMemo(() => getCategoriesWithCounts(), []);
   const allSkills = useMemo(() => getAllSkills(), []);
+  const enabledCount = useMemo(() => enabledAgentIds.length, [enabledAgentIds]);
+  
+  const handleToggleAgent = (agentId, e) => {
+    e?.stopPropagation();
+    const newEnabledState = toggleAgentInSelector(agentId);
+    setEnabledAgentIds(getEnabledAgentsInSelector());
+    
+    const agent = AGENTS.find(a => a.id === agentId);
+    if (newEnabledState) {
+      showToast?.(`${agent?.displayName} enabled in model selector`);
+    } else {
+      showToast?.(`${agent?.displayName} hidden from model selector`);
+    }
+  };
+  
+  const handleEnableAll = () => {
+    enableAllAgentsInSelector();
+    setEnabledAgentIds(getEnabledAgentsInSelector());
+    showToast?.('All agents enabled in model selector');
+  };
 
   const handleSelectAgent = (agent) => {
     onSelectAgent(agent);
@@ -293,10 +320,26 @@ export default function AgentsPage({
             
             <div className="agents-title-section">
               <h1>AI Agents</h1>
-              <p className="agents-subtitle">30 specialized assistants for every task</p>
+              <p className="agents-subtitle">
+                {enabledCount} of {AGENTS.length} visible in model selector
+              </p>
             </div>
 
             <div className="agents-header-actions">
+              {/* Enable All button */}
+              {enabledCount < AGENTS.length && (
+                <button 
+                  className="agents-enable-all-btn"
+                  onClick={handleEnableAll}
+                  title="Enable all agents in model selector"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 2v20M2 12h20"/>
+                  </svg>
+                  Enable All
+                </button>
+              )}
+              
               {/* Sort dropdown */}
               <select 
                 className="agents-sort-select"
@@ -426,14 +469,29 @@ export default function AgentsPage({
                     </svg>
                     {agent.defaultModel.split('/').pop().slice(0, 20)}
                   </div>
-                  {currentAgentId === agent.id && (
-                    <div className="agent-active-badge">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                        <polyline points="20 6 9 17 4 12"/>
-                      </svg>
-                      Active
-                    </div>
-                  )}
+                  <div className="agent-card-actions">
+                    {currentAgentId === agent.id && (
+                      <div className="agent-active-badge">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                          <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                        Active
+                      </div>
+                    )}
+                    {/* Toggle for model selector visibility */}
+                    <label 
+                      className="agent-toggle-label"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Show in model selector"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={enabledAgentIds.includes(agent.id)}
+                        onChange={(e) => handleToggleAgent(agent.id, e)}
+                      />
+                      <span className="agent-toggle-slider"></span>
+                    </label>
+                  </div>
                 </div>
               </div>
             ))}
@@ -532,6 +590,29 @@ export default function AgentsPage({
                 {showPromptPreview && (
                   <pre className="prompt-preview">{selectedAgent.systemPrompt}</pre>
                 )}
+              </div>
+              
+              {/* Model Selector Visibility Toggle */}
+              <div className="agent-detail-section agent-visibility-section">
+                <h4>Model Selector Visibility</h4>
+                <div className="agent-visibility-toggle">
+                  <div className="visibility-info">
+                    <p className="visibility-description">
+                      When enabled, this agent appears in the chat model selector dropdown for quick access.
+                    </p>
+                  </div>
+                  <label className="agent-toggle-label large">
+                    <input
+                      type="checkbox"
+                      checked={enabledAgentIds.includes(selectedAgent.id)}
+                      onChange={(e) => handleToggleAgent(selectedAgent.id, e)}
+                    />
+                    <span className="agent-toggle-slider"></span>
+                    <span className="toggle-text">
+                      {enabledAgentIds.includes(selectedAgent.id) ? 'Visible in selector' : 'Hidden from selector'}
+                    </span>
+                  </label>
+                </div>
               </div>
             </div>
 

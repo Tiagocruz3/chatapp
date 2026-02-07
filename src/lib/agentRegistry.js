@@ -1782,4 +1782,93 @@ export function getCategoriesWithCounts() {
   }));
 }
 
+// ==================== ENABLED AGENTS FOR MODEL SELECTOR ====================
+
+const ENABLED_AGENTS_KEY = 'enabledAgentsInSelector';
+
+/**
+ * Get list of agent IDs enabled for the model selector
+ * By default, all agents are enabled
+ */
+export function getEnabledAgentsInSelector() {
+  try {
+    const saved = localStorage.getItem(ENABLED_AGENTS_KEY);
+    if (saved) {
+      return JSON.parse(saved);
+    }
+  } catch (e) {
+    console.error('Error loading enabled agents:', e);
+  }
+  // Default: all agents enabled
+  return AGENTS.map(a => a.id);
+}
+
+/**
+ * Save list of agent IDs enabled for the model selector
+ */
+export function setEnabledAgentsInSelector(agentIds) {
+  try {
+    localStorage.setItem(ENABLED_AGENTS_KEY, JSON.stringify(agentIds));
+  } catch (e) {
+    console.error('Error saving enabled agents:', e);
+  }
+}
+
+/**
+ * Check if an agent is enabled for the model selector
+ */
+export function isAgentEnabledInSelector(agentId) {
+  const enabled = getEnabledAgentsInSelector();
+  return enabled.includes(agentId);
+}
+
+/**
+ * Toggle an agent's enabled state for the model selector
+ */
+export function toggleAgentInSelector(agentId) {
+  const enabled = getEnabledAgentsInSelector();
+  if (enabled.includes(agentId)) {
+    // Remove agent (but ensure at least one remains)
+    if (enabled.length > 1) {
+      const updated = enabled.filter(id => id !== agentId);
+      setEnabledAgentsInSelector(updated);
+      return false; // Now disabled
+    }
+    return true; // Keep enabled (can't disable last one)
+  } else {
+    // Add agent
+    setEnabledAgentsInSelector([...enabled, agentId]);
+    return true; // Now enabled
+  }
+}
+
+/**
+ * Enable all agents for the model selector
+ */
+export function enableAllAgentsInSelector() {
+  setEnabledAgentsInSelector(AGENTS.map(a => a.id));
+}
+
+/**
+ * Disable all agents except one for the model selector
+ */
+export function disableAllAgentsExcept(agentId) {
+  setEnabledAgentsInSelector([agentId]);
+}
+
+/**
+ * Get agents filtered by enabled status for model selector
+ */
+export function getAgentsForModelSelector() {
+  const enabledIds = getEnabledAgentsInSelector();
+  return AGENTS.filter(agent => enabledIds.includes(agent.id));
+}
+
+/**
+ * Get count of enabled agents
+ */
+export function getEnabledAgentCount() {
+  return getEnabledAgentsInSelector().length;
+}
+
 export default AGENTS;
