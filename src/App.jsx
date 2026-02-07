@@ -469,8 +469,11 @@ const formatMarkdown = (text) => {
     .replace(/^[-•] (.+)$/gm, '<li>$1</li>')
     // Numbered lists
     .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-    // Images (markdown)
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="chat-image" loading="lazy" />')
+    // Images (markdown) - decode HTML entities in src since we escaped earlier
+    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
+      const decodedSrc = src.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      return `<img src="${decodedSrc}" alt="${alt}" class="chat-image" loading="lazy" onerror="this.style.display='none'" />`
+    })
     // Links
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     // Line breaks (double newline = paragraph)
@@ -11168,10 +11171,53 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     let data
     try { data = JSON.parse(text) } catch { throw new Error(`Brainiac returned non-JSON response: ${text.slice(0, 200)}`) }
 
-    const outputText =
-      data.output_text ||
-      data.output?.map(o => o.content?.map(c => c.text).join('')).join('\n') ||
-      data.choices?.[0]?.message?.content || ''
+    // Extract text and images from the Responses API output
+    let outputText = ''
+    if (data.output_text) {
+      outputText = data.output_text
+    } else if (data.output && Array.isArray(data.output)) {
+      outputText = data.output.map(o => {
+        if (!o.content || !Array.isArray(o.content)) return o.text || ''
+        return o.content.map(c => {
+          if (c.type === 'text') return c.text || ''
+          return ''
+        }).join('')
+      }).join('\n')
+    } else if (data.choices?.[0]?.message?.content) {
+      outputText = data.choices[0].message.content
+    }
+
+    // Also extract any image URLs from output content items
+    const imageUrls = []
+    if (data.output && Array.isArray(data.output)) {
+      for (const item of data.output) {
+        // Top-level image output item
+        if (item.type === 'image' && item.url) {
+          imageUrls.push(item.url)
+        }
+        if (item.type === 'image' && item.image_url) {
+          imageUrls.push(typeof item.image_url === 'string' ? item.image_url : item.image_url?.url || '')
+        }
+        // Image content within a message output
+        if (item.content && Array.isArray(item.content)) {
+          for (const c of item.content) {
+            if (c.type === 'image_url' && c.image_url) {
+              imageUrls.push(typeof c.image_url === 'string' ? c.image_url : c.image_url?.url || '')
+            }
+            if (c.type === 'image' && (c.url || c.image_url)) {
+              const url = c.url || (typeof c.image_url === 'string' ? c.image_url : c.image_url?.url || '')
+              if (url) imageUrls.push(url)
+            }
+          }
+        }
+      }
+    }
+
+    // Append images as markdown so formatMarkdown renders them
+    const validImages = imageUrls.filter(u => u && u.startsWith('http'))
+    if (validImages.length > 0) {
+      outputText = outputText.trim() + '\n\n' + validImages.map(url => `![image](${url})`).join('\n')
+    }
 
     return { text: outputText || '', usage: data.usage || null }
   }
