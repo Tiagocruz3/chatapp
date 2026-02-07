@@ -2017,7 +2017,7 @@ function App() {
     return localStorage.getItem('brainiacEndpoint') || '/responses'
   })
   const [brainiacConnectState, setBrainiacConnectState] = useState(() => {
-    return localStorage.getItem('brainiacConnectState') || 'disconnected'
+    return localStorage.getItem('brainiacConnectState') || 'connected'
   })
   const [brainiacConnectError, setBrainiacConnectError] = useState('')
   const [brainiacModels, setBrainiacModels] = useState(() => {
@@ -13656,7 +13656,8 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                       id="brainiac-url"
                       type="text"
                       value={brainiacBaseUrl}
-                      onChange={(e) => setBrainiacBaseUrl(e.target.value)}
+                      readOnly
+                      disabled
                       placeholder="https://brainbot.capsulerelay.com/v1"
                     />
                     <span className="settings-form-hint">
@@ -13668,7 +13669,8 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                       id="brainiac-endpoint"
                       type="text"
                       value={brainiacEndpoint}
-                      onChange={(e) => setBrainiacEndpoint(e.target.value)}
+                      readOnly
+                      disabled
                       placeholder="/responses"
                     />
                     <span className="settings-form-hint">
@@ -13680,7 +13682,8 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                       id="brainiac-key"
                       type="password"
                       value={brainiacApiKey}
-                      onChange={(e) => setBrainiacApiKey(e.target.value)}
+                      readOnly
+                      disabled
                       placeholder="Bearer token..."
                     />
 
@@ -13705,13 +13708,8 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                           disabled={brainiacConnectState === 'connecting' || !brainiacBaseUrl.trim()}
                           title="Test connection to Brainiac"
                         >
-                          {brainiacConnectState === 'connecting' ? 'Connecting...' : 'Connect'}
+                          {brainiacConnectState === 'connecting' ? 'Testing...' : 'Test Connection'}
                         </button>
-                        {brainiacConnectState === 'connected' && (
-                          <button className="settings-clear-error-btn" type="button" onClick={disconnectBrainiac}>
-                            Disconnect
-                          </button>
-                        )}
                       </div>
                     </div>
 

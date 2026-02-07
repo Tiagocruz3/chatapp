@@ -15419,11 +15419,17 @@ button,
   .settings-tabs {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-    padding-bottom: 4px;
+    padding: 8px 16px 8px;
     gap: 4px;
     flex-wrap: nowrap;
     justify-content: flex-start;
     scrollbar-width: none;
+    position: sticky;
+    top: 56px;
+    background: var(--main-bg);
+    z-index: 9;
+    border-bottom: 1px solid var(--border-color);
+    margin: 0 -16px 8px;
   }
 
   .settings-tabs::-webkit-scrollbar {
