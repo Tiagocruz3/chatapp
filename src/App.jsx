@@ -7,6 +7,10 @@ import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import mammoth from 'mammoth/mammoth.browser'
 import { WebContainer } from '@webcontainer/api'
 
+// Agent Registry and Components
+import { AGENTS, getAgentById, getDefaultAgent } from './lib/agentRegistry'
+import AgentsPage from './components/AgentsPage'
+
 // pdf.js worker config (Vite)
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
@@ -1527,7 +1531,16 @@ function App() {
   const [showKnowledgeBasePage, setShowKnowledgeBasePage] = useState(false)
   const [knowledgeBaseTab, setKnowledgeBaseTab] = useState('memory') // memory | rag | graph
   const [showSkillsPage, setShowSkillsPage] = useState(false)
+  const [showAgentsPage, setShowAgentsPage] = useState(false)
   const [skillsSearchQuery, setSkillsSearchQuery] = useState('')
+  
+  // Selected persona agent from the 30 specialized agents
+  const [selectedPersonaAgent, setSelectedPersonaAgent] = useState(() => {
+    try {
+      const saved = localStorage.getItem('selectedPersonaAgent')
+      return saved ? JSON.parse(saved) : null
+    } catch { return null }
+  })
   const [enabledSkills, setEnabledSkills] = useState(() => {
     try {
       const saved = localStorage.getItem('enabledSkills')
@@ -2108,6 +2121,17 @@ function App() {
       sessionStorage.setItem('ui_settingsTab', settingsTab || 'n8n')
     } catch {}
   }, [settingsTab])
+
+  // Persist selected persona agent
+  useEffect(() => {
+    try {
+      if (selectedPersonaAgent) {
+        localStorage.setItem('selectedPersonaAgent', JSON.stringify(selectedPersonaAgent))
+      } else {
+        localStorage.removeItem('selectedPersonaAgent')
+      }
+    } catch {}
+  }, [selectedPersonaAgent])
 
   const loadGeneratedImages = async () => {
     if (!dbEnabled) return
@@ -3893,7 +3917,20 @@ Respond ONLY with valid JSON, no other text.`
     const n8nAgents = (agents || []).map(a => ({ ...a, provider: a.provider || 'n8n' }))
     const orAgents = (openRouterAgents || []).map(a => ({ ...a, provider: 'openrouter' }))
     const lmAgents = (lmStudioAgents || []).map(a => ({ ...a, provider: 'lmstudio' }))
-    return [...orAgents, ...lmAgents, ...n8nAgents]
+    // Add persona agents from registry
+    const personaAgents = AGENTS.map(a => ({
+      id: `persona-${a.id}`,
+      name: a.displayName,
+      provider: 'persona',
+      model: a.defaultModel,
+      systemPrompt: a.systemPrompt,
+      temperature: a.temperature,
+      isPersona: true,
+      personaId: a.id,
+      avatar: a.avatar,
+      specialty: a.specialty
+    }))
+    return [...personaAgents, ...orAgents, ...lmAgents, ...n8nAgents]
   }, [agents, openRouterAgents, lmStudioAgents])
 
   useEffect(() => {
@@ -8900,6 +8937,15 @@ else console.log('Deleted successfully')`
       const text = await sendMessageToMcpWorkflow(message, extraContext, signal)
       return { text, usage: null }
     }
+    
+    // Persona Agent - use OpenRouter with the persona's configuration
+    if (selectedAgent?.provider === 'persona') {
+      return await sendMessageToOpenRouterWithConfig(message, extraContext, signal, {
+        model: selectedAgent.model,
+        systemPrompt: selectedAgent.systemPrompt,
+        temperature: selectedAgent.temperature
+      })
+    }
 
     // Use agent's own webhook URL if available, otherwise fall back to global webhook
     const webhookUrl = selectedAgent?.webhookUrl || n8nWebhookUrl
@@ -10599,6 +10645,200 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     return { text: finalText, usage }
   }
 
+  // Send message to OpenRouter with custom configuration (for persona agents)
+  const sendMessageToOpenRouterWithConfig = async (message, extraContext = '', signal, config) => {
+    if (!openRouterApiKey.trim()) {
+      throw new Error('OpenRouter API key not set (Settings → OpenRouter)')
+    }
+    if (!config?.model) {
+      throw new Error('Model configuration missing')
+    }
+
+    const memories = await fetchRelevantMemories(message).catch(() => [])
+    const docChunks = await fetchRelevantDocChunks(message).catch(() => [])
+
+    const memoryBlock = memories.length
+      ? `Known user info (memory) - USE THIS TO ANSWER PERSONAL QUESTIONS:\n${memories
+          .slice(0, 25)
+          .map(m => `- (${m.memory_type}) ${m.content}`)
+          .join('\n')}`
+      : ''
+
+    const ragBlock = docChunks.length
+      ? `Relevant docs (RAG):\n${docChunks
+          .slice(0, 5)
+          .map((c, i) => `--- Chunk ${i + 1} ---\n${c.content}`)
+          .join('\n\n')}`
+      : ''
+
+    const profileBlock = buildUserProfileBlock()
+    
+    // Check which skills are enabled
+    const githubEnabled = enabledSkills.includes('github') && skillTokens.github_token
+    const vercelEnabled = enabledSkills.includes('vercel') && skillTokens.vercel_token
+    
+    // Formatting rules
+    const formattingRules = `FORMATTING RULES (always follow):
+- NEVER use em dashes (—) or en dashes (–). Use regular hyphens (-) or commas instead.
+- Use clean, simple punctuation.
+- Keep responses clear and well-structured.
+- ALWAYS use proper capitalization: capitalize the first letter of sentences, proper nouns, "I", and greetings (Hello, Hi, Dear, etc.).
+- ALWAYS start emails/letters with proper capitalization (e.g., "Hello John," not "hello John,").
+- Use correct grammar throughout all responses.`
+
+    const systemParts = [
+      config.systemPrompt || 'You are a helpful assistant.',
+      formattingRules,
+      searchUrl ? `You have access to a web_search tool to search the internet for current information.
+IMPORTANT RULE: If you are unsure about ANY fact, do not know the answer, or the question involves recent events, current data, real-time information, specific people, companies, products, dates, statistics, news, or anything you are not 100% certain about - you MUST use the web_search tool AUTOMATICALLY to look it up BEFORE responding. NEVER guess or say "I don't know" without searching first. When in doubt, ALWAYS search.` : '',
+      githubEnabled ? `You have access to GitHub tools to manage repositories, files, and code.
+IMPORTANT: After any GitHub action, ALWAYS report back to the user with:
+- What was done (created repo, updated file, etc.)
+- The repository/file name
+- A clickable link (format as markdown: [text](url))
+- Any relevant details (private/public, branch, commit message)
+Example: "I created the repository **username/my-project**: [View on GitHub](https://github.com/username/my-project)"` : '',
+      vercelEnabled ? `You have access to Vercel tools to manage deployments and projects.
+IMPORTANT: After any Vercel action, ALWAYS report back to the user with:
+- What was done (deployed, listed projects, etc.)
+- The project name
+- The deployment URL as a clickable link (format: [Visit Site](url))
+- The deployment status (building, ready, error)
+Example: "Deployment triggered for **my-project**: [View Deployment](https://my-project-xyz.vercel.app) - Status: Building"` : '',
+      profileBlock,
+      memoryBlock,
+      ragBlock,
+    ].filter(Boolean)
+    const system = systemParts.join('\n\n')
+
+    // Build the user message
+    let userMessageContent = message
+    if (extraContext && extraContext.trim()) {
+      userMessageContent = `[Document/Image Analysis Context]\n${extraContext.trim()}\n\n[User's Question]\n${message}`
+    }
+
+    // Include recent chat history
+    const history = (currentConversation?.messages || [])
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-10)
+      .map(m => {
+        let content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content)
+        if (content.includes('data:image/')) {
+          content = content.replace(/data:image\/[^;]+;base64,[A-Za-z0-9+/=]+/g, '[image]')
+        }
+        if (content.length > 4000) {
+          content = content.slice(0, 4000) + '... [truncated]'
+        }
+        return { role: m.role, content }
+      })
+
+    const messages = [{ role: 'system', content: system }, ...history, { role: 'user', content: userMessageContent }]
+
+    const basePayload = {
+      model: config.model,
+      temperature: Number(config.temperature ?? 0.7),
+    }
+
+    // Build tools array
+    const buildToolsArray = () => {
+      const tools = []
+      if (searchUrl) {
+        tools.push({
+          type: 'function',
+          function: {
+            name: 'web_search',
+            description: 'Search the web for current information.',
+            parameters: {
+              type: 'object',
+              properties: { query: { type: 'string', description: 'The search query' } },
+              required: ['query']
+            }
+          }
+        })
+      }
+      if (githubEnabled) {
+        tools.push({
+          type: 'function',
+          function: {
+            name: 'github',
+            description: 'Interact with GitHub',
+            parameters: {
+              type: 'object',
+              properties: { action: { type: 'string' } },
+              required: ['action']
+            }
+          }
+        })
+      }
+      if (vercelEnabled) {
+        tools.push({
+          type: 'function',
+          function: {
+            name: 'vercel',
+            description: 'Interact with Vercel',
+            parameters: {
+              type: 'object',
+              properties: { action: { type: 'string' } },
+              required: ['action']
+            }
+          }
+        })
+      }
+      return tools
+    }
+
+    const makeRequest = async (msgs, includeTools = false) => {
+      const payload = { ...basePayload, messages: msgs }
+      const tools = buildToolsArray()
+      if (includeTools && tools.length > 0) {
+        payload.tools = tools
+      }
+
+      const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openRouterApiKey.trim()}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': window.location.origin,
+          'X-Title': 'Agent Me',
+        },
+        signal,
+        body: JSON.stringify(payload),
+      })
+
+      if (!resp.ok) {
+        const t = await resp.text()
+        if (resp.status === 401) {
+          throw new Error(`OpenRouter auth failed (401). Your key is invalid/revoked or not an OpenRouter key.\n\n${t}`)
+        }
+        throw new Error(`OpenRouter error: ${resp.status} ${t}`)
+      }
+      return resp.json()
+    }
+
+    let data
+    let useTools = buildToolsArray().length > 0
+    
+    try {
+      data = await makeRequest(messages, useTools)
+    } catch (e) {
+      if (useTools && e.message.includes('400')) {
+        useTools = false
+        data = await makeRequest(messages, false)
+      } else {
+        throw e
+      }
+    }
+    
+    let choice = data?.choices?.[0]
+    let finalText = choice?.message?.content
+    
+    if (!finalText) throw new Error('OpenRouter returned no content')
+    
+    const usage = data?.usage || choice?.usage || null
+    return { text: finalText, usage }
+  }
+
   const sendMessageToLmStudio = async (message, extraContext = '', signal) => {
     const base = normalizeOpenAiCompatibleBaseUrl(selectedAgent?.baseUrl || lmStudioBaseUrl)
     if (!base) {
@@ -11181,7 +11421,7 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
       />
 
       {/* Sidebar */}
-      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showAdminPage || showSkillsPage) ? 'hidden' : ''}`}>
+      <aside className={`sidebar ${sidebarOpen ? 'open' : 'closed'} ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showAdminPage || showSkillsPage || showAgentsPage) ? 'hidden' : ''}`}>
         <div className="sidebar-header">
           <div className="sidebar-top-actions">
             {/* Sidebar toggle (close) */}
@@ -11308,6 +11548,23 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
               <span className="sidebar-nav-label">Skills</span>
               {enabledSkills.length > 0 && (
                 <span className="sidebar-nav-badge">{enabledSkills.length}</span>
+              )}
+            </button>
+
+            <button
+              className="sidebar-nav-btn agents-nav-btn"
+              type="button"
+              onClick={() => { setShowAgentsPage(true); setShowSkillsPage(false); setShowKnowledgeBasePage(false); setShowSettingsPage(false); setShowGalleryPage(false); setShowAdminPage(false); setShowDeepResearchPage(false) }}
+            >
+              <span className="sidebar-nav-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 2a3 3 0 0 0-3 3v3H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-3V5a3 3 0 0 0-3-3z"/>
+                  <path d="M12 11v5"/><path d="M9 14h6"/>
+                </svg>
+              </span>
+              <span className="sidebar-nav-label">Agents</span>
+              {selectedPersonaAgent && (
+                <span className="sidebar-nav-badge">1</span>
               )}
             </button>
 
@@ -11636,7 +11893,7 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
       {/* Main Chat Area */}
       <main className="chat-main">
         {/* Chat View */}
-        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showDeepResearchPage || showAdminPage || showSkillsPage) ? 'slide-out' : 'slide-in'}`}>
+        <div className={`chat-view ${(showSettingsPage || showGalleryPage || showKnowledgeBasePage || showDeepResearchPage || showAdminPage || showSkillsPage || showAgentsPage) ? 'slide-out' : 'slide-in'}`}>
           {!sidebarOpen && (
           <button className="open-sidebar" onClick={() => setSidebarOpen(true)}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -12144,13 +12401,15 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                         </span>
                         {selectedAgent && (
                           <span className={`model-badge agent ${selectedAgent.provider}`}>
-                            {selectedAgent.provider === 'openrouter'
-                              ? 'openrouter'
-                              : selectedAgent.provider === 'lmstudio'
-                                ? 'lmstudio'
-                                : selectedAgent.provider === 'mcp'
-                                  ? 'mcp'
-                                  : 'n8n'}
+                            {selectedAgent.provider === 'persona'
+                              ? 'agent'
+                              : selectedAgent.provider === 'openrouter'
+                                ? 'openrouter'
+                                : selectedAgent.provider === 'lmstudio'
+                                  ? 'lmstudio'
+                                  : selectedAgent.provider === 'mcp'
+                                    ? 'mcp'
+                                    : 'n8n'}
                           </span>
                         )}
                         <svg className="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -12159,7 +12418,30 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                       </div>
                       {showAgentSelector && (
                         <div className="model-dropdown">
-                          {allAgents.map(agent => (
+                          {/* Persona Agents Section */}
+                          {allAgents.filter(a => a.provider === 'persona').length > 0 && (
+                            <>
+                              <div className="model-dropdown-section">AI Agents</div>
+                              {allAgents.filter(a => a.provider === 'persona').map(agent => (
+                                <button 
+                                  key={agent.id}
+                                  className={`model-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
+                                  onClick={() => {
+                                    setSelectedAgent(agent)
+                                    setSelectedPersonaAgent(AGENTS.find(a => a.id === agent.personaId))
+                                    setShowAgentSelector(false)
+                                  }}
+                                >
+                                  <span className="model-option-name">{agent.name}</span>
+                                  <span className="model-option-badge persona">{agent.specialty}</span>
+                                </button>
+                              ))}
+                              <div className="model-dropdown-divider" />
+                            </>
+                          )}
+                          
+                          {/* Custom Agents Section */}
+                          {allAgents.filter(a => a.provider !== 'persona').map(agent => (
                             <button 
                               key={agent.id}
                               className={`model-option ${selectedAgent?.id === agent.id ? 'selected' : ''}`}
@@ -12182,7 +12464,7 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
                           ))}
                           {allAgents.length === 0 && (
                             <div className="model-option-empty">
-                              No agents added yet. Go to Settings to add agents.
+                              No agents available. Go to Settings to add agents or browse AI Agents.
                             </div>
                           )}
                         </div>
@@ -14078,6 +14360,33 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
           )}
 
         </div>
+
+        {/* Agents Page */}
+        <AgentsPage
+          isOpen={showAgentsPage}
+          onClose={() => setShowAgentsPage(false)}
+          onSelectAgent={(agent) => {
+            setSelectedPersonaAgent(agent)
+            // If the agent has a default model, update the selected agent configuration
+            if (agent) {
+              // Create a virtual agent configuration from the persona
+              const personaAgentConfig = {
+                id: `persona-${agent.id}`,
+                name: agent.displayName,
+                provider: 'openrouter',
+                model: agent.defaultModel,
+                systemPrompt: agent.systemPrompt,
+                temperature: agent.temperature,
+                isPersona: true,
+                personaId: agent.id
+              }
+              // Set this as the selected agent for chat
+              setSelectedAgent(personaAgentConfig)
+            }
+          }}
+          currentAgentId={selectedPersonaAgent?.id}
+          showToast={showToast}
+        />
 
         {/* Admin Page */}
         {isAdmin && (
