@@ -2064,6 +2064,7 @@ function App() {
   const [ragIngestState, setRagIngestState] = useState('idle') // idle | ingesting | done | error
   const [ragIngestProgress, setRagIngestProgress] = useState({ fileIndex: 0, fileCount: 0, message: '' })
   const [ragIngestError, setRagIngestError] = useState('')
+  const RAG_INGEST_URL = (import.meta?.env?.VITE_RAG_INGEST_URL || 'https://rag.capsulerelay.com/ingest').trim()
 
   // OCR (chat uploads)
   const [ocrModel, setOcrModel] = useState(() => {
@@ -4852,6 +4853,10 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
             url: dataUrl || a.preview || null
           }
         }))
+        // Fire-and-forget local RAG ingest
+        ingestFilesToRag(attachedFiles, 'chat_upload').catch((err) => {
+          console.error('RAG ingest failed:', err)
+        })
       } else {
         // For default model, try mock upload
         try {
@@ -4907,6 +4912,10 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
           }))
           
           setAttachmentProgress({})
+          // Fire-and-forget local RAG ingest
+          ingestFilesToRag(attachedFiles, 'chat_upload').catch((err) => {
+            console.error('RAG ingest failed:', err)
+          })
         } catch (err) {
           console.error('Upload error:', err)
           showToast(err.message || 'File upload not available. Select an n8n agent to use file attachments.')
@@ -9996,19 +10005,27 @@ else console.log('Deleted successfully')`
     if (e.target) e.target.value = ''
   }
 
+  const ingestFilesToRag = async (files, source = 'chat_upload') => {
+    if (!RAG_INGEST_URL) throw new Error('RAG ingest URL not set')
+    const uploads = files.map(async (f) => {
+      const form = new FormData()
+      form.append('file', f.file || f, f.name || f.file?.name || 'upload')
+      form.append('source', source)
+      const resp = await fetch(RAG_INGEST_URL, { method: 'POST', body: form })
+      if (!resp.ok) {
+        const text = await resp.text()
+        throw new Error(`RAG ingest error: ${resp.status} ${text}`)
+      }
+      return resp.json()
+    })
+    return Promise.all(uploads)
+  }
+
   const removeRagFile = (id) => {
     setRagUploadFiles((prev) => prev.filter((f) => f.id !== id))
   }
 
   const ingestRagFiles = async () => {
-    if (!dbEnabled) {
-      showToast('Sign in (Supabase) to upload to RAG')
-      return
-    }
-    if (!openAiEmbeddingsApiKey) {
-      showToast('Set VITE_OPENAI_API_KEY in .env (or add your key in Settings → Embeddings)')
-      return
-    }
     if (ragUploadFiles.length === 0) return
 
     setRagIngestError('')
@@ -10021,51 +10038,9 @@ else console.log('Deleted successfully')`
         setRagIngestProgress({
           fileIndex: fileIdx + 1,
           fileCount: ragUploadFiles.length,
-          message: `Reading ${f.name}…`,
+          message: `Uploading ${f.name}…`,
         })
-
-        const text = await extractTextForRag({ file: f.file, filename: f.name, mime: f.type })
-        const chunks = chunkText(text)
-        if (chunks.length === 0) continue
-
-        setRagIngestProgress({
-          fileIndex: fileIdx + 1,
-          fileCount: ragUploadFiles.length,
-          message: `Creating document for ${f.name}…`,
-        })
-
-        const { data: docRow, error: docErr } = await supabase
-          .from('documents')
-          .insert({
-            owner_user_id: authUser.id,
-            title: f.name,
-            source_type: 'upload',
-            metadata: { filename: f.name, mime: f.type, size: f.size, source: 'bulk_upload' },
-          })
-          .select('document_id')
-          .single()
-        if (docErr) throw docErr
-
-        // Embed + insert chunks in batches
-        const BATCH = 32
-        for (let i = 0; i < chunks.length; i += BATCH) {
-          const batch = chunks.slice(i, i + BATCH)
-          setRagIngestProgress({
-            fileIndex: fileIdx + 1,
-            fileCount: ragUploadFiles.length,
-            message: `Embedding ${f.name} (${Math.min(i + BATCH, chunks.length)}/${chunks.length})…`,
-          })
-          const embeddings = await openAiEmbed(batch)
-          const rows = batch.map((content, j) => ({
-            document_id: docRow.document_id,
-            chunk_index: i + j,
-            content,
-            metadata: { filename: f.name },
-            embedding: embeddings[j],
-          }))
-          const { error: chunkErr } = await supabase.from('document_chunks').insert(rows)
-          if (chunkErr) throw chunkErr
-        }
+        await ingestFilesToRag([f], 'bulk_upload')
       }
 
       setRagIngestState('done')
