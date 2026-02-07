@@ -11174,18 +11174,25 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     // Extract text and images from the Responses API output
     let outputText = ''
     if (data.output_text) {
+      // Top-level convenience field (preferred)
       outputText = data.output_text
     } else if (data.output && Array.isArray(data.output)) {
+      // Parse output items manually
       outputText = data.output.map(o => {
         if (!o.content || !Array.isArray(o.content)) return o.text || ''
         return o.content.map(c => {
-          if (c.type === 'text') return c.text || ''
+          // Responses API uses "output_text", chat completions uses "text"
+          if (c.type === 'output_text' || c.type === 'text') return c.text || ''
           return ''
         }).join('')
       }).join('\n')
     } else if (data.choices?.[0]?.message?.content) {
+      // Chat completions fallback
       outputText = data.choices[0].message.content
     }
+    // Last resort: try common response fields
+    if (!outputText && data.response) outputText = typeof data.response === 'string' ? data.response : ''
+    if (!outputText && data.message) outputText = typeof data.message === 'string' ? data.message : ''
 
     // Also extract any image URLs from output content items
     const imageUrls = []
