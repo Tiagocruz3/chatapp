@@ -10543,7 +10543,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     let finalText = choice?.message?.content
     if (!finalText) throw new Error('OpenRouter returned no content')
     
-    // Auto-search fallback: if the model didn't use tools but shows uncertainty, search automatically
+    // Auto-search fallback: if the model didn't use tools but shows uncertainty or says it will search, search automatically
     if (searchUrl && !choice?.message?.tool_calls) {
       const lowerText = finalText.toLowerCase()
       const uncertaintyPhrases = [
@@ -10557,6 +10557,13 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
         "i cannot access", "i can't access",
         "i'm not able", "i am not able",
         "unfortunately, i",
+        // Additional phrases for when model says it will search but doesn't
+        "i will search", "i'll search", "let me search", "let's search",
+        "i am going to search", "i'm going to search",
+        "i will look up", "i'll look up", "let me look up",
+        "i will check", "i'll check", "let me check",
+        "searching for", "looking up", "checking for",
+        "i need to search", "i should search",
       ]
       const showsUncertainty = uncertaintyPhrases.some(phrase => lowerText.includes(phrase))
       
@@ -10736,7 +10743,16 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
       }
     }
     
-    // Auto-search fallback: if the model didn't use a tool but shows uncertainty, search automatically
+    // Additional flexible parsing: look for tool name in various formats
+    if (!toolMatch) {
+      // Match web_search tool mentions with various quote styles
+      const webSearchMatch = out.match(/\{\s*["']?tool["']?\s*:\s*["']web_search["']\s*,\s*["']?params["']?\s*:\s*\{[^}]+\}\s*\}/i)
+      if (webSearchMatch) {
+        toolMatch = [webSearchMatch[0], webSearchMatch[0]]
+      }
+    }
+    
+    // Auto-search fallback: if the model didn't use a tool but shows uncertainty or says it will search, search automatically
     if (!toolMatch && searchEnabled) {
       const lowerOut = out.toLowerCase()
       const uncertaintyPhrases = [
@@ -10750,6 +10766,13 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
         "i cannot access", "i can't access",
         "i'm not able", "i am not able",
         "unfortunately, i",
+        // Additional phrases for when model says it will search but doesn't
+        "i will search", "i'll search", "let me search", "let's search",
+        "i am going to search", "i'm going to search",
+        "i will look up", "i'll look up", "let me look up",
+        "i will check", "i'll check", "let me check",
+        "searching for", "looking up", "checking for",
+        "i need to search", "i should search",
       ]
       const showsUncertainty = uncertaintyPhrases.some(phrase => lowerOut.includes(phrase))
       
