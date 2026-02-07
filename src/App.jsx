@@ -11596,6 +11596,21 @@ CRITICAL: If you are unsure about ANY fact or the user asks about something you 
     })
   }
 
+  useEffect(() => {
+    const lock = sidebarOpen || showSettingsPage || showGalleryPage || showKnowledgeBasePage || showAdminPage || showSkillsPage || showAgentsPage || showDeepResearchPage
+    if (lock) {
+      document.body.style.overflow = 'hidden'
+      document.body.style.touchAction = 'none'
+    } else {
+      document.body.style.overflow = ''
+      document.body.style.touchAction = ''
+    }
+    return () => {
+      document.body.style.overflow = ''
+      document.body.style.touchAction = ''
+    }
+  }, [sidebarOpen, showSettingsPage, showGalleryPage, showKnowledgeBasePage, showAdminPage, showSkillsPage, showAgentsPage, showDeepResearchPage])
+
   const appBody = (
     <div className="app">
       {/* Mobile Header - Only visible on mobile via CSS */}
