@@ -2447,7 +2447,6 @@ function App() {
   const syncSkillTokensToDb = async (tokens) => {
     if (!dbEnabled || !authUser?.id) return
     try {
-      // Store in user_settings table with encrypted tokens
       const { error } = await supabase
         .from('user_settings')
         .upsert({
@@ -2455,9 +2454,10 @@ function App() {
           skill_tokens: tokens,
           updated_at: new Date().toISOString()
         }, { onConflict: 'user_id' })
-      if (error) throw error
+      // Silently ignore if table doesn't exist (PGRST205)
+      if (error && error.code !== 'PGRST205') throw error
     } catch (e) {
-      console.error('Failed to sync skill tokens to DB:', e)
+      console.warn('Failed to sync skill tokens to DB:', e)
     }
   }
 
@@ -2471,19 +2471,19 @@ function App() {
         .eq('user_id', authUser.id)
         .single()
       
-      if (error && error.code !== 'PGRST116') throw error // PGRST116 = not found
+      // PGRST116 = row not found, PGRST205 = table not found — both are OK
+      if (error && error.code !== 'PGRST116' && error.code !== 'PGRST205') throw error
+      if (error) return // table or row doesn't exist, just use localStorage
       
       if (data?.skill_tokens && Object.keys(data.skill_tokens).length > 0) {
-        // Merge DB tokens with local tokens (DB takes precedence)
         const mergedTokens = { ...skillTokens, ...data.skill_tokens }
         setSkillTokens(mergedTokens)
         localStorage.setItem('skillTokens', JSON.stringify(mergedTokens))
       } else if (Object.keys(skillTokens).length > 0) {
-        // If no DB tokens but local tokens exist, sync local to DB
         await syncSkillTokensToDb(skillTokens)
       }
     } catch (e) {
-      console.error('Failed to load skill tokens from DB:', e)
+      console.warn('Failed to load skill tokens from DB:', e)
     }
   }
 
