@@ -14863,6 +14863,13 @@ button,
   box-sizing: border-box;
 }
 
+@media (display-mode: standalone) {
+  .mobile-header {
+    height: calc(56px + env(safe-area-inset-top) + 12px);
+    padding-top: calc(env(safe-area-inset-top) + 12px);
+  }
+}
+
 .mobile-header-left {
   display: flex;
   align-items: center;
