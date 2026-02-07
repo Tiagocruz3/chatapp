@@ -11126,8 +11126,31 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     if (key) headers.Authorization = `Bearer ${key}`
 
     const endpoint = (brainiacEndpoint || '/responses').trim()
+
+    // Build input for the /responses API format
+    let userMessageContent = message
+    if (extraContext && extraContext.trim()) {
+      userMessageContent = `[Document/Image Analysis Context]\n${extraContext.trim()}\n\n[User's Question]\n${message}`
+    }
+
+    // Build conversation history as response-API input items
+    const historyItems = (currentConversation?.messages || [])
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .slice(-10)
+      .map(m => ({
+        type: 'message',
+        role: m.role,
+        content: typeof m.content === 'string' ? m.content : String(m.content || '')
+      }))
+
+    const inputItems = [
+      ...historyItems,
+      { type: 'message', role: 'user', content: userMessageContent }
+    ]
+
     const payload = {
-      input: buildMessageArray(message, extraContext),
+      input: inputItems,
+      instructions: selectedAgent?.systemPrompt || 'You are a helpful assistant.',
       temperature: Number(selectedAgent.temperature ?? 0.7),
     }
     if (selectedAgent?.model) payload.model = selectedAgent.model
