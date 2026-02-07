@@ -14865,15 +14865,7 @@ button,
   box-sizing: border-box;
 }
 
-@media (display-mode: standalone) {
-  .mobile-header {
-    height: calc(56px + env(safe-area-inset-top) + 20px);
-    padding-top: calc(env(safe-area-inset-top) + 20px);
-  }
-  .app {
-    padding-top: 8px;
-  }
-}
+/* PWA standalone overrides moved to end of file for cascade priority */
 
 .mobile-header-left {
   display: flex;
@@ -16129,5 +16121,50 @@ button,
 
   .gallery-grid {
     grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* ============================================
+   PWA STANDALONE MODE OVERRIDES
+   Must be last to override all mobile breakpoints.
+   Adds extra top padding so the menu button clears
+   the device status bar / notch / dynamic island.
+   ============================================ */
+@media (display-mode: standalone) and (max-width: 768px) {
+  .mobile-header {
+    height: calc(56px + env(safe-area-inset-top, 0px) + 12px);
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 12px 0;
+  }
+
+  .chat-main {
+    top: calc(56px + env(safe-area-inset-top, 0px) + 12px);
+  }
+
+  .deep-research-header {
+    top: calc(68px + env(safe-area-inset-top, 0px) + 12px);
+  }
+
+  .settings-page {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+  }
+
+  .kb-page,
+  .gallery-page {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+  }
+
+  .sidebar {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+  }
+}
+
+@media (display-mode: standalone) and (max-width: 480px) {
+  .mobile-header {
+    height: calc(52px + env(safe-area-inset-top, 0px) + 12px);
+    padding: calc(env(safe-area-inset-top, 0px) + 12px) 8px 0;
+  }
+
+  .chat-main {
+    top: calc(52px + env(safe-area-inset-top, 0px) + 12px);
   }
 }

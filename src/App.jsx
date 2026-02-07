@@ -11131,7 +11131,9 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     }
     if (selectedAgent?.model) payload.model = selectedAgent.model
 
-    const resp = await fetch(`${base}${endpoint}`, {
+    // Route through our Vercel proxy to avoid CORS issues
+    const proxyUrl = `/api/brainiac?base=${encodeURIComponent(base)}&endpoint=${encodeURIComponent(endpoint)}`
+    const resp = await fetch(proxyUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(payload),

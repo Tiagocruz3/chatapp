@@ -29,6 +29,16 @@ const normalizeBaseUrl = (raw) => {
 }
 
 export default async function handler(req, res) {
+  // Handle CORS preflight
+  if (req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    res.setHeader('Access-Control-Max-Age', '86400')
+    res.status(204).end()
+    return
+  }
+
   const baseRaw = req.query.base || ''
   const endpointRaw = req.query.endpoint || '/responses'
   const base = normalizeBaseUrl(baseRaw)
