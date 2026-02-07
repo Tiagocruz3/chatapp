@@ -1833,7 +1833,8 @@
 
 .message {
   display: flex;
-  gap: 16px;
+  align-items: flex-start;
+  gap: 20px;
   padding: 16px 0;
 }
 
@@ -6696,7 +6697,7 @@ button,
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 24px;
+  padding: 24px max(24px, calc((100% - 800px) / 2 + 24px));
   border-bottom: 1px solid var(--border-color);
   position: sticky;
   top: 0;
@@ -6748,7 +6749,8 @@ button,
 
 .settings-tabs {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   padding: 8px;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -6756,8 +6758,7 @@ button,
 }
 
 .settings-tab {
-  flex: 1;
-  padding: 10px 12px;
+  padding: 8px 14px;
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 10px;
@@ -6765,6 +6766,7 @@ button,
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.08s var(--ease-out-fast);
 }
 

@@ -2008,16 +2008,16 @@ function App() {
 
   // Brainiac (OpenAI-compatible) config
   const [brainiacBaseUrl, setBrainiacBaseUrl] = useState(() => {
-    return localStorage.getItem('brainiacBaseUrl') || 'https://brainbot.capsulerelay.com/v1'
+    return localStorage.getItem('brainiacBaseUrl') || ''
   })
   const [brainiacApiKey, setBrainiacApiKey] = useState(() => {
-    return localStorage.getItem('brainiacApiKey') || '0c35bae24ee3c00fc05f16408a79a296c663cbd85e36473b'
+    return localStorage.getItem('brainiacApiKey') || ''
   })
   const [brainiacEndpoint, setBrainiacEndpoint] = useState(() => {
     return localStorage.getItem('brainiacEndpoint') || '/responses'
   })
   const [brainiacConnectState, setBrainiacConnectState] = useState(() => {
-    return localStorage.getItem('brainiacConnectState') || 'connected'
+    return localStorage.getItem('brainiacConnectState') || 'disconnected'
   })
   const [brainiacConnectError, setBrainiacConnectError] = useState('')
   const [brainiacModels, setBrainiacModels] = useState(() => {
@@ -4086,7 +4086,7 @@ Respond ONLY with valid JSON, no other text.`
     const brainiacDefaultAgent = brainiacConnectState === 'connected'
       ? [{
           id: 'brainiac-default',
-          name: 'Brainiac (default)',
+          name: 'Brainiac Bot',
           provider: 'brainiac',
           baseUrl: brainiacBaseUrl,
           apiKey: brainiacApiKey,
@@ -4118,6 +4118,14 @@ Respond ONLY with valid JSON, no other text.`
     const match = allAgents.find(a => a.id === selectedId)
     if (match) setSelectedAgent(match)
   }, [dbEnabled, profileRow?.settings, allAgents, selectedAgent?.id])
+
+  // Auto-select Brainiac Bot when connected and no agent is selected
+  useEffect(() => {
+    if (selectedAgent?.id) return
+    if (brainiacConnectState !== 'connected') return
+    const brainiacAgent = allAgents.find(a => a.id === 'brainiac-default')
+    if (brainiacAgent) setSelectedAgent(brainiacAgent)
+  }, [allAgents, brainiacConnectState, selectedAgent?.id])
 
   // Function to handle opening file in code editor - called by event handler
   const openFileInCodeEditor = useRef((filename, code, language, conversationId, conversationTitle) => {
@@ -11989,11 +11997,9 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                         ? 'openrouter'
                         : selectedAgent.provider === 'lmstudio'
                           ? 'lmstudio'
-                          : selectedAgent.provider === 'brainiac'
-                            ? 'brainiac'
-                            : selectedAgent.provider === 'mcp'
-                              ? 'mcp'
-                              : 'claw'}
+                          : selectedAgent.provider === 'mcp'
+                            ? 'mcp'
+                            : 'claw'}
                     </span>
                   </div>
                 </div>
@@ -12459,11 +12465,9 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                                 ? 'openrouter'
                                 : selectedAgent.provider === 'lmstudio'
                                   ? 'lmstudio'
-                                  : selectedAgent.provider === 'brainiac'
-                                    ? 'brainiac'
-                                    : selectedAgent.provider === 'mcp'
-                                      ? 'mcp'
-                                      : 'claw'}
+                                  : selectedAgent.provider === 'mcp'
+                                    ? 'mcp'
+                                    : 'claw'}
                           </span>
                         )}
                         <svg className="dropdown-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -12509,14 +12513,16 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                               }}
                             >
                               <span className="model-option-name">{agent.name}</span>
-                              <span className="model-option-badge">
+                              <span className={`model-option-badge ${agent.provider}`}>
                                 {agent.provider === 'openrouter'
                                   ? 'openrouter'
                                   : agent.provider === 'lmstudio'
                                     ? 'lmstudio'
                                     : agent.provider === 'mcp'
                                       ? 'mcp'
-                                      : 'n8n'}
+                                      : agent.provider === 'n8n'
+                                        ? 'n8n'
+                                        : 'claw'}
                               </span>
                             </button>
                           ))}
@@ -13460,8 +13466,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                       id="brainiac-url"
                       type="text"
                       value={brainiacBaseUrl}
-                      readOnly
-                      disabled
+                      onChange={(e) => setBrainiacBaseUrl(e.target.value)}
                       placeholder="https://brainbot.capsulerelay.com/v1"
                     />
                     <span className="settings-form-hint">
@@ -13473,8 +13478,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                       id="brainiac-endpoint"
                       type="text"
                       value={brainiacEndpoint}
-                      readOnly
-                      disabled
+                      onChange={(e) => setBrainiacEndpoint(e.target.value)}
                       placeholder="/responses"
                     />
                     <span className="settings-form-hint">
@@ -13486,8 +13490,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                       id="brainiac-key"
                       type="password"
                       value={brainiacApiKey}
-                      readOnly
-                      disabled
+                      onChange={(e) => setBrainiacApiKey(e.target.value)}
                       placeholder="Bearer token..."
                     />
 
@@ -15773,7 +15776,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                           >
                             <span className="coder-model-option-name">{agent.name}</span>
                             <span className={`coder-model-option-badge ${agent.provider}`}>
-                              {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'brainiac' ? 'brainiac' : agent.mcpServerId ? 'mcp' : 'claw'}
+                              {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.mcpServerId ? 'mcp' : 'claw'}
                             </span>
                           </button>
                         ))
@@ -17578,8 +17581,8 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                               }}
                             >
                               <span className="model-option-name">{agent.name}</span>
-                              <span className="model-option-badge">
-                                {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'brainiac' ? 'brainiac' : agent.provider === 'mcp' ? 'mcp' : 'claw'}
+                              <span className={`model-option-badge ${agent.provider}`}>
+                                {agent.provider === 'openrouter' ? 'openrouter' : agent.provider === 'lmstudio' ? 'lmstudio' : agent.provider === 'mcp' ? 'mcp' : 'claw'}
                               </span>
                             </button>
                           ))}
