@@ -2407,6 +2407,66 @@ function App() {
     showToast(`${skill.name} disconnected`)
   }
 
+  // Sync skill tokens to Supabase for permanent storage
+  const syncSkillTokensToDb = async (tokens) => {
+    if (!dbEnabled || !authUser?.id) return
+    try {
+      // Store in user_settings table with encrypted tokens
+      const { error } = await supabase
+        .from('user_settings')
+        .upsert({
+          user_id: authUser.id,
+          skill_tokens: tokens,
+          updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' })
+      if (error) throw error
+    } catch (e) {
+      console.error('Failed to sync skill tokens to DB:', e)
+    }
+  }
+
+  // Load skill tokens from Supabase on login
+  const loadSkillTokensFromDb = async () => {
+    if (!dbEnabled || !authUser?.id) return
+    try {
+      const { data, error } = await supabase
+        .from('user_settings')
+        .select('skill_tokens')
+        .eq('user_id', authUser.id)
+        .single()
+      
+      if (error && error.code !== 'PGRST116') throw error // PGRST116 = not found
+      
+      if (data?.skill_tokens && Object.keys(data.skill_tokens).length > 0) {
+        // Merge DB tokens with local tokens (DB takes precedence)
+        const mergedTokens = { ...skillTokens, ...data.skill_tokens }
+        setSkillTokens(mergedTokens)
+        localStorage.setItem('skillTokens', JSON.stringify(mergedTokens))
+      } else if (Object.keys(skillTokens).length > 0) {
+        // If no DB tokens but local tokens exist, sync local to DB
+        await syncSkillTokensToDb(skillTokens)
+      }
+    } catch (e) {
+      console.error('Failed to load skill tokens from DB:', e)
+    }
+  }
+
+  // Sync skill tokens when they change (debounced)
+  useEffect(() => {
+    if (!dbEnabled || !authUser?.id) return
+    const timeout = setTimeout(() => {
+      syncSkillTokensToDb(skillTokens)
+    }, 1000)
+    return () => clearTimeout(timeout)
+  }, [skillTokens, dbEnabled, authUser?.id])
+
+  // Load skill tokens from DB on auth change
+  useEffect(() => {
+    if (dbEnabled && authUser?.id) {
+      loadSkillTokensFromDb()
+    }
+  }, [dbEnabled, authUser?.id])
+
   // Filter skills by search query
   const filteredSkills = availableSkills.filter(skill => {
     if (!skillsSearchQuery.trim()) return true
