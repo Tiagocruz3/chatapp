@@ -5964,14 +5964,8 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
 
       const responseData = await testResp.json()
       
-      // Store a default model list based on what the endpoint supports
-      // The actual models depend on what the relay supports
-      setBrainiacModels([
-        { id: 'openrouter/gpt-4.1', name: 'GPT-4.1' },
-        { id: 'openrouter/gpt-4o', name: 'GPT-4o' },
-        { id: 'openrouter/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },
-        { id: 'openrouter/gemini-pro', name: 'Gemini Pro' },
-      ])
+      // Clear any local model list - Brainiac uses OpenClaw's default model
+      setBrainiacModels([])
 
       setBrainiacConnectState('connected')
       showToast('Connected to Brainiac successfully.')
