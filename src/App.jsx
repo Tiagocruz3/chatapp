@@ -13499,7 +13499,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
                         <span className="openrouter-status-dot" />
                         <span className="openrouter-status-text">
                           {brainiacConnectState === 'connected'
-                            ? `Connected • ${brainiacModels.length} models`
+                            ? 'Connected'
                             : brainiacConnectState === 'connecting'
                               ? 'Connecting...'
                               : brainiacConnectState === 'error'
