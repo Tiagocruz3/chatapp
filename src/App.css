@@ -16132,8 +16132,13 @@ button,
    ============================================ */
 @media (display-mode: standalone) and (max-width: 768px) {
   .mobile-header {
-    height: calc(56px + env(safe-area-inset-top, 0px) + 12px);
-    padding: calc(env(safe-area-inset-top, 0px) + 12px) 12px 0;
+    height: calc(56px + env(safe-area-inset-top, 0px) + 24px);
+    padding: calc(env(safe-area-inset-top, 0px) + 24px) 12px 0;
+  }
+
+  .mobile-header-left,
+  .mobile-header-right {
+    padding-top: 4px;
   }
 
   .chat-main {
@@ -16156,12 +16161,25 @@ button,
   .sidebar {
     padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
   }
+
+  .input-area {
+    padding: 8px 0 calc(env(safe-area-inset-bottom, 0px) + 8px);
+  }
 }
 
 @media (display-mode: standalone) and (max-width: 480px) {
   .mobile-header {
-    height: calc(52px + env(safe-area-inset-top, 0px) + 12px);
-    padding: calc(env(safe-area-inset-top, 0px) + 12px) 8px 0;
+    height: calc(52px + env(safe-area-inset-top, 0px) + 24px);
+    padding: calc(env(safe-area-inset-top, 0px) + 24px) 8px 0;
+  }
+
+  .mobile-header-left,
+  .mobile-header-right {
+    padding-top: 4px;
+  }
+
+  .input-area {
+    padding: 6px 0 calc(env(safe-area-inset-bottom, 0px) + 6px);
   }
 
   .chat-main {
