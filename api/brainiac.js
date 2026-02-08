@@ -33,7 +33,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') {
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-brainiac-key')
     res.setHeader('Access-Control-Max-Age', '86400')
     res.status(204).end()
     return
@@ -68,7 +68,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const auth = req.headers.authorization || req.headers.Authorization || ''
+    // Prefer x-brainiac-key custom header (avoids infrastructure stripping Authorization)
+    const customKey = req.headers['x-brainiac-key'] || ''
+    const auth = customKey ? `Bearer ${customKey}` : (req.headers.authorization || '')
     const response = await fetch(targetUrl, {
       method: req.method || 'POST',
       headers: {

@@ -5967,7 +5967,7 @@ ${errorWrapperStart}${js}${errorWrapperEnd}
     try {
       const headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${brainiacApiKey.trim()}`
+        'x-brainiac-key': brainiacApiKey.trim()
       }
 
       // Test connection by calling the /responses endpoint with a simple request
@@ -11137,7 +11137,7 @@ Example: "Deployment triggered for **my-project**: [View Deployment](https://my-
     if (!base) throw new Error('Brainiac base URL not set (Settings → Brainiac)')
     const headers = { 'Content-Type': 'application/json' }
     const key = (selectedAgent?.apiKey || brainiacApiKey || '').trim()
-    if (key) headers.Authorization = `Bearer ${key}`
+    if (key) headers['x-brainiac-key'] = key
 
     const endpoint = (brainiacEndpoint || '/responses').trim()
 
