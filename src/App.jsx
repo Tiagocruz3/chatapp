@@ -2011,7 +2011,7 @@ function App() {
 
   // Brainiac (OpenAI-compatible) config
   const [brainiacBaseUrl, setBrainiacBaseUrl] = useState(() => {
-    return localStorage.getItem('brainiacBaseUrl') || ''
+    return localStorage.getItem('brainiacBaseUrl') || 'https://brainbot.capsulerelay.com/v1'
   })
   const [brainiacApiKey, setBrainiacApiKey] = useState(() => {
     return localStorage.getItem('brainiacApiKey') || 'e73b2da792f8688436ab34b475ae8bdd5f011980a2ac3cb6'
@@ -2020,7 +2020,7 @@ function App() {
     return localStorage.getItem('brainiacEndpoint') || '/responses'
   })
   const [brainiacConnectState, setBrainiacConnectState] = useState(() => {
-    return localStorage.getItem('brainiacConnectState') || 'disconnected'
+    return localStorage.getItem('brainiacConnectState') || 'connected'
   })
   const [brainiacConnectError, setBrainiacConnectError] = useState('')
   const [brainiacModels, setBrainiacModels] = useState(() => {
