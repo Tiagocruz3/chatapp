@@ -68,13 +68,13 @@ export default async function handler(req, res) {
   }
 
   try {
-    const auth = req.headers.authorization || ''
+    const auth = req.headers.authorization || req.headers.Authorization || ''
     const response = await fetch(targetUrl, {
       method: req.method || 'POST',
       headers: {
-        'accept': 'application/json',
-        'content-type': 'application/json',
-        ...(auth ? { authorization: auth } : {})
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        ...(auth ? { 'Authorization': auth } : {})
       },
       body: req.method === 'GET' ? undefined : JSON.stringify(req.body || {})
     })

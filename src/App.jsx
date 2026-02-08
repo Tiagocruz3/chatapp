@@ -2010,11 +2010,22 @@ function App() {
   const agentsSyncTimeoutRef = useRef(null)
 
   // Brainiac (OpenAI-compatible) config
+  const BRAINIAC_DEFAULT_URL = 'https://brainbot.capsulerelay.com/v1'
+  const BRAINIAC_DEFAULT_KEY = 'e73b2da792f8688436ab34b475ae8bdd5f011980a2ac3cb6'
+
+  // Migrate stale Brainiac credentials — force-update to current defaults once
+  if (localStorage.getItem('brainiacDefaultsVersion') !== '2') {
+    localStorage.setItem('brainiacBaseUrl', BRAINIAC_DEFAULT_URL)
+    localStorage.setItem('brainiacApiKey', BRAINIAC_DEFAULT_KEY)
+    localStorage.setItem('brainiacConnectState', 'connected')
+    localStorage.setItem('brainiacDefaultsVersion', '2')
+  }
+
   const [brainiacBaseUrl, setBrainiacBaseUrl] = useState(() => {
-    return localStorage.getItem('brainiacBaseUrl') || 'https://brainbot.capsulerelay.com/v1'
+    return localStorage.getItem('brainiacBaseUrl') || BRAINIAC_DEFAULT_URL
   })
   const [brainiacApiKey, setBrainiacApiKey] = useState(() => {
-    return localStorage.getItem('brainiacApiKey') || 'e73b2da792f8688436ab34b475ae8bdd5f011980a2ac3cb6'
+    return localStorage.getItem('brainiacApiKey') || BRAINIAC_DEFAULT_KEY
   })
   const [brainiacEndpoint, setBrainiacEndpoint] = useState(() => {
     return localStorage.getItem('brainiacEndpoint') || '/responses'
