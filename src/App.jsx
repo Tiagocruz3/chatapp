@@ -2014,7 +2014,7 @@ function App() {
     return localStorage.getItem('brainiacBaseUrl') || ''
   })
   const [brainiacApiKey, setBrainiacApiKey] = useState(() => {
-    return localStorage.getItem('brainiacApiKey') || ''
+    return localStorage.getItem('brainiacApiKey') || 'e73b2da792f8688436ab34b475ae8bdd5f011980a2ac3cb6'
   })
   const [brainiacEndpoint, setBrainiacEndpoint] = useState(() => {
     return localStorage.getItem('brainiacEndpoint') || '/responses'
